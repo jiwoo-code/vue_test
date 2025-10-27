@@ -1,0 +1,64 @@
+// imports
+import java.beans.Introspector;
+import java.beans.PropertyDescriptor;
+import java.lang.reflect.Method;
+import java.math.BigDecimal;
+
+// 예) ServiceImpl 내부
+@Override
+public CompositeVo buildCompositeVo(Vo1 vo1, Vo2 vo2, Vo3 vo3) {
+    CompositeVo.CompositeVoBuilder b = CompositeVo.builder();
+    mergeToBuilder(b, vo1, vo2, vo3);   // <- 함수로만 분리
+    return b.build();
+}
+
+/**
+ * 여러 VO를 돌며 동일 이름 필드를 Builder에 주입.
+ * vo2의 BigDecimal 값은 vo2.toPercentTruncated(BigDecimal)로 변환해 double/Double로 넣음.
+ */
+private void mergeToBuilder(CompositeVo.CompositeVoBuilder b, Object vo1, Object vo2, Object vo3) {
+    try {
+        for (Object src : new Object[]{ vo1, vo2, vo3 }) {
+            if (src == null) continue;
+
+            for (PropertyDescriptor pd : Introspector.getBeanInfo(src.getClass(), Object.class).getPropertyDescriptors()) {
+                Method getter = pd.getReadMethod();
+                if (getter == null) continue;
+
+                Object v = getter.invoke(src);
+                if (v == null) continue;
+
+                String name = pd.getName();
+
+                // --- vo2의 BigDecimal만 사용자 정의 변환 적용 ---
+                if (src == vo2 && v instanceof BigDecimal) {
+                    // (리플렉션 없이 직접 호출) vo2 타입이 확실하면 캐스팅이 가장 빠르고 짧습니다.
+                    double dv = ((Vo2) vo2).toPercentTruncated((BigDecimal) v);
+                    if (!tryInvoke(b, name, double.class, dv)) {
+                        tryInvoke(b, name, Double.class, dv);
+                    }
+                    continue;
+                }
+                // -------------------------------------------------
+
+                // 일반 케이스: 선언 타입 → 런타임 타입 순으로 시도 (짧게)
+                Class<?> decl = pd.getPropertyType();
+                if (!tryInvoke(b, name, decl, v)) {
+                    tryInvoke(b, name, v.getClass(), v);
+                }
+            }
+        }
+    } catch (Exception e) {
+        throw new IllegalStateException("mergeToBuilder failed", e);
+    }
+}
+
+/** 동일 이름의 빌더 메서드 호출 시도. 성공하면 true */
+private boolean tryInvoke(Object builder, String method, Class<?> paramType, Object arg) {
+    try {
+        builder.getClass().getMethod(method, paramType).invoke(builder, arg);
+        return true;
+    } catch (ReflectiveOperationException ignore) {
+        return false;
+    }
+}
