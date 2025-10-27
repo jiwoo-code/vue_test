@@ -3,6 +3,50 @@ import java.beans.Introspector;
 import java.beans.PropertyDescriptor;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
+import java.util.*;
+import java.util.stream.Collectors;
+
+@Override
+public List<CompositeVo> buildCompositeVoList(List<Vo1> vo1List, List<Vo2> vo2List, List<Vo3> vo3List) {
+
+    // eqpId 기준으로 lookup map 구성
+    Map<String, Vo1> vo1Map = vo1List.stream().collect(Collectors.toMap(Vo1::getEqpId, v -> v, (a,b)->a));
+    Map<String, Vo2> vo2Map = vo2List.stream().collect(Collectors.toMap(Vo2::getEqpId, v -> v, (a,b)->a));
+    Map<String, Vo3> vo3Map = vo3List.stream().collect(Collectors.toMap(Vo3::getEqpId, v -> v, (a,b)->a));
+
+    // eqpId 전체 집합
+    Set<String> allEqpIds = new HashSet<>();
+    allEqpIds.addAll(vo1Map.keySet());
+    allEqpIds.addAll(vo2Map.keySet());
+    allEqpIds.addAll(vo3Map.keySet());
+
+    List<CompositeVo> result = new ArrayList<>();
+
+    for (String eqpId : allEqpIds) {
+        Vo1 vo1 = vo1Map.get(eqpId);
+        Vo2 vo2 = vo2Map.get(eqpId);
+        Vo3 vo3 = vo3Map.get(eqpId);
+
+        CompositeVo.CompositeVoBuilder b = CompositeVo.builder();
+        mergeToBuilder(b, vo1, vo2, vo3); // 기존 함수 그대로 재사용
+        result.add(b.build());
+    }
+
+    return result;
+}
+
+
+
+
+
+
+
+
+// imports
+import java.beans.Introspector;
+import java.beans.PropertyDescriptor;
+import java.lang.reflect.Method;
+import java.math.BigDecimal;
 
 // 예) ServiceImpl 내부
 @Override
