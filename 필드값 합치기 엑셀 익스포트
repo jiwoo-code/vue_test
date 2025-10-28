@@ -1,0 +1,31 @@
+// methods 안, 익스포트 옵션의 processCellCallback에 넣을 함수
+processCellForExport(params) {
+  // 0) 메타셀(헤더/그룹 등)은 그대로
+  const colId =
+    (params.column && typeof params.column.getColId === 'function' && params.column.getColId()) ||
+    params?.colDef?.field || null;
+  if (!colId) return params?.value;
+
+  // 1) dddD.. 만 대상
+  if (!/^dddD/.test(colId)) return params?.value;
+
+  // 2) 행 데이터는 params.node.data에서 가져오기 (params.data는 종종 없음)
+  const row = params?.node?.data;
+  const baseText = params?.value == null ? '' : String(params.value);
+
+  if (!row) return `[${baseText}]`; // 데이터 자체가 없으면 기본만
+
+  // 3) 대응되는 dddAcD.. 필드 조회 (컬럼 정의에 없어도 됨)
+  const acField = colId.replace(/^dddD/, 'dddAcD');
+  const acRaw = row[acField];
+
+  if (acRaw == null || acRaw === '' || Number.isNaN(Number(acRaw))) {
+    return `[${baseText}]`;
+  }
+
+  const n = Number(acRaw);
+  if (n === 0) return `[${baseText} (0)]`;
+
+  const icon = n > 0 ? '▲' : '▼';
+  return `[${baseText} (${icon} ${Math.abs(n)})]`;
+}
