@@ -1,75 +1,43 @@
-function getMaxCellTextWidth(colId) {
-  const ctx = document.createElement('canvas').getContext('2d');
-  let max = 0, fontSet = false;
+methods: {
+  getMaxCellTextWidth(gridApi, colId) {
+    const ctx = document.createElement('canvas').getContext('2d');
 
-  const cells = document.querySelectorAll(
-    `.ag-center-cols-container [col-id="${colId}"],` +
-    `.ag-left-cols-container [col-id="${colId}"],`  +
-    `.ag-right-cols-container [col-id="${colId}"]`
-  );
+    // 셀 폰트 설정
+    const anyCell =
+      document.querySelector(`.ag-center-cols-container .ag-cell[col-id="${colId}"]`) ||
+      document.querySelector(`.ag-left-cols-container .ag-cell[col-id="${colId}"]`)  ||
+      document.querySelector(`.ag-right-cols-container .ag-cell[col-id="${colId}"]`);
+    const fontSource = anyCell?.querySelector('.ag-cell-value') || anyCell || document.querySelector('.ag-root') || document.body;
+    const cs = window.getComputedStyle(fontSource);
+    ctx.font = `${cs.fontStyle} ${cs.fontVariant} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
 
-  for (const cell of cells) {
-    const el = cell.querySelector('.ag-cell-value') || cell;
-    const text = (el.textContent || '').trim();
-    if (!text) continue;
+    // 렌더된 셀 기준
+    let domMax = 0;
+    const cells = document.querySelectorAll(
+      `.ag-center-cols-container .ag-cell[col-id="${colId}"],` +
+      `.ag-left-cols-container .ag-cell[col-id="${colId}"],`  +
+      `.ag-right-cols-container .ag-cell[col-id="${colId}"]`
+    );
+    cells.forEach(cell => {
+      const el = cell.querySelector('.ag-cell-value') || cell;
+      const text = (el.textContent || '').trim();
+      if (!text) return;
+      const w = Math.ceil(ctx.measureText(text).width);
+      if (w > domMax) domMax = w;
+    });
 
-    if (!fontSet) {
-      const cs = getComputedStyle(el);
-      // 셀과 동일 폰트로 측정 (간결 버전)
-      ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-      fontSet = true;
-    }
-    const w = Math.ceil(ctx.measureText(text).width);
-    if (w > max) max = w;
+    // 전체 데이터 기준
+    let dataMax = 0;
+    gridApi.forEachNodeAfterFilterAndSort(node => {
+      const v = gridApi.getValue(colId, node);
+      if (v == null) return;
+      const w = Math.ceil(ctx.measureText(String(v)).width);
+      if (w > dataMax) dataMax = w;
+    });
+
+    return Math.max(domMax, dataMax);
   }
-  return max; // 필요시 호출부에서 +패딩 (예: +10~14)
 }
-
-
-
-
-
-// imports: 없음(브라우저 내장 DOM API만 사용)
-// 렌더된 셀 기준 + 전체 데이터 기준을 모두 측정해 더 큰 width(px) 반환
-function getMaxCellTextWidth(colId) {
-  const ctx = document.createElement('canvas').getContext('2d');
-
-  // 셀에서 폰트 추출(없으면 그리드 루트/바디 폰트 사용)
-  const anyCell =
-    document.querySelector(`.ag-center-cols-container .ag-cell[col-id="${colId}"]`) ||
-    document.querySelector(`.ag-left-cols-container .ag-cell[col-id="${colId}"]`)  ||
-    document.querySelector(`.ag-right-cols-container .ag-cell[col-id="${colId}"]`);
-  const fontSource = anyCell?.querySelector('.ag-cell-value') || anyCell || document.querySelector('.ag-root') || document.body;
-  const cs = window.getComputedStyle(fontSource);
-  ctx.font = `${cs.fontStyle} ${cs.fontVariant} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-
-  // 1) DOM(현재 렌더된 셀) 기준 최대폭
-  let domMax = 0;
-  const cells = document.querySelectorAll(
-    `.ag-center-cols-container .ag-cell[col-id="${colId}"],` +
-    `.ag-left-cols-container .ag-cell[col-id="${colId}"],`  +
-    `.ag-right-cols-container .ag-cell[col-id="${colId}"]`
-  );
-  cells.forEach(cell => {
-    const el = cell.querySelector('.ag-cell-value') || cell;
-    const text = (el.textContent || '').trim();
-    if (!text) return;
-    const w = Math.ceil(ctx.measureText(text).width);
-    if (w > domMax) domMax = w;
-  });
-
-  // 2) DATA(필터/정렬 반영, 화면 밖 행 포함) 기준 최대폭
-  let dataMax = 0;
-  this.gridApi.forEachNodeAfterFilterAndSort(node => {
-    const v = this.gridApi.getValue(colId, node); // valueGetter 반영(포맷터는 별도 적용 시 확장)
-    if (v == null) return;
-    const w = Math.ceil(ctx.measureText(String(v)).width);
-    if (w > dataMax) dataMax = w;
-  });
-
-  return Math.max(domMax, dataMax); // 호출부에서 +패딩(예: +12) 더해 setColumnWidth
-}
-
 
 
 
@@ -78,7 +46,7 @@ this.gridApi.refreshCells();
 requestAnimationFrame(() => {
   const ids = this.getLeafIdsFromGroup('myGroup');
   ids.forEach(id => {
-    const w = getMaxCellTextWidth.call(this, id);
+    const w = this.getMaxCellTextWidth(this.gridApi, id);
     this.columnApi.setColumnWidth(id, Math.max(40, w + 12));
   });
 });
