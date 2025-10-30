@@ -50,3 +50,68 @@ requestAnimationFrame(() => {
     this.columnApi.setColumnWidth(id, Math.max(40, w + 12));
   });
 });
+
+
+
+
+
+ㅡㅡㅡㅡㅡㅡㅡ
+
+
+
+methods: {
+  // 셀렌더러 DOM 기준으로만 최대 텍스트 width(px) 측정
+  getMaxTextWidthFromRenderer(colId) {
+    const ctx = document.createElement('canvas').getContext('2d');
+
+    // 폰트: 해당 컬럼의 아무 셀이나, 없으면 .ag-root
+    const probe =
+      document.querySelector(`.ag-cell[col-id="${colId}"] .ag-cell-value`) ||
+      document.querySelector(`.ag-cell[col-id="${colId}"]`) ||
+      document.querySelector('.ag-root') || document.body;
+    const cs = window.getComputedStyle(probe);
+    ctx.font = `${cs.fontStyle} ${cs.fontVariant} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+
+    let max = 0;
+
+    // 1) 셀렌더러 인스턴스에서 텍스트 측정
+    const instances = this.gridApi.getCellRendererInstances({ columns: [colId] }) || [];
+    instances.forEach(r => {
+      const gui = r.getGui?.();
+      const s = (gui?.textContent || '').trim();
+      if (!s) return;
+      const w = Math.ceil(ctx.measureText(s).width);
+      if (w > max) max = w;
+    });
+
+    // 2) 렌더러가 아닌 셀도 DOM에서 보강(같은 컬럼, 현재 렌더된 범위만)
+    if (max === 0) {
+      document.querySelectorAll(
+        `.ag-center-cols-container .ag-cell[col-id="${colId}"],` +
+        `.ag-left-cols-container .ag-cell[col-id="${colId}"],`  +
+        `.ag-right-cols-container .ag-cell[col-id="${colId}"]`
+      ).forEach(cell => {
+        const el = cell.querySelector('.ag-cell-value') || cell;
+        const s = (el.textContent || '').trim();
+        if (!s) return;
+        const w = Math.ceil(ctx.measureText(s).width);
+        if (w > max) max = w;
+      });
+    }
+
+    return max;
+  }
+}
+
+
+
+
+
+// 데이터 반영 직후
+this.gridApi.refreshCells();
+this.gridApi.ensureColumnVisible(colId); // 가로 가상화 대비 (마지막 컬럼 포함)
+
+requestAnimationFrame(() => {
+  const w = this.getMaxTextWidthFromRenderer(colId);
+  this.columnApi.setColumnWidth(colId, Math.max(40, w + 12)); // 패딩 여유
+});
