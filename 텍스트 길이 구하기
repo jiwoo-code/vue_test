@@ -1,19 +1,26 @@
-// 외부 import 없음
-
 function getMaxCellTextWidth(colId) {
-  const ctx = getMaxCellTextWidth._ctx || (getMaxCellTextWidth._ctx = document.createElement('canvas').getContext('2d'));
-  const nodes = document.querySelectorAll(
-    `.ag-center-cols-container [col-id="${colId}"], .ag-left-cols-container [col-id="${colId}"], .ag-right-cols-container [col-id="${colId}"]`
-  );
+  const ctx = document.createElement('canvas').getContext('2d');
   let max = 0, fontSet = false;
-  nodes.forEach(cell => {
+
+  const cells = document.querySelectorAll(
+    `.ag-center-cols-container [col-id="${colId}"],` +
+    `.ag-left-cols-container [col-id="${colId}"],`  +
+    `.ag-right-cols-container [col-id="${colId}"]`
+  );
+
+  for (const cell of cells) {
     const el = cell.querySelector('.ag-cell-value') || cell;
-    if (!fontSet) { ctx.font = getComputedStyle(el).font; fontSet = true; }
-    const s = (el.textContent || '').trim();
-    if (s) {
-      const w = Math.ceil(ctx.measureText(s).width);
-      if (w > max) max = w;
+    const text = (el.textContent || '').trim();
+    if (!text) continue;
+
+    if (!fontSet) {
+      const cs = getComputedStyle(el);
+      // 셀과 동일 폰트로 측정 (간결 버전)
+      ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+      fontSet = true;
     }
-  });
-  return max; // px (패딩은 필요 시 호출부에서 +10~14 정도 더하세요)
+    const w = Math.ceil(ctx.measureText(text).width);
+    if (w > max) max = w;
+  }
+  return max; // 필요시 호출부에서 +패딩 (예: +10~14)
 }
