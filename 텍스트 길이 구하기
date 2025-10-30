@@ -24,3 +24,75 @@ function getMaxCellTextWidth(colId) {
   }
   return max; // 필요시 호출부에서 +패딩 (예: +10~14)
 }
+
+
+
+
+
+
+
+// imports: 없음 (브라우저 기본 DOM API만 사용)
+
+function getMaxCellTextWidth(colId) {
+  // 1) 캔버스 컨텍스트 준비
+  const ctx = document.createElement('canvas').getContext('2d');
+
+  // 2) 폰트 설정(가능하면 실제 셀 폰트, 없으면 그리드 컨테이너/기본 폰트)
+  let fontSet = false;
+  const anyCell =
+    document.querySelector(`.ag-center-cols-container .ag-cell[col-id="${colId}"]`) ||
+    document.querySelector(`.ag-left-cols-container .ag-cell[col-id="${colId}"]`)  ||
+    document.querySelector(`.ag-right-cols-container .ag-cell[col-id="${colId}"]`);
+  if (anyCell) {
+    const el = anyCell.querySelector('.ag-cell-value') || anyCell;
+    const cs = window.getComputedStyle(el);
+    ctx.font = `${cs.fontStyle} ${cs.fontVariant} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    fontSet = true;
+  } else {
+    const host = document.querySelector('.ag-root') || document.body;
+    const cs = window.getComputedStyle(host);
+    ctx.font = `${cs.fontStyle} ${cs.fontVariant} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  }
+
+  // 3) (DOM) 현재 렌더된 셀들 기준 최대폭
+  let domMax = 0;
+  const cells = document.querySelectorAll(
+    `.ag-center-cols-container .ag-cell[col-id="${colId}"],` +
+    `.ag-left-cols-container .ag-cell[col-id="${colId}"],`  +
+    `.ag-right-cols-container .ag-cell[col-id="${colId}"]`
+  );
+  cells.forEach(cell => {
+    const el = cell.querySelector('.ag-cell-value') || cell;
+    const text = (el.textContent || '').trim();
+    if (!text) return;
+    const w = Math.ceil(ctx.measureText(text).width);
+    if (w > domMax) domMax = w;
+  });
+
+  // 4) (DATA) 화면에 안 보이는 마지막 행까지 포함: 값 기반 폭
+  let dataMax = 0;
+  // gridApi / columnApi는 this에 있다고 가정
+  this.gridApi.forEachNodeAfterFilterAndSort(node => {
+    const v = this.gridApi.getValue(colId, node); // valueGetter/valueFormatter 반영
+    if (v == null) return;
+    const s = String(v);
+    const w = Math.ceil(ctx.measureText(s).width);
+    if (w > dataMax) dataMax = w;
+  });
+
+  // 5) 최종
+  return Math.max(domMax, dataMax);
+}
+
+
+
+
+
+this.gridApi.refreshCells();
+requestAnimationFrame(() => {
+  const ids = this.getLeafIdsFromGroup('myGroup');
+  ids.forEach(id => {
+    const w = getMaxCellTextWidth.call(this, id);
+    this.columnApi.setColumnWidth(id, Math.max(40, w + 12)); // 패딩 여유
+  });
+});
