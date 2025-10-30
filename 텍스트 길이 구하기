@@ -79,6 +79,6 @@ requestAnimationFrame(() => {
   const ids = this.getLeafIdsFromGroup('myGroup');
   ids.forEach(id => {
     const w = getMaxCellTextWidth.call(this, id);
-    this.columnApi.setColumnWidth(id, Math.max(40, w + 12)); // 패딩 여유
+    this.columnApi.setColumnWidth(id, Math.max(40, w + 12));
   });
 });
