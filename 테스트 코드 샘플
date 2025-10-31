@@ -1,0 +1,102 @@
+
+1) 일반 조회용 (기존 Standalone 패턴) — 메서드 전용 라이브 템플릿
+Abbreviation: get200
+Description: Read-only GET API should return 200 (Standalone/Existing pattern)
+코드 복사
+Java
+@Test
+@DisplayName("$API_NAME$ SHOULD return 200")
+void $API_NAME$_SHOULD_return_200_WHENEVER() throws Exception {
+    String condition = "$QUERY$";
+
+    // when + then
+    perform(getRequest($BASE_URL$ + "$PATH$" + (condition.isEmpty() ? "" : "?" + condition)))
+        .andExpect(status().isOk());
+}
+변수 가이드
+$API_NAME$: 테스트 식별 이름 (예: findMonitor)
+$BASE_URL$: 기존 테스트 클래스의 필드명 (예: baseUrl)
+$PATH$: 호출 path (예: /monitor)
+$QUERY$: 쿼리스트링 (예: eqpId=ddd&date=2025-10-31)
+필요한 import
+코드 복사
+Java
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+이 템플릿은 지금 쓰시는 APIUnitExtension + buildStandaloneMockMvc(controller) + perform(...)/getRequest(...) 헬퍼가 이미 있는 전제예요.
+2) 수정/삽입/삭제용 (부작용 0, 컨트롤러만) — 클래스 스켈레톤 라이브 템플릿
+요청하신 대로 **@WebMvcTest(Controller.class) + @MockBean**으로 서비스/리포를 전부 목 처리하여 컨트롤러 200만 확인합니다.
+(이 스켈레톤 안에서 메서드 이름/HTTP 메서드/경로/바디만 바꿔가며 복제 사용하세요.)
+Abbreviation: mod200webmvc
+Description: Modify API returns 200 (controller-only via @WebMvcTest + @MockBean)
+코드 복사
+Java
+@WebMvcTest($CONTROLLER$.class)
+class $CONTROLLER$WebMvcTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean
+    private $SERVICE$ $SERVICE_VAR$;
+
+    // 필요 시 다른 의존성도 @MockBean 추가
+    // @MockBean private $REPOSITORY$ $REPOSITORY_VAR$;
+
+    // (선택) 보안/인증이 필요하면 여기서 SecurityContext 설정 or @WithMockUser 사용
+    // @BeforeEach
+    // void setUp() { ... }
+
+    @Test
+    @DisplayName("$API_NAME$ SHOULD return 200 (controller only, service mocked)")
+    void $API_NAME$_SHOULD_return_200_WHENEVER() throws Exception {
+        // given (서비스 호출 부작용 차단)
+        doNothing().when($SERVICE_VAR$).$SERVICE_METHOD$(any());
+
+        String body = "$JSON_BODY$"; // POST/PUT/PATCH일 때 사용
+
+        // when + then
+        mockMvc.perform($HTTP_METHOD$("$PATH$")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isOk());
+    }
+}
+변수 가이드
+$CONTROLLER$: 대상 컨트롤러 클래스명 (예: DddController)
+$SERVICE$: 서비스 타입 (예: DddService)
+$SERVICE_VAR$: 서비스 변수명 (예: dddService)
+$SERVICE_METHOD$: 컨트롤러에서 호출하는 서비스 메서드명 (예: registerItem)
+$API_NAME$: 테스트 식별 이름 (예: createItem)
+$HTTP_METHOD$: post / put / patch / delete 중 택1  (스프링 MockMvc의 MockMvcRequestBuilders 메서드명)
+$PATH$: 호출 경로 (예: /aaa/bbb/ccc/items)
+$JSON_BODY$: 요청 바디 (예: {"name":"hello"}) — GET/DELETE면 빈 문자열로 두고 .content(...) 제거해도 됩니다.
+필요한 import
+코드 복사
+Java
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.doNothing;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*; // get, post, put, patch, delete
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+이 스켈레톤은 기존 Standalone 패턴과 독립적입니다.
+APIUnitExtension/perform()/getRequest() 없이 순수 MockMvc로 동작해요. 보안이 필요한 경우 @WithMockUser 또는 커스텀 설정을 @BeforeEach에 추가하시면 됩니다.
+보너스 — DELETE/GET처럼 바디가 없는 메서드용 한 줄 변형
+코드 복사
+Java
+mockMvc.perform(delete("$PATH$"))
+      .andExpect(status().isOk());
+코드 복사
+Java
+mockMvc.perform(get("$PATH$" + ( "$QUERY$".isEmpty() ? "" : "?" + "$QUERY$" )))
+      .andExpect(status().isOk());
+필요하시면 ②번 스켈레톤을 DddController/DddService/DddMapper 네이밍으로 채운 “즉시 실행 가능” 버전도 만들어 드릴게요.
+또, 인증이 필요한 경우 지금 쓰시는 loginAsUser()와 유사한 효과를 @WebMvcTest 환경에서 재현하는 방법(예: Spring Security 테스트 어노테이션)도 바로 붙여드릴 수 있어요.
