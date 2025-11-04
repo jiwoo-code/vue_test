@@ -1,0 +1,130 @@
+
+유틸 코드: excelExporter.js (브라우저 전용, Vue2 호환)
+코드 복사
+Javascript
+// Imports
+// 설치: npm i xlsx file-saver
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
+
+/**
+ * 시트명 유효화 (엑셀 제약: 31자, \ / ? * [ ] : 금지, 앞뒤 공백 제거)
+ */
+function sanitizeSheetName(name, index) {
+  const raw = (name && String(name).trim()) || `Sheet${index + 1}`;
+  const invalid = /[\\/?*\[\]:]/g;
+  let safe = raw.replace(invalid, ' ');
+  if (safe.length > 31) safe = safe.slice(0, 31);
+  if (!safe) safe = `Sheet${index + 1}`;
+  return safe;
+}
+
+/**
+ * 워크북 생성
+ * @param {Array<{sheetName: string, rows: Array<object>|Array<Array<any>>}>} sheets
+ *  - rows: 객체 배열(JSON) 또는 2차원 배열(AOA) 모두 지원
+ */
+function buildWorkbook(sheets) {
+  const wb = XLSX.utils.book_new();
+  sheets.forEach((s, i) => {
+    const name = sanitizeSheetName(s.sheetName, i);
+    const rows = Array.isArray(s.rows) ? s.rows : [];
+    const isAoa = Array.isArray(rows[0]);
+    const ws = isAoa ? XLSX.utils.aoa_to_sheet(rows) : XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  });
+  return wb;
+}
+
+/**
+ * 브라우저 저장 (파일명만 지정 가능, 경로/자동열기 불가)
+ */
+function saveInBrowser(wb, filename) {
+  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([out], { type: 'application/octet-stream' });
+  saveAs(blob, filename);
+}
+
+/**
+ * 엑셀 내보내기 함수 팩토리
+ *
+ * @param {Object} factoryOptions
+ * @param {string} [factoryOptions.registerName] window에 등록할 함수명 (선택)
+ * @returns {(sheets: Array<{sheetName:string, rows:any[]}>, opts?: {
+ *   filename?: string  // 기본값: 'export.xlsx'
+ * }) => Promise<void>}
+ */
+export function createExcelExporter(factoryOptions = {}) {
+  /**
+   * @param {Array<{sheetName:string, rows:any[]}>} sheets 시트 정의 배열 (필수)
+   * @param {Object} opts 옵션
+   * @param {string} [opts.filename='export.xlsx'] 파일명
+   */
+  async function exportExcel(sheets, opts = {}) {
+    if (!Array.isArray(sheets) || sheets.length === 0) {
+      throw new Error('sheets는 최소 1개 이상의 시트를 포함한 배열이어야 합니다.');
+    }
+    const filename = (opts.filename && String(opts.filename).trim()) || 'export.xlsx';
+    const wb = buildWorkbook(sheets);
+    saveInBrowser(wb, filename);
+  }
+
+  // 전역 등록(원하면 전역에서 window.내함수명(...) 호출)
+  if (factoryOptions.registerName && typeof window !== 'undefined') {
+    window[factoryOptions.registerName] = exportExcel;
+  }
+
+  return exportExcel;
+}
+
+/**
+ * 기본 인스턴스
+ * - import { exportExcel } from './excelExporter'
+ * - 원하시는 이름으로 변수에 담아 사용 가능: const saveReport = exportExcel;
+ */
+export const exportExcel = createExcelExporter();
+리팩토링 포인트(동작 동일)
+isAoa 판별을 Array.isArray(rows[0])로 간결화.
+rows 한 번만 안전 처리(Array.isArray(s.rows) ? s.rows : []).
+불필요한 조건 분기/임시 변수 제거, I/O 경로 단일화로 가독성 ↑.
+사용 예제 (복붙)
+코드 복사
+Javascript
+// 1) 함수명을 내가 정해서 사용
+// import { exportExcel } from './excelExporter';
+
+const saveMultiSheet = exportExcel; // 필요 시 원하는 이름으로 대입
+await saveMultiSheet(
+  [
+    { sheetName: '장비현황', rows: [{ eqpId: 'EQP-01', status: 'OK' }, { eqpId: 'EQP-02', status: 'NG' }] },
+    { sheetName: 'RawData', rows: [['colA', 'colB'], [1, 2], [3, 4]] }
+  ],
+  { filename: 'monitoring.xlsx' }
+);
+
+// 2) 전역에 등록해서 호출
+// import { createExcelExporter } from './excelExporter';
+createExcelExporter({ registerName: 'saveAgGridExcel' });
+// 이후 어디서든: window.saveAgGridExcel(sheets, { filename: 'report.xlsx' });
+ag-Grid 데이터 뽑는 법 (복붙)
+코드 복사
+Javascript
+// 표시 중인 행만 JSON으로 수집하는 간단 예시
+function collectJsonFromAgGrid(gridApi) {
+  const rows = [];
+  gridApi.forEachNodeAfterFilterAndSort(node => {
+    rows.push(node.data);
+  });
+  return rows;
+}
+
+// 사용
+await exportExcel(
+  [
+    { sheetName: 'AG-Grid-1', rows: collectJsonFromAgGrid(gridApi1) },
+    { sheetName: 'AG-Grid-2', rows: collectJsonFromAgGrid(gridApi2) }
+  ],
+  { filename: 'aggrid-export.xlsx' }
+);
+더 줄이고 싶으시면 말씀만 주세요.
+예: 컬럼 순서 고정(AOA 변환), 헤더 한글변환/맵핑, 셀 너비 자동화 등 옵션도 얹어드릴게요, 지우님!
