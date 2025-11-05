@@ -206,28 +206,44 @@ export default {
   },
 
   // ✨ 새로 추가한 엑셀 내보내기 함수들 ✨
-  createExcelExporter(factoryOptions = {}) {
-    const exportExcel = async (sheets, opts = {}) => {
-      if (!Array.isArray(sheets) || sheets.length === 0) {
-        throw new Error('sheets는 최소 1개 이상의 시트를 포함한 배열이어야 합니다.');
-      }
-      const filename = (opts.filename && String(opts.filename).trim()) || 'export.xlsx';
-      const wb = buildWorkbook(sheets);
-      saveInBrowser(wb, filename);
-    };
-
-    if (factoryOptions.registerName && typeof window !== 'undefined') {
-      window[factoryOptions.registerName] = exportExcel;
-    }
-    return exportExcel;
-  },
-
-  async exportExcel(sheets, opts = {}) {
+  
+  /**
+ * 엑셀 내보내기 함수 팩토리
+ *
+ * @param {Object} factoryOptions
+ * @returns {(sheets: Array<{sheetName:string, rows:any[]}>, opts?: {
+ *   filename?: string  // 기본값: 'export.xlsx'
+ * }) => Promise<void>}
+ */
+createExcelExporter(factoryOptions = {}) {
+  /**
+   * @param {Array<{sheetName:string, rows:any[]}>} sheets 시트 정의 배열 (필수)
+   * @param {Object} opts 옵션
+   * @param {string} [opts.filename='export.xlsx'] 파일명
+   */
+  const exportExcel = async (sheets, opts = {}) => {
     if (!Array.isArray(sheets) || sheets.length === 0) {
       throw new Error('sheets는 최소 1개 이상의 시트를 포함한 배열이어야 합니다.');
+      // 주석 유지: 시트 배열 입력, rows는 JSON 또는 2차원 배열 모두 가능
     }
     const filename = (opts.filename && String(opts.filename).trim()) || 'export.xlsx';
     const wb = buildWorkbook(sheets);
     saveInBrowser(wb, filename);
+  };
+
+  return exportExcel;
+},
+
+/**
+ * 기본 인스턴스
+ * - 원하시는 이름으로 변수에 담아 사용 가능: const saveReport = Util.exportExcel;
+ * - import Util from '@/utils/Util' 후 Util.exportExcel(...) 형태로 바로 호출 가능
+ */
+async exportExcel(sheets, opts = {}) {
+  if (!Array.isArray(sheets) || sheets.length === 0) {
+    throw new Error('sheets는 최소 1개 이상의 시트를 포함한 배열이어야 합니다.');
   }
-};
+  const filename = (opts.filename && String(opts.filename).trim()) || 'export.xlsx';
+  const wb = buildWorkbook(sheets);
+  saveInBrowser(wb, filename);
+}
