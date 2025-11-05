@@ -280,3 +280,88 @@ async exportExcel(sheets, opts = {}) {
     return rows;
   },
 };
+
+
+
+
+
+/**
+ * ag-Grid 데이터 추출
+ * - 필터/정렬이 적용된 현재 표시 데이터만 반환
+ * - exportExcel()의 rows에 바로 넣을 수 있는 배열 형태
+ *
+ * @param {object} gridApi ag-Grid의 gridApi 인스턴스
+ * @param {object} [options]
+ * @param {boolean} [options.includeHiddenColumns=false] 숨김 컬럼도 포함할지 여부
+ * @param {boolean} [options.useValueFormatter=true] valueFormatter 결과를 반영할지 여부
+ * @returns {Array<object>} rows 데이터 배열
+ */
+getAgGridData(gridApi, options = {}) {
+  if (!gridApi) return [];
+
+  const includeHiddenColumns = options.includeHiddenColumns === true;
+  const useValueFormatter = options.useValueFormatter !== false; // 기본 true
+
+  const rows = [];
+
+  // columnApi 안전 획득
+  const columnApi =
+    (typeof gridApi.getColumnApi === 'function' && gridApi.getColumnApi()) ||
+    gridApi.columnApi ||
+    null;
+
+  // 표시 컬럼(기본) / 전체 컬럼(옵션) 수집
+  const columns = columnApi
+    ? (includeHiddenColumns ? columnApi.getAllColumns() : columnApi.getAllDisplayedColumns())
+    : [];
+
+  // 컬럼 메타 준비 (키는 고유한 colId 사용)
+  const colMetas = columns.map(col => {
+    const def = col.getColDef ? col.getColDef() : {};
+    const key = (col.getColId && col.getColId()) || def.colId || def.field || 'col';
+    return { col, def, key };
+  });
+
+  gridApi.forEachNodeAfterFilterAndSort(node => {
+    // 그룹/푸터 행 제외
+    if (node.group || node.footer) return;
+
+    const row = {};
+    colMetas.forEach(({ col, def, key }) => {
+      // 1) 원시값: api.getValue → valueGetter/field 기반 값 계산
+      let raw;
+      if (typeof gridApi.getValue === 'function') {
+        raw = gridApi.getValue(col, node);
+      } else if (def && def.field && node.data) {
+        raw = node.data[def.field];
+      }
+
+      // 2) 포맷 적용: 필요 시 valueFormatter 호출
+      let value = raw;
+      if (useValueFormatter && typeof def.valueFormatter === 'function') {
+        const params = {
+          value: raw == null ? null : raw, // undefined → null 변환 (일부 포매터 대비)
+          data: node.data,
+          node,
+          colDef: def,
+          api: gridApi,
+          columnApi,
+          context: gridApi.context
+        };
+        const formatted = def.valueFormatter(params);
+        if (formatted !== undefined && formatted !== null) {
+          value = formatted;
+        }
+      }
+
+      // 3) undefined/null은 빈 문자열로 정규화 (엑셀에서 'undefined' 방지)
+      if (value === undefined || value === null) value = '';
+
+      row[key] = value;
+    });
+
+    rows.push(row);
+  });
+
+  return rows;
+},
