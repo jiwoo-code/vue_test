@@ -127,4 +127,107 @@ await exportExcel(
   { filename: 'aggrid-export.xlsx' }
 );
 더 줄이고 싶으시면 말씀만 주세요.
-예: 컬럼 순서 고정(AOA 변환), 헤더 한글변환/맵핑, 셀 너비 자동화 등 옵션도 얹어드릴게요, 지우님!
+예: 컬럼 순서 고정(AOA 변환), 헤더 한글변환/맵핑, 셀 너비 자동화 등 옵션도 얹어드릴게요
+
+
+
+
+
+
+
+
+
+
+
+ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+
+
+// ----------------------
+// 상단 import
+// ----------------------
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
+
+// ----------------------
+// 헬퍼 함수들 (export default 바깥에 선언)
+// ----------------------
+
+/**
+ * 시트명 유효화 (엑셀 제약: 31자, \ / ? * [ ] : 금지, 앞뒤 공백 제거)
+ */
+function sanitizeSheetName(name, index) {
+  const raw = (name && String(name).trim()) || `Sheet${index + 1}`;
+  // ESLint: unnecessary escape character 경고 없이 안전한 문자 클래스
+  const invalid = /[\\/?*[\]:]/g;
+  let safe = raw.replace(invalid, ' ');
+  if (safe.length > 31) safe = safe.slice(0, 31);
+  if (!safe) safe = `Sheet${index + 1}`;
+  return safe;
+}
+
+/**
+ * 워크북 생성
+ * @param {Array<{sheetName: string, rows: Array<object>|Array<Array<any>>}>} sheets
+ *  - rows: 객체 배열(JSON) 또는 2차원 배열(AOA) 모두 지원
+ */
+function buildWorkbook(sheets) {
+  const wb = XLSX.utils.book_new();
+  sheets.forEach((s, i) => {
+    const name = sanitizeSheetName(s.sheetName, i);
+    const rows = Array.isArray(s.rows) ? s.rows : [];
+    const isAoa = Array.isArray(rows[0]);
+    const ws = isAoa ? XLSX.utils.aoa_to_sheet(rows) : XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  });
+  return wb;
+}
+
+/**
+ * 브라우저 저장 (파일명만 지정 가능, 경로/자동열기 불가)
+ */
+function saveInBrowser(wb, filename) {
+  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([out], { type: 'application/octet-stream' });
+  saveAs(blob, filename);
+}
+
+// ----------------------
+// export default (여기에 기존 유틸 메서드 + 엑셀 내보내기 추가)
+// ----------------------
+export default {
+  exportCsv(content, fileName) {
+    // ...
+  },
+  omit(obj, ...props) {
+    // ...
+  },
+  averArr(arr) {
+    // ...
+  },
+
+  // ✨ 새로 추가한 엑셀 내보내기 함수들 ✨
+  createExcelExporter(factoryOptions = {}) {
+    const exportExcel = async (sheets, opts = {}) => {
+      if (!Array.isArray(sheets) || sheets.length === 0) {
+        throw new Error('sheets는 최소 1개 이상의 시트를 포함한 배열이어야 합니다.');
+      }
+      const filename = (opts.filename && String(opts.filename).trim()) || 'export.xlsx';
+      const wb = buildWorkbook(sheets);
+      saveInBrowser(wb, filename);
+    };
+
+    if (factoryOptions.registerName && typeof window !== 'undefined') {
+      window[factoryOptions.registerName] = exportExcel;
+    }
+    return exportExcel;
+  },
+
+  async exportExcel(sheets, opts = {}) {
+    if (!Array.isArray(sheets) || sheets.length === 0) {
+      throw new Error('sheets는 최소 1개 이상의 시트를 포함한 배열이어야 합니다.');
+    }
+    const filename = (opts.filename && String(opts.filename).trim()) || 'export.xlsx';
+    const wb = buildWorkbook(sheets);
+    saveInBrowser(wb, filename);
+  }
+};
