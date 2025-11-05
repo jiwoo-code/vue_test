@@ -247,3 +247,36 @@ async exportExcel(sheets, opts = {}) {
   const wb = buildWorkbook(sheets);
   saveInBrowser(wb, filename);
 }
+
+/**
+   * ag-Grid 데이터 추출
+   * - 필터/정렬이 적용된 현재 표시 데이터만 반환
+   * - exportExcel()의 rows에 바로 넣을 수 있는 배열 형태
+   *
+   * @param {object} gridApi ag-Grid의 gridApi 인스턴스
+   * @param {boolean} [includeHiddenColumns=false] 숨김 컬럼도 포함할지 여부
+   * @returns {Array<object>} rows 데이터 배열
+   */
+  getAgGridData(gridApi, includeHiddenColumns = false) {
+    if (!gridApi) return [];
+
+    const rows = [];
+    const visibleColumns = gridApi
+      .getColumnDefs()
+      .filter(col => includeHiddenColumns || !col.hide)
+      .map(col => col.field);
+
+    gridApi.forEachNodeAfterFilterAndSort(node => {
+      if (node.data) {
+        // 필요한 컬럼만 추출
+        const row = {};
+        visibleColumns.forEach(field => {
+          row[field] = node.data[field];
+        });
+        rows.push(row);
+      }
+    });
+
+    return rows;
+  },
+};
