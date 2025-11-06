@@ -484,3 +484,150 @@ function getAgGridData(
 
   return aoa;
 }
+
+
+
+
+
+
+
+
+
+
+/**
+ * ag-Grid → AOA (Array of Arrays)
+ * (컬럼 순서 보장, 그룹 헤더 포함, '-' 헤더 컬럼 제외)
+ *
+ * @param {object} gridApi - ag-Grid gridApi
+ * @param {object} columnApi - ag-Grid columnApi
+ * @param {boolean} [reflectExpand=false] - 표시 컬럼만 포함 여부
+ * @param {boolean} [reflectFilterSort=false] - 필터/정렬 반영 여부
+ * @param {boolean} [applyValueFormatter=true] - valueFormatter 적용 여부
+ * @returns {Array<Array<any>>} 헤더 행 + 데이터 행의 AOA
+ */
+function getAgGridData(
+  gridApi,
+  columnApi,
+  reflectExpand = false,
+  reflectFilterSort = false,
+  applyValueFormatter = true
+) {
+  if (!gridApi || !columnApi) return [];
+
+  const EXCLUDE_HEADER = '-';
+
+  // --- 헬퍼 함수 ---
+
+  /**
+   * 객체의 메서드를 안전하게 호출합니다.
+   * @param {object} obj - 대상 객체
+   * @param {string} methodName - 호출할 메서드 이름
+   * @param {any} fallback - 메서드 호출 실패 시 반환할 값
+   */
+  const safeCall = (obj, methodName, fallback = null) => {
+    return (obj && typeof obj[methodName] === 'function')
+      ? obj[methodName]()
+      : fallback;
+  };
+
+  /**
+   * 컬럼의 상위 그룹 경로를 배열로 수집합니다. (예: ['상위그룹', '하위그룹'])
+   */
+  function buildGroupPath(col) {
+    const path = [];
+    let parent =
+      safeCall(col, 'getParent', null) ||
+      safeCall(col, 'getOriginalParent', null);
+
+    while (parent && typeof parent.getColGroupDef === 'function') {
+      const gdef = parent.getColGroupDef();
+      const name = gdef && (gdef.headerName || gdef.header);
+      if (name && name !== EXCLUDE_HEADER) path.unshift(String(name));
+      parent = safeCall(parent, 'getParent', null);
+    }
+    return path;
+  }
+
+  /**
+   * 셀의 최종 표시 값을 계산합니다. (valueGetter/field → valueFormatter)
+   * @param {object} node - ag-Grid rowNode
+   * @param {object} meta - { col, def }를 포함한 메타 객체
+   */
+  function getCellValue(node, { col, def }) { // <-- 1. 구조 분해 할당
+    const data = node?.data;
+    let value = (typeof gridApi.getValue === 'function')
+      ? gridApi.getValue(col, node)
+      : (def.field && data ? data[def.field] : undefined);
+
+    if (applyValueFormatter && def && typeof def.valueFormatter === 'function') {
+      const params = {
+        value: value ?? null, // <-- 2. nullish coalescing (??) 사용
+        data: data,
+        node: node,
+        colDef: def,
+        column: col,
+        api: gridApi,
+        columnApi: columnApi,
+        context: gridApi.context
+      };
+      const formatted = def.valueFormatter(params);
+      if (formatted != null) value = formatted;
+    }
+    // null 또는 undefined는 빈 문자열로 반환
+    return value == null ? '' : value;
+  }
+
+  /**
+   * 데이터 행인지 확인합니다. (그룹/푸터 제외)
+   */
+  const isDataNode = (node) => !!node && !node.group && !node.footer;
+
+  /**
+   * AOA 배열에 데이터 노드를 추가합니다.
+   */
+  function collectNode(node) {
+    if (!isDataNode(node)) return;
+    aoa.push(metas.map(m => getCellValue(node, m)));
+  }
+
+  // --- 메인 로직 ---
+
+  // 1) 사용할 컬럼(표시 vs 전체)
+  const columns = reflectExpand
+    ? safeCall(columnApi, 'getAllDisplayedColumns', [])
+    : safeCall(columnApi, 'getColumns', []);
+
+  // 2) 메타 구성(그룹 경로/헤더) 후 '-' 헤더 제외
+  const metas = columns.map(col => {
+    const def = safeCall(col, 'getColDef', {}); // <-- 3. 불필요한 '|| {}' 제거
+    const colId = safeCall(col, 'getColId', null) || def.colId || '';
+    const header = def.headerName || colId || def.field || 'col';
+    return { col: col, def: def, header: header, groupPath: buildGroupPath(col) };
+  }).filter(m => m.header !== EXCLUDE_HEADER);
+
+  if (metas.length === 0) return [];
+
+  // 3) 그룹 헤더 행(최대 깊이만큼) + 실제 헤더 행
+  const maxDepth = Math.max(0, ...metas.map(m => m.groupPath.length));
+  const headerRows = Array.from({ length: maxDepth }, (_, level) =>
+    metas.map(m => m.groupPath[level] || '')
+  );
+  headerRows.push(metas.map(m => m.header));
+
+  // 4) 데이터 행 수집
+  const aoa = [...headerRows];
+
+  // 5) 순회 전략(표시 행 → 필터/정렬 → 전체)
+  if (reflectFilterSort && reflectExpand && typeof gridApi.getDisplayedRowCount === 'function') {
+    for (let i = 0, n = gridApi.getDisplayedRowCount(); i < n; i++) {
+      collectNode(gridApi.getDisplayedRowAtIndex(i));
+    }
+  } else if (reflectFilterSort && typeof gridApi.forEachNodeAfterFilterAndSort === 'function') {
+    gridApi.forEachNodeAfterFilterAndSort(collectNode);
+  } else if (typeof gridApi.forEachNode === 'function') {
+    gridApi.forEachNode(collectNode);
+  }
+
+  return aoa;
+}
+
