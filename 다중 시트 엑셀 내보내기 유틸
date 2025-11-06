@@ -371,58 +371,70 @@ getAgGridData(gridApi, options = {}) {
 
 
 
-/**
- * ag-Grid "현재 화면" 데이터 추출 (필터/정렬/접힘 포함 + 그룹 헤더 포함)
- */
-getAgGridViewData(gridApi, reflectFilterSort = true, reflectExpand = true, applyValueFormatter = true) {
-  if (!gridApi || !gridApi.getColumnApi) return [];
 
-  const columnApi = gridApi.getColumnApi();
-  const cols = columnApi.getAllDisplayedColumns ? columnApi.getAllDisplayedColumns() : [];
+
+
+
+
+
+
+/**
+ * ag-Grid 데이터 추출 (AOA)
+ * - 컬럼 순서 보장 / 그룹헤더 포함
+ * - 1행: 헤더, 이후: 데이터행 (첫 셀에 groupKey)
+ *
+ * @param {object} gridApi ag-Grid의 gridApi
+ * @param {object} columnApi ag-Grid의 columnApi
+ * @param {boolean} reflectExpand 접힘/펼침 상태 반영 여부
+ * @param {boolean} reflectFilterSort 필터/정렬 반영 여부
+ * @param {boolean} applyValueFormatter valueFormatter 적용 여부
+ * @returns {Array<Array<any>>} AOA (엑셀 export용)
+ */
+getAgGridData(gridApi, columnApi, reflectExpand = true, reflectFilterSort = true, applyValueFormatter = true) {
+  if (!gridApi || !columnApi) return [];
+
+  const cols = reflectFilterSort
+    ? columnApi.getAllDisplayedColumns?.() || []
+    : columnApi.getColumns?.() || [];
+
   const metas = cols.map(col => {
-    const def = col.getColDef ? col.getColDef() : {};
-    const key = (col.getColId && col.getColId()) || def.field || def.colId || 'col';
-    return { col, def, key };
+    const def = col.getColDef?.() || {};
+    const header = def.headerName || col.getColId?.() || def.field || def.colId || 'col';
+    return { col, def, header };
   });
 
-  const useDisplayed = reflectFilterSort && reflectExpand;
-  const rows = [];
+  const aoa = [metas.map(m => m.header)];
 
-  const pushRowFromNode = (node) => {
-    if (!node || node.footer) return;
-
-    // 그룹 헤더는 groupKey만 표시
-    if (node.group) {
-      rows.push({ groupKey: node.key });
-      return;
+  const getValue = (node, { col, def }) => {
+    let v = gridApi.getValue?.(col, node) ?? (def.field && node.data ? node.data[def.field] : undefined);
+    if (applyValueFormatter && typeof def.valueFormatter === 'function') {
+      const p = { value: v ?? null, data: node.data, node, colDef: def, api: gridApi, columnApi, context: gridApi.context };
+      v = def.valueFormatter(p) ?? v;
     }
-
-    const row = {};
-    for (const { col, def, key } of metas) {
-      let v = typeof gridApi.getValue === 'function'
-        ? gridApi.getValue(col, node)
-        : (def.field && node.data ? node.data[def.field] : undefined);
-
-      if (applyValueFormatter && typeof def.valueFormatter === 'function') {
-        const p = { value: v == null ? null : v, data: node.data, node, colDef: def, api: gridApi, columnApi, context: gridApi.context };
-        const f = def.valueFormatter(p);
-        if (f !== undefined && f !== null) v = f;
-      }
-      row[key] = v == null ? '' : v;
-    }
-    rows.push(row);
+    return v ?? '';
   };
 
-  if (useDisplayed && gridApi.getDisplayedRowCount) {
-    const count = gridApi.getDisplayedRowCount();
-    for (let i = 0; i < count; i += 1) {
-      pushRowFromNode(gridApi.getDisplayedRowAtIndex(i));
+  const pushNode = (node) => {
+    if (!node) return;
+    if (node.group) {
+      const r = new Array(metas.length).fill('');
+      r[0] = String(node.key);
+      aoa.push(r);
+      return;
     }
-  } else if (reflectFilterSort && typeof gridApi.forEachNodeAfterFilterAndSort === 'function') {
-    gridApi.forEachNodeAfterFilterAndSort(pushRowFromNode);
-  } else if (typeof gridApi.forEachLeafNode === 'function') {
-    gridApi.forEachLeafNode(pushRowFromNode);
+    if (node.footer) return;
+    aoa.push(metas.map(m => getValue(node, m)));
+  };
+
+  if (reflectFilterSort && reflectExpand && gridApi.getDisplayedRowCount) {
+    for (let i = 0, n = gridApi.getDisplayedRowCount(); i < n; i++) {
+      pushNode(gridApi.getDisplayedRowAtIndex(i));
+    }
+  } else if (reflectFilterSort && gridApi.forEachNodeAfterFilterAndSort) {
+    gridApi.forEachNodeAfterFilterAndSort(pushNode);
+  } else {
+    gridApi.forEachNode?.(pushNode);
   }
 
-  return rows;
-},
+  return aoa;
+} 
