@@ -367,3 +367,120 @@ getAgGridData(gridApi, columnApi, reflectExpand = false, reflectFilterSort = fal
 
   return aoa;
 }
+
+
+
+
+
+
+
+
+
+
+/**
+ * ag-Grid → AOA
+ * (컬럼 순서 보장, 그룹 헤더 포함, '-' 헤더 컬럼 제외)
+ *
+ * @param {object} gridApi
+ * @param {object} columnApi
+ * @param {boolean} [reflectExpand=false]      표시 컬럼만 포함 여부
+ * @param {boolean} [reflectFilterSort=false]  필터/정렬 반영 여부
+ * @param {boolean} [applyValueFormatter=true] valueFormatter 적용 여부
+ * @returns {Array<Array<any>>} 헤더 행 + 데이터 행의 AOA
+ */
+function getAgGridData(
+  gridApi,
+  columnApi,
+  reflectExpand = false,
+  reflectFilterSort = false,
+  applyValueFormatter = true
+) {
+  if (!gridApi || !columnApi) return [];
+
+  const EXCLUDE_HEADER = '-';
+
+  // 안전 호출 유틸
+  const safeCall = (obj, method, fallback) =>
+    obj && typeof obj[method] === 'function' ? obj[method]() : fallback;
+
+  // 상위 그룹 경로 구성
+  const buildGroupPath = (col) => {
+    const path = [];
+    let parent = safeCall(col, 'getParent', null) || safeCall(col, 'getOriginalParent', null);
+    while (parent && typeof parent.getColGroupDef === 'function') {
+      const gdef = parent.getColGroupDef();
+      const name = gdef && (gdef.headerName || gdef.header);
+      if (name && name !== EXCLUDE_HEADER) path.unshift(String(name));
+      parent = safeCall(parent, 'getParent', null);
+    }
+    return path;
+  };
+
+  // 셀 값 계산 (valueGetter/valueFormatter 반영)
+  const getCellValue = (node, meta) => {
+    const { col, def } = meta;
+    let value = typeof gridApi.getValue === 'function'
+      ? gridApi.getValue(col, node)
+      : def.field && node?.data ? node.data[def.field] : undefined;
+
+    if (applyValueFormatter && typeof def.valueFormatter === 'function') {
+      const params = {
+        value: value ?? null,
+        data: node?.data,
+        node,
+        colDef: def,
+        column: col,
+        api: gridApi,
+        columnApi,
+        context: gridApi.context
+      };
+      const formatted = def.valueFormatter(params);
+      if (formatted != null) value = formatted;
+    }
+    return value ?? '';
+  };
+
+  // 컬럼 메타 구성
+  const columns = reflectExpand
+    ? safeCall(columnApi, 'getAllDisplayedColumns', [])
+    : safeCall(columnApi, 'getColumns', []);
+
+  const metas = columns
+    .map(col => {
+      const def = safeCall(col, 'getColDef', {}) || {};
+      const colId = safeCall(col, 'getColId', null) || def.colId || '';
+      const header = def.headerName || colId || def.field || 'col';
+      return { col, def, header, groupPath: buildGroupPath(col) };
+    })
+    .filter(m => m.header !== EXCLUDE_HEADER);
+
+  if (metas.length === 0) return [];
+
+  // 그룹 헤더 행 생성
+  const maxDepth = Math.max(0, ...metas.map(m => m.groupPath.length));
+  const headerRows = Array.from({ length: maxDepth }, (_, level) =>
+    metas.map(m => m.groupPath[level] || '')
+  );
+  headerRows.push(metas.map(m => m.header)); // 실제 헤더 행 추가
+
+  // 데이터 행 구성
+  const aoa = [...headerRows];
+  const collectNode = (node) => {
+    if (node && !node.group && !node.footer) {
+      aoa.push(metas.map(m => getCellValue(node, m)));
+    }
+  };
+
+  // 행 순회 전략
+  if (reflectFilterSort && reflectExpand && typeof gridApi.getDisplayedRowCount === 'function') {
+    for (let i = 0, n = gridApi.getDisplayedRowCount(); i < n; i++) {
+      collectNode(gridApi.getDisplayedRowAtIndex(i));
+    }
+  } else if (reflectFilterSort && typeof gridApi.forEachNodeAfterFilterAndSort === 'function') {
+    gridApi.forEachNodeAfterFilterAndSort(collectNode);
+  } else if (typeof gridApi.forEachNode === 'function') {
+    gridApi.forEachNode(collectNode);
+  }
+
+  return aoa;
+}
