@@ -444,62 +444,69 @@ getAgGridData(gridApi, columnApi, reflectExpand = false, reflectFilterSort = fal
 
 
 /**
- * ag-Grid 데이터 추출 (AOA)
- * - 컬럼 순서 보장 / 그룹헤더 포함
- * - 1행: 헤더, 이후: 데이터행 (첫 셀에 groupKey)
+ * ag-Grid 데이터를 AOA로 추출 (컬럼 순서 보장, 그룹 헤더 포함)
  *
- * @param {object} gridApi ag-Grid의 gridApi
- * @param {object} columnApi ag-Grid의 columnApi
- * @param {boolean} reflectExpand 접힘/펼침 상태 반영 여부
- * @param {boolean} reflectFilterSort 필터/정렬 반영 여부
- * @param {boolean} applyValueFormatter valueFormatter 적용 여부
- * @returns {Array<Array<any>>} AOA (엑셀 export용)
+ * @param {object} gridApi            ag-Grid gridApi
+ * @param {object} columnApi          ag-Grid columnApi
+ * @param {boolean} [reflectExpand=false]     접힘/펼침 상태 반영 여부
+ * @param {boolean} [reflectFilterSort=false] 필터/정렬 반영 여부
+ * @param {boolean} [applyValueFormatter=true] valueFormatter 적용 여부
+ * @returns {Array<Array<any>>} AOA (엑셀 rows 용)
  */
-getAgGridData(gridApi, columnApi, reflectExpand = true, reflectFilterSort = true, applyValueFormatter = true) {
+getAgGridData(gridApi, columnApi, reflectExpand = false, reflectFilterSort = false, applyValueFormatter = true) {
   if (!gridApi || !columnApi) return [];
 
   const cols = reflectFilterSort
-    ? columnApi.getAllDisplayedColumns?.() || []
-    : columnApi.getColumns?.() || [];
+    ? (columnApi.getAllDisplayedColumns ? columnApi.getAllDisplayedColumns() : [])
+    : (columnApi.getColumns ? columnApi.getColumns() : []);
 
   const metas = cols.map(col => {
-    const def = col.getColDef?.() || {};
-    const header = def.headerName || col.getColId?.() || def.field || def.colId || 'col';
-    return { col, def, header };
+    const def = col.getColDef ? col.getColDef() : {};
+    const header = def.headerName || (col.getColId && col.getColId()) || def.field || def.colId || 'col';
+    const colId = (col.getColId && col.getColId()) || def.colId || '';
+    const isAutoGroup = def.showRowGroup !== undefined || colId.startsWith('ag-Grid-AutoColumn');
+    return { col, def, header, isAutoGroup };
   });
 
   const aoa = [metas.map(m => m.header)];
+  const groupColIndex = Math.max(0, metas.findIndex(m => m.isAutoGroup));
 
+  // 셀 값 계산 (valueGetter, valueFormatter 포함)
   const getValue = (node, { col, def }) => {
-    let v = gridApi.getValue?.(col, node) ?? (def.field && node.data ? node.data[def.field] : undefined);
+    let v = (typeof gridApi.getValue === 'function')
+      ? gridApi.getValue(col, node)
+      : (def.field && node.data ? node.data[def.field] : undefined);
+
     if (applyValueFormatter && typeof def.valueFormatter === 'function') {
       const p = { value: v ?? null, data: node.data, node, colDef: def, api: gridApi, columnApi, context: gridApi.context };
-      v = def.valueFormatter(p) ?? v;
+      const f = def.valueFormatter(p);
+      if (f !== undefined && f !== null) v = f;
     }
     return v ?? '';
   };
 
+  // 노드 → AOA 행 변환
   const pushNode = (node) => {
-    if (!node) return;
+    if (!node || node.footer) return;
     if (node.group) {
       const r = new Array(metas.length).fill('');
-      r[0] = String(node.key);
+      r[groupColIndex] = String(node.key);
       aoa.push(r);
       return;
     }
-    if (node.footer) return;
     aoa.push(metas.map(m => getValue(node, m)));
   };
 
-  if (reflectFilterSort && reflectExpand && gridApi.getDisplayedRowCount) {
+  // 행 순회 (표시 행 → 필터/정렬 행 → 전체 행)
+  if (reflectFilterSort && reflectExpand && typeof gridApi.getDisplayedRowCount === 'function') {
     for (let i = 0, n = gridApi.getDisplayedRowCount(); i < n; i++) {
       pushNode(gridApi.getDisplayedRowAtIndex(i));
     }
-  } else if (reflectFilterSort && gridApi.forEachNodeAfterFilterAndSort) {
+  } else if (reflectFilterSort && typeof gridApi.forEachNodeAfterFilterAndSort === 'function') {
     gridApi.forEachNodeAfterFilterAndSort(pushNode);
-  } else {
-    gridApi.forEachNode?.(pushNode);
+  } else if (typeof gridApi.forEachNode === 'function') {
+    gridApi.forEachNode(pushNode);
   }
 
   return aoa;
-} 
+}
