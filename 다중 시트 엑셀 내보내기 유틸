@@ -282,222 +282,77 @@ async exportExcel(sheets, opts = {}) {
 };
 
 
+ㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+
+
+
+
+  
 
 
 
 /**
- * ag-Grid 데이터 추출
- * - 필터/정렬이 적용된 현재 표시 데이터만 반환
- * - exportExcel()의 rows에 바로 넣을 수 있는 배열 형태
- *
- * @param {object} gridApi ag-Grid의 gridApi 인스턴스
- * @param {object} [options]
- * @param {boolean} [options.includeHiddenColumns=false] 숨김 컬럼도 포함할지 여부
- * @param {boolean} [options.useValueFormatter=true] valueFormatter 결과를 반영할지 여부
- * @returns {Array<object>} rows 데이터 배열
- */
-getAgGridData(gridApi, options = {}) {
-  if (!gridApi) return [];
-
-  const includeHiddenColumns = options.includeHiddenColumns === true;
-  const useValueFormatter = options.useValueFormatter !== false; // 기본 true
-
-  const rows = [];
-
-  // columnApi 안전 획득
-  const columnApi =
-    (typeof gridApi.getColumnApi === 'function' && gridApi.getColumnApi()) ||
-    gridApi.columnApi ||
-    null;
-
-  // 표시 컬럼(기본) / 전체 컬럼(옵션) 수집
-  const columns = columnApi
-    ? (includeHiddenColumns ? columnApi.getAllColumns() : columnApi.getAllDisplayedColumns())
-    : [];
-
-  // 컬럼 메타 준비 (키는 고유한 colId 사용)
-  const colMetas = columns.map(col => {
-    const def = col.getColDef ? col.getColDef() : {};
-    const key = (col.getColId && col.getColId()) || def.colId || def.field || 'col';
-    return { col, def, key };
-  });
-
-  gridApi.forEachNodeAfterFilterAndSort(node => {
-    // 그룹/푸터 행 제외
-    if (node.group || node.footer) return;
-
-    const row = {};
-    colMetas.forEach(({ col, def, key }) => {
-      // 1) 원시값: api.getValue → valueGetter/field 기반 값 계산
-      let raw;
-      if (typeof gridApi.getValue === 'function') {
-        raw = gridApi.getValue(col, node);
-      } else if (def && def.field && node.data) {
-        raw = node.data[def.field];
-      }
-
-      // 2) 포맷 적용: 필요 시 valueFormatter 호출
-      let value = raw;
-      if (useValueFormatter && typeof def.valueFormatter === 'function') {
-        const params = {
-          value: raw == null ? null : raw, // undefined → null 변환 (일부 포매터 대비)
-          data: node.data,
-          node,
-          colDef: def,
-          api: gridApi,
-          columnApi,
-          context: gridApi.context
-        };
-        const formatted = def.valueFormatter(params);
-        if (formatted !== undefined && formatted !== null) {
-          value = formatted;
-        }
-      }
-
-      // 3) undefined/null은 빈 문자열로 정규화 (엑셀에서 'undefined' 방지)
-      if (value === undefined || value === null) value = '';
-
-      row[key] = value;
-    });
-
-    rows.push(row);
-  });
-
-  return rows;
-},
-
-
-
-
-
-
-
-/**
- * ag-Grid 데이터를 AOA 형태로 추출 (컬럼 순서 보장, 그룹 헤더 포함)
- * 
- * @param {object} gridApi            ag-Grid의 gridApi
- * @param {object} columnApi          ag-Grid의 columnApi
- * @param {boolean} [reflectExpand=false]   접힘/펼침 상태 반영 여부
- * @param {boolean} [reflectFilterSort=false] 필터/정렬 반영 여부
- * @param {boolean} [applyValueFormatter=true] valueFormatter 적용 여부
- * @returns {Array<Array<any>>}       AOA 형식의 데이터 (엑셀 export용)
- */
-getAgGridData(gridApi, columnApi, reflectExpand = false, reflectFilterSort = false, applyValueFormatter = true) {
-  if (!gridApi || !columnApi) return [];
-
-  const cols = reflectFilterSort
-    ? columnApi.getAllDisplayedColumns?.() || []
-    : columnApi.getColumns?.() || [];
-
-  const metas = cols.map(col => {
-    const def = col.getColDef?.() || {};
-    const header = def.headerName || col.getColId?.() || def.field || def.colId || 'col';
-    const colId = col.getColId?.() || def.colId || '';
-    const isAutoGroup = def.showRowGroup !== undefined || colId.startsWith('ag-Grid-AutoColumn');
-    return { col, def, header, isAutoGroup };
-  });
-
-  const aoa = [metas.map(m => m.header)];
-  const groupColIndex = Math.max(0, metas.findIndex(m => m.isAutoGroup));
-
-  const getValue = (node, { col, def }) => {
-    let v = gridApi.getValue?.(col, node) ?? (def.field && node.data ? node.data[def.field] : undefined);
-    if (applyValueFormatter && typeof def.valueFormatter === 'function') {
-      const p = { value: v ?? null, data: node.data, node, colDef: def, api: gridApi, columnApi, context: gridApi.context };
-      const f = def.valueFormatter(p);
-      if (f !== undefined && f !== null) v = f;
-    }
-    return v ?? '';
-  };
-
-  const pushNode = (node) => {
-    if (!node || node.footer) return;
-    if (node.group) {
-      const row = new Array(metas.length).fill('');
-      row[groupColIndex] = String(node.key);
-      aoa.push(row);
-      return;
-    }
-    aoa.push(metas.map(m => getValue(node, m)));
-  };
-
-  if (reflectFilterSort && reflectExpand && typeof gridApi.getDisplayedRowCount === 'function') {
-    for (let i = 0, n = gridApi.getDisplayedRowCount(); i < n; i++) pushNode(gridApi.getDisplayedRowAtIndex(i));
-  } else if (reflectFilterSort && typeof gridApi.forEachNodeAfterFilterAndSort === 'function') {
-    gridApi.forEachNodeAfterFilterAndSort(pushNode);
-  } else if (typeof gridApi.forEachNode === 'function') {
-    gridApi.forEachNode(pushNode);
-  }
-
-  return aoa;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-/**
- * ag-Grid 데이터를 AOA로 추출 (컬럼 순서 보장, 그룹 헤더 포함)
+ * ag-Grid 데이터를 AOA로 추출 (컬럼 순서 보장, 그룹헤더 포함, '-' 헤더 컬럼 제외)
  *
  * @param {object} gridApi            ag-Grid gridApi
  * @param {object} columnApi          ag-Grid columnApi
- * @param {boolean} [reflectExpand=false]     접힘/펼침 상태 반영 여부
+ * @param {boolean} [reflectExpand=false]     접힘/펼침 반영 여부
  * @param {boolean} [reflectFilterSort=false] 필터/정렬 반영 여부
  * @param {boolean} [applyValueFormatter=true] valueFormatter 적용 여부
- * @returns {Array<Array<any>>} AOA (엑셀 rows 용)
+ * @returns {Array<Array<any>>} AOA
  */
 getAgGridData(gridApi, columnApi, reflectExpand = false, reflectFilterSort = false, applyValueFormatter = true) {
   if (!gridApi || !columnApi) return [];
 
+  // 컬럼 수집 (표시 컬럼 또는 전체 컬럼)
   const cols = reflectFilterSort
-    ? (columnApi.getAllDisplayedColumns ? columnApi.getAllDisplayedColumns() : [])
-    : (columnApi.getColumns ? columnApi.getColumns() : []);
+    ? (typeof columnApi.getAllDisplayedColumns === 'function' ? columnApi.getAllDisplayedColumns() : [])
+    : (typeof columnApi.getColumns === 'function' ? columnApi.getColumns() : []);
 
-  const metas = cols.map(col => {
+  // 메타 구성 + '-' 헤더 컬럼 필터링
+  let metas = cols.map(col => {
     const def = col.getColDef ? col.getColDef() : {};
-    const header = def.headerName || (col.getColId && col.getColId()) || def.field || def.colId || 'col';
     const colId = (col.getColId && col.getColId()) || def.colId || '';
-    const isAutoGroup = def.showRowGroup !== undefined || colId.startsWith('ag-Grid-AutoColumn');
+    const header = def.headerName || colId || def.field || 'col';
+    const isAutoGroup = (def.showRowGroup !== undefined) || colId.startsWith('ag-Grid-AutoColumn');
     return { col, def, header, isAutoGroup };
-  });
+  }).filter(m => m.header !== '-'); // 더미 컬럼 제외
 
-  const aoa = [metas.map(m => m.header)];
-  const groupColIndex = Math.max(0, metas.findIndex(m => m.isAutoGroup));
+  // 모든 컬럼이 제거되었을 때도 그룹헤더를 찍기 위한 최소 헤더 확보
+  if (metas.length === 0) metas = [{ col: null, def: {}, header: 'GROUP', isAutoGroup: true }];
 
-  // 셀 값 계산 (valueGetter, valueFormatter 포함)
-  const getValue = (node, { col, def }) => {
+  const aoa = [metas.map(m => m.header)];                    // 헤더 행
+  const groupColIndex = Math.max(0, metas.findIndex(m => m.isAutoGroup)); // 그룹텍스트 위치 결정
+
+  // 셀 값 계산 (valueGetter/valueFormatter 반영)
+  const getValue = (node, m) => {
+    if (!m.col) return ''; // 최소 헤더 폴백 경우
     let v = (typeof gridApi.getValue === 'function')
-      ? gridApi.getValue(col, node)
-      : (def.field && node.data ? node.data[def.field] : undefined);
+      ? gridApi.getValue(m.col, node)
+      : (m.def.field && node.data ? node.data[m.def.field] : undefined);
 
-    if (applyValueFormatter && typeof def.valueFormatter === 'function') {
-      const p = { value: v ?? null, data: node.data, node, colDef: def, api: gridApi, columnApi, context: gridApi.context };
-      const f = def.valueFormatter(p);
+    if (applyValueFormatter && typeof m.def.valueFormatter === 'function') {
+      const p = { value: v == null ? null : v, data: node.data, node, colDef: m.def, api: gridApi, columnApi, context: gridApi.context };
+      const f = m.def.valueFormatter(p);
       if (f !== undefined && f !== null) v = f;
     }
-    return v ?? '';
+    return v == null ? '' : v;
   };
 
-  // 노드 → AOA 행 변환
+  // 노드를 AOA 한 행으로 변환 (그룹헤더는 항상 행 생성)
   const pushNode = (node) => {
-    if (!node || node.footer) return;
+    if (!node) return;
     if (node.group) {
       const r = new Array(metas.length).fill('');
       r[groupColIndex] = String(node.key);
       aoa.push(r);
       return;
     }
+    if (node.footer) return;
     aoa.push(metas.map(m => getValue(node, m)));
   };
 
-  // 행 순회 (표시 행 → 필터/정렬 행 → 전체 행)
+  // 행 순회: 표시 행 → (필터/정렬만) → 전체 행  (그룹헤더 강제 포함)
   if (reflectFilterSort && reflectExpand && typeof gridApi.getDisplayedRowCount === 'function') {
     for (let i = 0, n = gridApi.getDisplayedRowCount(); i < n; i++) {
       pushNode(gridApi.getDisplayedRowAtIndex(i));
@@ -510,3 +365,4 @@ getAgGridData(gridApi, columnApi, reflectExpand = false, reflectFilterSort = fal
 
   return aoa;
 }
+
