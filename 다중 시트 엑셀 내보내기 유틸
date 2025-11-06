@@ -365,3 +365,64 @@ getAgGridData(gridApi, options = {}) {
 
   return rows;
 },
+
+
+
+
+
+
+/**
+ * ag-Grid "현재 화면" 데이터 추출 (필터/정렬/접힘 포함 + 그룹 헤더 포함)
+ */
+getAgGridViewData(gridApi, reflectFilterSort = true, reflectExpand = true, applyValueFormatter = true) {
+  if (!gridApi || !gridApi.getColumnApi) return [];
+
+  const columnApi = gridApi.getColumnApi();
+  const cols = columnApi.getAllDisplayedColumns ? columnApi.getAllDisplayedColumns() : [];
+  const metas = cols.map(col => {
+    const def = col.getColDef ? col.getColDef() : {};
+    const key = (col.getColId && col.getColId()) || def.field || def.colId || 'col';
+    return { col, def, key };
+  });
+
+  const useDisplayed = reflectFilterSort && reflectExpand;
+  const rows = [];
+
+  const pushRowFromNode = (node) => {
+    if (!node || node.footer) return;
+
+    // 그룹 헤더는 groupKey만 표시
+    if (node.group) {
+      rows.push({ groupKey: node.key });
+      return;
+    }
+
+    const row = {};
+    for (const { col, def, key } of metas) {
+      let v = typeof gridApi.getValue === 'function'
+        ? gridApi.getValue(col, node)
+        : (def.field && node.data ? node.data[def.field] : undefined);
+
+      if (applyValueFormatter && typeof def.valueFormatter === 'function') {
+        const p = { value: v == null ? null : v, data: node.data, node, colDef: def, api: gridApi, columnApi, context: gridApi.context };
+        const f = def.valueFormatter(p);
+        if (f !== undefined && f !== null) v = f;
+      }
+      row[key] = v == null ? '' : v;
+    }
+    rows.push(row);
+  };
+
+  if (useDisplayed && gridApi.getDisplayedRowCount) {
+    const count = gridApi.getDisplayedRowCount();
+    for (let i = 0; i < count; i += 1) {
+      pushRowFromNode(gridApi.getDisplayedRowAtIndex(i));
+    }
+  } else if (reflectFilterSort && typeof gridApi.forEachNodeAfterFilterAndSort === 'function') {
+    gridApi.forEachNodeAfterFilterAndSort(pushRowFromNode);
+  } else if (typeof gridApi.forEachLeafNode === 'function') {
+    gridApi.forEachLeafNode(pushRowFromNode);
+  }
+
+  return rows;
+},
