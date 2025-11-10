@@ -1,0 +1,441 @@
+
+Vue2 (ag-Grid) – MxTrendGrid.vue
+코드 복사
+Vue
+<template>
+  <div class="mx-trend-wrap">
+    <div class="toolbar">
+      <label>Departments</label>
+      <input v-model="departmentsCsv" placeholder="예: ASSY,PACK" />
+      <label>Start</label>
+      <input v-model="startDate" type="date" />
+      <label>End</label>
+      <input v-model="endDate" type="date" />
+      <button @click="fetchTrend">조회</button>
+    </div>
+
+    <ag-grid-vue
+      class="ag-theme-alpine"
+      style="width: 100%; height: 560px"
+      :columnDefs="columnDefs"
+      :defaultColDef="defaultColDef"
+      :rowData="rowData"
+      :animateRows="true"
+      :suppressDragLeaveHidesColumns="true"
+      :rowClassRules="rowClassRules"
+    />
+  </div>
+</template>
+
+<script>
+import axios from 'axios';
+import { AgGridVue } from 'ag-grid-vue';
+
+export default {
+  name: 'MxTrendGrid',
+  components: { AgGridVue },
+  data() {
+    return {
+      departments: ['depart'],
+      startDate: '2025-01-01',
+      endDate: '2025-01-31',
+      rowData: [],
+      columnDefs: [],
+      defaultColDef: {
+        resizable: true,
+        sortable: true,
+        filter: 'agTextColumnFilter',
+        valueFormatter: (p) => {
+          const v = p.value;
+          if (v === null || v === undefined || Number.isNaN(v)) return '';
+          if (typeof v === 'number') return v.toFixed(4);
+          return v;
+        }
+      },
+      rowClassRules: {
+        'row-sum':        p => p.data?.action_name === 'sum',
+        'row-daily':      p => p.data?.action_name === 'Daily_MAction 수',
+        'row-mx-day-min': p => p.data?.action_name === 'MX/day(min)'
+      }
+    };
+  },
+  computed: {
+    departmentsCsv: {
+      get() { return this.departments.join(','); },
+      set(v) { this.departments = v.split(',').map(s => s.trim()).filter(Boolean); }
+    }
+  },
+  mounted() { this.fetchTrend(); },
+  methods: {
+    async fetchTrend() {
+      const params = new URLSearchParams();
+      this.departments.forEach(d => params.append('departments', d));
+      params.append('start', this.startDate);
+      params.append('end', this.endDate);
+
+      const { data } = await axios.get('/api/mx/trend', { params });
+      this.rowData = Array.isArray(data) ? data : [];
+
+      const fixed = new Set(['action_name', 'component', '항목별 ALL', 'day(sec)', 'day(min)']);
+      const eqpKeys = this.collectEqpKeys(this.rowData, fixed);
+
+      this.columnDefs = [
+        { headerName: 'MACTION',   field: 'action_name', pinned: 'left', minWidth: 140 },
+        { headerName: 'COMPONENT', field: 'component',   pinned: 'left', minWidth: 120 },
+        ...eqpKeys.map(k => ({
+          headerName: k.toUpperCase(),
+          field: k,
+          type: 'rightAligned',
+          cellClass: p => (typeof p.value === 'number' ? 'ag-right-aligned-cell' : '')
+        })),
+        { headerName: '항목별 ALL', field: '항목별 ALL', type: 'rightAligned', minWidth: 120 },
+        { headerName: 'day(sec)',  field: 'day(sec)',    type: 'rightAligned', minWidth: 110 },
+        { headerName: 'day(min)',  field: 'day(min)',    type: 'rightAligned', minWidth: 110 }
+      ];
+    },
+    collectEqpKeys(rows, fixed) {
+      const set = new Set();
+      rows.forEach(r => Object.keys(r || {}).forEach(k => {
+        if (!fixed.has(k) && k.toLowerCase().startsWith('eqp')) set.add(k);
+      }));
+      return Array.from(set).sort((a, b) => {
+        const na = parseInt(a.replace(/^\D+/g, ''), 10);
+        const nb = parseInt(b.replace(/^\D+/g, ''), 10);
+        if (Number.isNaN(na) || Number.isNaN(nb)) return a.localeCompare(b);
+        return na - nb;
+      });
+    }
+  }
+};
+</script>
+
+<style scoped>
+.mx-trend-wrap { width: 100%; }
+.toolbar { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+.toolbar input { width: 160px; }
+.row-sum        { background: rgba(0,0,0,0.03); font-weight: 600; }
+.row-daily      { background: rgba(0,128,255,0.06); }
+.row-mx-day-min { background: rgba(255,165,0,0.10); }
+</style>
+Spring Boot
+1) DTO – MxHistoryRow.java
+코드 복사
+Java
+package com.example.mx.domain;
+
+import lombok.Getter;
+import lombok.Setter;
+
+/** MX 이력 단일 행 (DB numeric → Java double) */
+@Getter
+@Setter
+public class MxHistoryRow {
+    private String eqpId;
+    private String actionName;
+    private String component;
+    private double mxSeconds; // numeric
+}
+2) Mapper 시그니처 – MxMapper.java  (구현/XML 생략)
+코드 복사
+Java
+package com.example.mx.application;
+
+import com.example.mx.domain.MxHistoryRow;
+import java.util.List;
+
+/**
+ * 부서들 + 기간(문자열)로 MX 이력을 한 번에 로드
+ * - 종료일 포함(+1day)은 SQL에서 처리 권장
+ * - 정렬: line, eqpId, summaryDate, mxTime (action_name은 정렬 안 함)
+ */
+public interface MxMapper {
+    List<MxHistoryRow> loadAllMxHistoryByDepartments(
+            List<String> departments,
+            String startDate,  // "yyyy-MM-dd"
+            String endDate     // "yyyy-MM-dd"
+    );
+}
+3) Service – MxTrendService.java
+코드 복사
+Java
+package com.example.mx.application;
+
+import java.util.List;
+import java.util.Map;
+
+/** 반환 컬럼: action_name, component, eqp..., 항목별 ALL, day(sec), day(min) */
+public interface MxTrendService {
+    List<Map<String, Object>> buildTrend(List<String> departments, String startDate, String endDate);
+}
+4) ServiceImpl – MxTrendServiceImpl.java  (DB 정렬 존중, 중복 제거만)
+코드 복사
+Java
+package com.example.mx.application;
+
+import com.example.mx.domain.MxHistoryRow;
+import org.springframework.stereotype.Service;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+@Service
+public class MxTrendServiceImpl implements MxTrendService {
+
+    private final MxMapper mxMapper;
+
+    public MxTrendServiceImpl(MxMapper mxMapper) {
+        this.mxMapper = mxMapper;
+    }
+
+    @Override
+    public List<Map<String, Object>> buildTrend(List<String> departments, String startDate, String endDate) {
+        if (departments == null || departments.isEmpty()) return Collections.emptyList();
+
+        // 단 한 번의 조회 (정렬은 SQL에서 수행)
+        List<MxHistoryRow> rows = mxMapper.loadAllMxHistoryByDepartments(departments, startDate, endDate);
+        if (rows == null || rows.isEmpty()) return Collections.emptyList();
+
+        // EQP 컬럼 순서: DB 등장 순서 유지, 중복만 제거
+        LinkedHashSet<String> eqpOrderSet = new LinkedHashSet<>();
+        for (MxHistoryRow r : rows) {
+            if (r.getEqpId() != null) eqpOrderSet.add(r.getEqpId());
+        }
+        List<String> eqpIdOrder = new ArrayList<>(eqpOrderSet);
+
+        // 피벗: (action_name, component) × eqp → sum(mxSeconds) — 등장 순서 유지
+        record PivotKey(String actionName, String component) {}
+        Map<PivotKey, Map<String, Double>> pivot = new LinkedHashMap<>();
+
+        for (MxHistoryRow r : rows) {
+            PivotKey key = new PivotKey(r.getActionName(), r.getComponent());
+            Map<String, Double> eqpSums = pivot.computeIfAbsent(key, k -> new LinkedHashMap<>());
+            eqpSums.merge(r.getEqpId(), r.getMxSeconds(), Double::sum);
+        }
+
+        // 피벗 → 표(List<Map>) 변환
+        List<Map<String, Object>> table = new ArrayList<>();
+        for (Map.Entry<PivotKey, Map<String, Double>> e : pivot.entrySet()) {
+            PivotKey key = e.getKey();
+            Map<String, Double> eqpSums = e.getValue();
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("action_name", key.actionName());
+            row.put("component",   key.component());
+            for (String eqpId : eqpIdOrder) {
+                row.put(eqpId, round2(eqpSums.getOrDefault(eqpId, 0.0)));
+            }
+            table.add(row);
+        }
+
+        // 설비별 합계 행(total_sum)
+        Map<String, Object> equipmentTotalsRow = new LinkedHashMap<>();
+        equipmentTotalsRow.put("action_name", "total_sum");
+        equipmentTotalsRow.put("component", null);
+        for (String eqpId : eqpIdOrder) {
+            double sum = table.stream()
+                    .mapToDouble(r -> ((Number) r.getOrDefault(eqpId, 0.0)).doubleValue())
+                    .sum();
+            equipmentTotalsRow.put(eqpId, round2(sum));
+        }
+        table.add(equipmentTotalsRow);
+
+        // 각 행의 total_sum (행 합계)
+        for (Map<String, Object> row : table) {
+            double sumOfRow = eqpIdOrder.stream()
+                    .mapToDouble(e -> ((Number) row.getOrDefault(e, 0.0)).doubleValue())
+                    .sum();
+            row.put("total_sum", round2(sumOfRow));
+        }
+
+        // Daily_MAction 수(설비별 count) 행
+        Map<String, Long> dailyCountByEqp = rows.stream()
+                .filter(r -> "Daily_MAction".equals(r.getActionName()))
+                .collect(Collectors.groupingBy(MxHistoryRow::getEqpId, LinkedHashMap::new, Collectors.counting()));
+
+        Map<String, Object> dailyCountRow = new LinkedHashMap<>();
+        dailyCountRow.put("action_name", "daily_mx_count");
+        dailyCountRow.put("component", null);
+        double dailyTotal = 0.0;
+        for (String eqpId : eqpIdOrder) {
+            double c = dailyCountByEqp.getOrDefault(eqpId, 0L).doubleValue();
+            dailyCountRow.put(eqpId, c);
+            dailyTotal += c;
+        }
+        dailyCountRow.put("total_sum", round2(dailyTotal));
+        dailyCountRow.put("day(sec)", 0.0);
+        dailyCountRow.put("day(min)", 0.0);
+
+        // day(sec), day(min) (분모 0 보호)
+        double denom = (dailyTotal == 0.0) ? 1.0 : dailyTotal;
+        for (Map<String, Object> row : table) {
+            double rowTotal = ((Number) row.getOrDefault("total_sum", 0.0)).doubleValue();
+            row.put("day(sec)", round2(rowTotal / denom));
+            row.put("day(min)", round2(rowTotal / denom / 60.0));
+        }
+
+        // MX/day(min) 행: 설비합 / 설비별 daily count / 60
+        Map<String, Object> mxPerDayMinRow = new LinkedHashMap<>();
+        mxPerDayMinRow.put("action_name", "day_min");
+        mxPerDayMinRow.put("component", null);
+        double mxDayMinTotal = 0.0;
+        for (String eqpId : eqpIdOrder) {
+            double s = ((Number) equipmentTotalsRow.getOrDefault(eqpId, 0.0)).doubleValue();
+            double c = ((Number) dailyCountRow.getOrDefault(eqpId, 0.0)).doubleValue();
+            double v = (c == 0.0) ? 0.0 : (s / c / 60.0);
+            v = round2(v);
+            mxPerDayMinRow.put(eqpId, v);
+            mxDayMinTotal += v;
+        }
+        mxPerDayMinRow.put("total_sum", round2(mxDayMinTotal));
+        mxPerDayMinRow.put("day(sec)", 0.0);
+        mxPerDayMinRow.put("day(min)", 0.0);
+
+        // 라벨 치환 & 열 재배치
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : table) {
+            renameActionLabelInline(row);   // total_sum → sum
+            moveTotalToAllInline(row);      // total_sum → 항목별 ALL
+            result.add(reorderColumns(row, eqpIdOrder));
+        }
+        renameActionLabelInline(dailyCountRow);     // daily_mx_count → Daily_MAction 수
+        moveTotalToAllInline(dailyCountRow);
+        result.add(reorderColumns(dailyCountRow, eqpIdOrder));
+
+        renameActionLabelInline(mxPerDayMinRow);    // day_min → MX/day(min)
+        moveTotalToAllInline(mxPerDayMinRow);
+        result.add(reorderColumns(mxPerDayMinRow, eqpIdOrder));
+
+        return result;
+    }
+
+    private static double round2(double v) { return Math.round(v * 100.0) / 100.0; }
+    private static void renameActionLabelInline(Map<String, Object> row) {
+        Object label = row.get("action_name");
+        if ("total_sum".equals(label)) row.put("action_name", "sum");
+        else if ("daily_mx_count".equals(label)) row.put("action_name", "Daily_MAction 수");
+        else if ("day_min".equals(label)) row.put("action_name", "MX/day(min)");
+    }
+    private static void moveTotalToAllInline(Map<String, Object> row) {
+        Object total = row.remove("total_sum");
+        row.put("항목별 ALL", total);
+    }
+    private static Map<String, Object> reorderColumns(Map<String, Object> row, List<String> eqpIdOrder) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("action_name", row.get("action_name"));
+        out.put("component",   row.get("component"));
+        for (String eqpId : eqpIdOrder) out.put(eqpId, row.getOrDefault(eqpId, 0.0));
+        out.put("항목별 ALL", row.getOrDefault("항목별 ALL", 0.0));
+        out.put("day(sec)",   row.getOrDefault("day(sec)", 0.0));
+        out.put("day(min)",   row.getOrDefault("day(min)", 0.0));
+        return out;
+    }
+}
+5) Controller – MxTrendController.java
+코드 복사
+Java
+package com.example.mx.presentation;
+
+import com.example.mx.application.MxTrendService;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+
+/** 날짜는 String("yyyy-MM-dd")으로 주고받습니다. */
+@RestController
+@RequestMapping("/api/mx")
+public class MxTrendController {
+
+    private final MxTrendService mxTrendService;
+
+    public MxTrendController(MxTrendService mxTrendService) {
+        this.mxTrendService = mxTrendService;
+    }
+
+    @GetMapping("/trend")
+    public ResponseEntity<List<Map<String, Object>>> getTrend(
+            @RequestParam("departments") List<String> departments,
+            @RequestParam("start") String startDate,
+            @RequestParam("end") String endDate
+    ) {
+        return ResponseEntity.ok(mxTrendService.buildTrend(departments, startDate, endDate));
+    }
+}
+Controller 테스트 (심플 포맷)
+지우님 포맷 그대로 맞췄습니다.
+@StandaloneConfiguration + @EnableGlobalMethodSecurity(prePostEnabled = true)
+@Bean으로 컨트롤러/서비스 생성, 매퍼는 @MockBean
+buildStandaloneMockMvc(controller), loginAsUser() 호출
+perform(getRequest(...)) 사용
+테스트 메서드 네이밍: {컨트롤러함수명}_SHOULD_return_status_200_WHENEVER
+코드 복사
+Java
+package com.example.mx.presentation;
+
+import com.example.mx.application.MxMapper;
+import com.example.mx.application.MxTrendService;
+import com.example.mx.application.MxTrendServiceImpl;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.mock.mockito.MockBean;
+
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * 베이스 테스트 클래스에서 제공한다고 가정:
+ * - buildStandaloneMockMvc(Object... controllers)
+ * - loginAsUser()
+ * - baseUrl, getRequest(String url)
+ */
+public class MxTrendControllerTest extends APIUnitExtension {
+
+    @TestConfiguration
+    @EnableGlobalMethodSecurity(prePostEnabled = true)
+    public static class Config {
+        @Bean
+        public MxTrendController controller(MxTrendService service) {
+            return new MxTrendController(service);
+        }
+        @Bean
+        public MxTrendService service(MxMapper mapper) {
+            return new MxTrendServiceImpl(mapper);
+        }
+    }
+
+    @Autowired
+    MxTrendController controller;
+
+    @Autowired
+    MxTrendService service;
+
+    @MockBean
+    MxMapper mapper;
+
+    @BeforeEach
+    void setUp() {
+        buildStandaloneMockMvc(controller);
+        loginAsUser();
+    }
+
+    @Test
+    @DisplayName("GET /api/mx/trend 200")
+    void getTrend_SHOULD_return_status_200_WHENEVER() throws Exception {
+        String condition = "?departments=ASSY&departments=PACK&start=2025-01-01&end=2025-01-31";
+        perform(getRequest(baseUrl + "/api/mx/trend" + condition))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("GET /api/mx/trend 200 (단일 부서)")
+    void getTrend_SINGLE_DEPT_SHOULD_return_status_200_WHENEVER() throws Exception {
+        String condition = "?departments=ASSY&start=2025-02-01&end=2025-02-28";
+        perform(getRequest(baseUrl + "/api/mx/trend" + condition))
+                .andExpect(status().isOk());
+    }
+}
