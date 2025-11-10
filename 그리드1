@@ -167,9 +167,13 @@ import java.util.Map;
 public interface MxTrendService {
     List<Map<String, Object>> buildTrend(List<String> departments, String startDate, String endDate);
 }
+
+
 4) ServiceImpl – MxTrendServiceImpl.java  (DB 정렬 존중, 중복 제거만)
 코드 복사
 Java
+
+
 package com.example.mx.application;
 
 import com.example.mx.domain.MxHistoryRow;
@@ -191,37 +195,43 @@ public class MxTrendServiceImpl implements MxTrendService {
     public List<Map<String, Object>> buildTrend(List<String> departments, String startDate, String endDate) {
         if (departments == null || departments.isEmpty()) return Collections.emptyList();
 
-        // 단 한 번의 조회 (정렬은 SQL에서 수행)
-        List<MxHistoryRow> rows = mxMapper.loadAllMxHistoryByDepartments(departments, startDate, endDate);
-        if (rows == null || rows.isEmpty()) return Collections.emptyList();
+        // 단 한 번의 조회(정렬은 DB: line, eqp_id, summary_date, mx_time)
+        final List<MxHistoryRow> mxHist =
+                mxMapper.getAllMxHistoryByDepartments(departments, startDate, endDate);
+        if (mxHist == null || mxHist.isEmpty()) return Collections.emptyList();
 
-        // EQP 컬럼 순서: DB 등장 순서 유지, 중복만 제거
-        LinkedHashSet<String> eqpOrderSet = new LinkedHashSet<>();
-        for (MxHistoryRow r : rows) {
-            if (r.getEqpId() != null) eqpOrderSet.add(r.getEqpId());
-        }
-        List<String> eqpIdOrder = new ArrayList<>(eqpOrderSet);
+        // EQP 컬럼 목록: DB 등장 순서 유지 + 중복 제거
+        final List<String> eqpIds = mxHist.stream()
+                .map(MxHistoryRow::getEqpId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
 
-        // 피벗: (action_name, component) × eqp → sum(mxSeconds) — 등장 순서 유지
-        record PivotKey(String actionName, String component) {}
-        Map<PivotKey, Map<String, Double>> pivot = new LinkedHashMap<>();
+        // pivot: "action|component" → (eqpId → sum(mxSeconds))
+        final Map<String, Map<String, Double>> pivot = new LinkedHashMap<>();
+        for (MxHistoryRow r : mxHist) {
+            final String action = r.getActionName();
+            final String component = r.getComponent() == null ? "" : r.getComponent();
+            final String key = action + "|" + component;
 
-        for (MxHistoryRow r : rows) {
-            PivotKey key = new PivotKey(r.getActionName(), r.getComponent());
             Map<String, Double> eqpSums = pivot.computeIfAbsent(key, k -> new LinkedHashMap<>());
             eqpSums.merge(r.getEqpId(), r.getMxSeconds(), Double::sum);
         }
 
-        // 피벗 → 표(List<Map>) 변환
-        List<Map<String, Object>> table = new ArrayList<>();
-        for (Map.Entry<PivotKey, Map<String, Double>> e : pivot.entrySet()) {
-            PivotKey key = e.getKey();
-            Map<String, Double> eqpSums = e.getValue();
+        // pivot → 표(List<Map>) 변환 (행 순서 = DB 등장 순서)
+        final List<Map<String, Object>> table = new ArrayList<>();
+        for (Map.Entry<String, Map<String, Double>> e : pivot.entrySet()) {
+            final String key = e.getKey();
+            final int bar = key.indexOf('|');
+            final String action = bar >= 0 ? key.substring(0, bar) : key;
+            final String component = bar >= 0 ? key.substring(bar + 1) : "";
+
+            final Map<String, Double> eqpSums = e.getValue();
 
             Map<String, Object> row = new LinkedHashMap<>();
-            row.put("action_name", key.actionName());
-            row.put("component",   key.component());
-            for (String eqpId : eqpIdOrder) {
+            row.put("action_name", action);
+            row.put("component", component);
+            for (String eqpId : eqpIds) {
                 row.put(eqpId, round2(eqpSums.getOrDefault(eqpId, 0.0)));
             }
             table.add(row);
@@ -231,7 +241,7 @@ public class MxTrendServiceImpl implements MxTrendService {
         Map<String, Object> equipmentTotalsRow = new LinkedHashMap<>();
         equipmentTotalsRow.put("action_name", "total_sum");
         equipmentTotalsRow.put("component", null);
-        for (String eqpId : eqpIdOrder) {
+        for (String eqpId : eqpIds) {
             double sum = table.stream()
                     .mapToDouble(r -> ((Number) r.getOrDefault(eqpId, 0.0)).doubleValue())
                     .sum();
@@ -241,22 +251,24 @@ public class MxTrendServiceImpl implements MxTrendService {
 
         // 각 행의 total_sum (행 합계)
         for (Map<String, Object> row : table) {
-            double sumOfRow = eqpIdOrder.stream()
+            double sumOfRow = eqpIds.stream()
                     .mapToDouble(e -> ((Number) row.getOrDefault(e, 0.0)).doubleValue())
                     .sum();
             row.put("total_sum", round2(sumOfRow));
         }
 
-        // Daily_MAction 수(설비별 count) 행
-        Map<String, Long> dailyCountByEqp = rows.stream()
+        // Daily_MAction 수(설비별 count)
+        Map<String, Long> dailyCountByEqp = mxHist.stream()
                 .filter(r -> "Daily_MAction".equals(r.getActionName()))
-                .collect(Collectors.groupingBy(MxHistoryRow::getEqpId, LinkedHashMap::new, Collectors.counting()));
+                .collect(Collectors.groupingBy(
+                        MxHistoryRow::getEqpId, LinkedHashMap::new, Collectors.counting()
+                ));
 
         Map<String, Object> dailyCountRow = new LinkedHashMap<>();
         dailyCountRow.put("action_name", "daily_mx_count");
         dailyCountRow.put("component", null);
         double dailyTotal = 0.0;
-        for (String eqpId : eqpIdOrder) {
+        for (String eqpId : eqpIds) {
             double c = dailyCountByEqp.getOrDefault(eqpId, 0L).doubleValue();
             dailyCountRow.put(eqpId, c);
             dailyTotal += c;
@@ -273,12 +285,12 @@ public class MxTrendServiceImpl implements MxTrendService {
             row.put("day(min)", round2(rowTotal / denom / 60.0));
         }
 
-        // MX/day(min) 행: 설비합 / 설비별 daily count / 60
+        // MX/day(min): 설비합 / 설비별 daily count / 60
         Map<String, Object> mxPerDayMinRow = new LinkedHashMap<>();
         mxPerDayMinRow.put("action_name", "day_min");
         mxPerDayMinRow.put("component", null);
         double mxDayMinTotal = 0.0;
-        for (String eqpId : eqpIdOrder) {
+        for (String eqpId : eqpIds) {
             double s = ((Number) equipmentTotalsRow.getOrDefault(eqpId, 0.0)).doubleValue();
             double c = ((Number) dailyCountRow.getOrDefault(eqpId, 0.0)).doubleValue();
             double v = (c == 0.0) ? 0.0 : (s / c / 60.0);
@@ -290,46 +302,63 @@ public class MxTrendServiceImpl implements MxTrendService {
         mxPerDayMinRow.put("day(sec)", 0.0);
         mxPerDayMinRow.put("day(min)", 0.0);
 
-        // 라벨 치환 & 열 재배치
+        // 라벨 치환 & 열 재배치 (최종 컬럼 정렬)
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map<String, Object> row : table) {
             renameActionLabelInline(row);   // total_sum → sum
             moveTotalToAllInline(row);      // total_sum → 항목별 ALL
-            result.add(reorderColumns(row, eqpIdOrder));
+            result.add(reorderColumns(row, eqpIds));
         }
         renameActionLabelInline(dailyCountRow);     // daily_mx_count → Daily_MAction 수
         moveTotalToAllInline(dailyCountRow);
-        result.add(reorderColumns(dailyCountRow, eqpIdOrder));
+        result.add(reorderColumns(dailyCountRow, eqpIds));
 
         renameActionLabelInline(mxPerDayMinRow);    // day_min → MX/day(min)
         moveTotalToAllInline(mxPerDayMinRow);
-        result.add(reorderColumns(mxPerDayMinRow, eqpIdOrder));
+        result.add(reorderColumns(mxPerDayMinRow, eqpIds));
 
         return result;
     }
 
-    private static double round2(double v) { return Math.round(v * 100.0) / 100.0; }
+    // ===== Helpers =====
+
+    /** 소수 둘째 자리 반올림 */
+    private static double round2(double v) {
+        return Math.round(v * 100.0) / 100.0;
+    }
+
+    /** action_name 라벨 치환 */
     private static void renameActionLabelInline(Map<String, Object> row) {
         Object label = row.get("action_name");
         if ("total_sum".equals(label)) row.put("action_name", "sum");
         else if ("daily_mx_count".equals(label)) row.put("action_name", "Daily_MAction 수");
         else if ("day_min".equals(label)) row.put("action_name", "MX/day(min)");
     }
+
+    /** total_sum → 항목별 ALL */
     private static void moveTotalToAllInline(Map<String, Object> row) {
         Object total = row.remove("total_sum");
         row.put("항목별 ALL", total);
     }
-    private static Map<String, Object> reorderColumns(Map<String, Object> row, List<String> eqpIdOrder) {
+
+    /** 열 순서 고정: action_name, component, [eqp...], 항목별 ALL, day(sec), day(min) */
+    private static Map<String, Object> reorderColumns(Map<String, Object> row, List<String> eqpIds) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("action_name", row.get("action_name"));
         out.put("component",   row.get("component"));
-        for (String eqpId : eqpIdOrder) out.put(eqpId, row.getOrDefault(eqpId, 0.0));
+        for (String eqpId : eqpIds) {
+            out.put(eqpId, row.getOrDefault(eqpId, 0.0));
+        }
         out.put("항목별 ALL", row.getOrDefault("항목별 ALL", 0.0));
         out.put("day(sec)",   row.getOrDefault("day(sec)", 0.0));
         out.put("day(min)",   row.getOrDefault("day(min)", 0.0));
         return out;
     }
 }
+
+
+
+
 5) Controller – MxTrendController.java
 코드 복사
 Java
