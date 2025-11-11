@@ -174,6 +174,8 @@ public interface MxTrendService {
 Java
 
 
+
+
 package com.example.mx.application;
 
 import com.example.mx.domain.MxHistoryRow;
@@ -195,13 +197,12 @@ public class MxTrendServiceImpl implements MxTrendService {
     public List<Map<String, Object>> buildTrend(List<String> departments, String startDate, String endDate) {
         if (departments == null || departments.isEmpty()) return Collections.emptyList();
 
-        // 단 한 번의 조회 (정렬은 DB: line, eqp_id, summary_date, mx_time)
-        final List<MxHistoryRow> mxHist =
+        final List<MxHistoryRow> mxHistories =
                 mxMapper.getAllMxHistoryByDepartments(departments, startDate, endDate);
-        if (mxHist == null || mxHist.isEmpty()) return Collections.emptyList();
+        if (mxHistories == null || mxHistories.isEmpty()) return Collections.emptyList();
 
         // EQP 컬럼 목록: DB 등장 순서 유지 + 중복 제거
-        final List<String> eqpIds = mxHist.stream()
+        final List<String> eqpIds = mxHistories.stream()
                 .map(MxHistoryRow::getEqpId)
                 .filter(Objects::nonNull)
                 .distinct()
@@ -209,128 +210,157 @@ public class MxTrendServiceImpl implements MxTrendService {
 
         // 피벗 구조 만들기 (actionName+component 조합별 설비별 mxSeconds 합계 계산)
         final Map<String, Map<String, Double>> pivot = new LinkedHashMap<>();
-        for (MxHistoryRow r : mxHist) {
-            final String action = r.getActionName();
-            final String component = r.getComponent() == null ? "" : r.getComponent();
-            final String key = action + "|" + component;
+        for (MxHistoryRow historyRow : mxHistories) {
+            final String actionName = historyRow.getActionName();
+            final String component = historyRow.getComponent() == null ? "" : historyRow.getComponent();
+            final String pivotKey = actionName + "|" + component;
 
-            Map<String, Double> eqpSums = pivot.computeIfAbsent(key, k -> new LinkedHashMap<>());
-            eqpSums.merge(r.getEqpId(), r.getMxSeconds(), Double::sum);
+            Map<String, Double> equipmentSums = pivot.computeIfAbsent(pivotKey, key -> new LinkedHashMap<>());
+            equipmentSums.merge(historyRow.getEqpId(), historyRow.getMxSeconds(), Double::sum);
         }
 
         // 피벗을 리스트 형태로 변환
         final List<Map<String, Object>> table = new ArrayList<>();
-        for (Map.Entry<String, Map<String, Double>> e : pivot.entrySet()) {
-            final String key = e.getKey();
-            final int bar = key.indexOf('|');
-            final String action = bar >= 0 ? key.substring(0, bar) : key;
-            final String component = bar >= 0 ? key.substring(bar + 1) : "";
+        for (Map.Entry<String, Map<String, Double>> pivotEntry : pivot.entrySet()) {
+            final String pivotKey = pivotEntry.getKey();
+            final int separatorIndex = pivotKey.indexOf('|');
+            final String actionName = separatorIndex >= 0 ? pivotKey.substring(0, separatorIndex) : pivotKey;
+            final String component = separatorIndex >= 0 ? pivotKey.substring(separatorIndex + 1) : "";
 
-            final Map<String, Double> eqpSums = e.getValue();
+            final Map<String, Double> equipmentSums = pivotEntry.getValue();
 
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("actionName", action);
-            row.put("component", component);
+            Map<String, Object> rowMap = new LinkedHashMap<>();
+            rowMap.put("ActionName", actionName);
+            rowMap.put("component", component);
             for (String eqpId : eqpIds) {
-                row.put(eqpId, round2(eqpSums.getOrDefault(eqpId, 0.0)));
+                // 원값 유지 (최종 출력 직전에만 반올림)
+                rowMap.put(eqpId, equipmentSums.getOrDefault(eqpId, 0.0));
             }
-            table.add(row);
+            table.add(rowMap);
         }
+
+        // actionName 기준으로 재정렬
+        table.sort(Comparator.comparing(
+            row -> ((String) row.get("ActionName")).toLowerCase(),
+            Comparator.nullsLast(String::compareTo)
+        ));
 
         // 설비별 합계행(열 방향 합계): actionName = "sum"
         Map<String, Object> equipmentTotalsRow = new LinkedHashMap<>();
-        equipmentTotalsRow.put("actionName", "sum");
+        equipmentTotalsRow.put("ActionName", "sum");
         equipmentTotalsRow.put("component", null);
         for (String eqpId : eqpIds) {
-            double sum = table.stream()
-                    .mapToDouble(r -> ((Number) r.getOrDefault(eqpId, 0.0)).doubleValue())
+            double columnSum = table.stream()
+                    .mapToDouble(row -> ((Number) row.getOrDefault(eqpId, 0.0)).doubleValue())
                     .sum();
-            equipmentTotalsRow.put(eqpId, round2(sum));
+            equipmentTotalsRow.put(eqpId, columnSum); // 원값
         }
         table.add(equipmentTotalsRow);
 
         // 각 행의 합계(행 방향 합계) → rowSum
         for (Map<String, Object> row : table) {
             double rowSum = eqpIds.stream()
-                    .mapToDouble(e -> ((Number) row.getOrDefault(e, 0.0)).doubleValue())
+                    .mapToDouble(eqpId -> ((Number) row.getOrDefault(eqpId, 0.0)).doubleValue())
                     .sum();
-            row.put("rowSum", round2(rowSum));
+            row.put("rowSum", rowSum); // 원값
         }
 
         // Daily_MAction 수(설비별 count) 행: actionName = "dailyMActionCount"
-        Map<String, Long> dailyCountByEqp = mxHist.stream()
-                .filter(r -> "Daily_MAction".equals(r.getActionName()))
+        Map<String, Long> dailyCountByEqp = mxHistories.stream()
+                .filter(historyRow -> "Daily_MAction".equals(historyRow.getActionName()))
                 .collect(Collectors.groupingBy(
                         MxHistoryRow::getEqpId, LinkedHashMap::new, Collectors.counting()
                 ));
 
         Map<String, Object> dailyCountRow = new LinkedHashMap<>();
-        dailyCountRow.put("actionName", "dailyMActionCount");
+        dailyCountRow.put("ActionName", "dailyMActionCount");
         dailyCountRow.put("component", null);
-        double dailyTotal = 0.0;
+        long dailyTotalCount = 0L;
         for (String eqpId : eqpIds) {
-            double c = dailyCountByEqp.getOrDefault(eqpId, 0L).doubleValue();
-            dailyCountRow.put(eqpId, c);
-            dailyTotal += c;
+            long count = dailyCountByEqp.getOrDefault(eqpId, 0L);
+            dailyCountRow.put(eqpId, count); // 정수 유지
+            dailyTotalCount += count;
         }
-        dailyCountRow.put("rowSum", round2(dailyTotal)); // 총 카운트도 합계 칸에 표기
-        dailyCountRow.put("daySec", 0.0);
-        dailyCountRow.put("dayMin", 0.0);
+        dailyCountRow.put("rowSum", dailyTotalCount); // 정수 합
+        dailyCountRow.put("daySec", null);
+        dailyCountRow.put("dayMin", null);
 
-        // daySec, dayMin 계산 (분모 0 보호) — 각 행의 rowSum을 기준으로 계산
-        double denom = (dailyTotal == 0.0) ? 1.0 : dailyTotal;
+        // daySec, dayMin 계산 (분모 0 보호)
+        double denominator = (dailyTotalCount == 0L) ? 1.0 : (double) dailyTotalCount;
         for (Map<String, Object> row : table) {
             double rowSum = ((Number) row.getOrDefault("rowSum", 0.0)).doubleValue();
-            row.put("daySec", round2(rowSum / denom));
-            row.put("dayMin", round2(rowSum / denom / 60.0));
+            row.put("daySec", rowSum / denominator);
+            row.put("dayMin", (rowSum / denominator) / 60.0);
         }
 
         // MX/day(min) 행: 설비합 / 설비별 daily count / 60
         Map<String, Object> mxPerDayMinRow = new LinkedHashMap<>();
-        mxPerDayMinRow.put("actionName", "mxPerDayMin");
+        mxPerDayMinRow.put("ActionName", "mxPerDayMin");
         mxPerDayMinRow.put("component", null);
         double mxDayMinTotal = 0.0;
         for (String eqpId : eqpIds) {
-            double s = ((Number) equipmentTotalsRow.getOrDefault(eqpId, 0.0)).doubleValue();
-            double c = ((Number) dailyCountRow.getOrDefault(eqpId, 0.0)).doubleValue();
-            double v = (c == 0.0) ? 0.0 : (s / c / 60.0);
-            v = round2(v);
-            mxPerDayMinRow.put(eqpId, v);
-            mxDayMinTotal += v;
+            double equipmentSum = ((Number) equipmentTotalsRow.getOrDefault(eqpId, 0.0)).doubleValue();
+            long dailyCount = ((Number) dailyCountRow.getOrDefault(eqpId, 0L)).longValue();
+            double value = (dailyCount == 0L) ? 0.0 : (equipmentSum / dailyCount / 60.0);
+            mxPerDayMinRow.put(eqpId, value); // 원값
+            mxDayMinTotal += value;
         }
-        mxPerDayMinRow.put("rowSum", round2(mxDayMinTotal));
-        mxPerDayMinRow.put("daySec", 0.0);
-        mxPerDayMinRow.put("dayMin", 0.0);
+        mxPerDayMinRow.put("rowSum", mxDayMinTotal);
+        mxPerDayMinRow.put("daySec", null);
+        mxPerDayMinRow.put("dayMin", null);
 
-        // 최종 컬럼 순서 정렬: actionName, component, [eqp...], rowSum, daySec, dayMin
+        // 최종 출력: eqp/rowSum/daySec/dayMin 4자리 반올림 (count는 정수 유지, null은 그대로 유지)
         List<Map<String, Object>> result = new ArrayList<>();
-        for (Map<String, Object> row : table) {
-            result.add(reorderColumns(row, eqpIds));
-        }
-        result.add(reorderColumns(dailyCountRow, eqpIds));
-        result.add(reorderColumns(mxPerDayMinRow, eqpIds));
+        for (Map<String, Object> row : table) result.add(roundRowForOutput(row, eqpIds));
+        result.add(roundRowForOutput(dailyCountRow, eqpIds));
+        result.add(roundRowForOutput(mxPerDayMinRow, eqpIds));
 
         return result;
     }
 
     // ===== Helpers =====
 
-    private static double round2(double v) {
-        return Math.round(v * 100.0) / 100.0;
+    private static double round4(double value) {
+        return Math.round(value * 10000.0) / 10000.0;
     }
 
-    /** 열 순서 고정: actionName, component, [eqp...], rowSum, daySec, dayMin */
-    private static Map<String, Object> reorderColumns(Map<String, Object> row, List<String> eqpIds) {
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("actionName", row.get("actionName"));
-        out.put("component", row.get("component"));
+    /** 출력용 반올림: eqp계열/rowSum/daySec/dayMin은 4자리 반올림, count는 정수 유지, null은 그대로 */
+    private static Map<String, Object> roundRowForOutput(Map<String, Object> row, List<String> eqpIds) {
+        Map<String, Object> outputRow = new LinkedHashMap<>();
+        outputRow.put("ActionName", row.get("ActionName"));
+        outputRow.put("component", row.get("component"));
+
         for (String eqpId : eqpIds) {
-            out.put(eqpId, row.getOrDefault(eqpId, 0.0));
+            Object value = row.get(eqpId);
+            if (value == null) {
+                outputRow.put(eqpId, null);
+            } else if (value instanceof Integer || value instanceof Long) {
+                outputRow.put(eqpId, value);
+            } else if (value instanceof Number) {
+                outputRow.put(eqpId, round4(((Number) value).doubleValue()));
+            } else {
+                outputRow.put(eqpId, value);
+            }
         }
-        out.put("rowSum", row.getOrDefault("rowSum", 0.0));
-        out.put("daySec", row.getOrDefault("daySec", 0.0));
-        out.put("dayMin", row.getOrDefault("dayMin", 0.0));
-        return out;
+
+        Object rowSum = row.get("rowSum");
+        if (rowSum == null) {
+            outputRow.put("rowSum", null);
+        } else if (rowSum instanceof Integer || rowSum instanceof Long) {
+            outputRow.put("rowSum", rowSum);
+        } else if (rowSum instanceof Number) {
+            outputRow.put("rowSum", round4(((Number) rowSum).doubleValue()));
+        } else {
+            outputRow.put("rowSum", rowSum);
+        }
+
+        Object daySec = row.get("daySec");
+        outputRow.put("daySec", (daySec instanceof Number) ? round4(((Number) daySec).doubleValue()) : daySec);
+
+        Object dayMin = row.get("dayMin");
+        outputRow.put("dayMin", (dayMin instanceof Number) ? round4(((Number) dayMin).doubleValue()) : dayMin);
+
+        return outputRow;
     }
 }
 
