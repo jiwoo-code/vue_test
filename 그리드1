@@ -233,8 +233,8 @@ public class MxTrendServiceImpl implements MxTrendService {
             rowMap.put("ActionName", actionName);
             rowMap.put("component", component);
             for (String eqpId : eqpIds) {
-                // 원값 유지 (최종 출력 직전에만 반올림)
-                rowMap.put(eqpId, equipmentSums.getOrDefault(eqpId, 0.0));
+                // 🔸 변경된 코드: 값이 없을 때 null 반환 (0.0 대신)
+                rowMap.put(eqpId, equipmentSums.containsKey(eqpId) ? equipmentSums.get(eqpId) : null);
             }
             table.add(rowMap);
         }
@@ -251,7 +251,7 @@ public class MxTrendServiceImpl implements MxTrendService {
         equipmentTotalsRow.put("component", null);
         for (String eqpId : eqpIds) {
             double columnSum = table.stream()
-                    .mapToDouble(row -> ((Number) row.getOrDefault(eqpId, 0.0)).doubleValue())
+                    .mapToDouble(row -> toDoubleOrZero(row.get(eqpId)))
                     .sum();
             equipmentTotalsRow.put(eqpId, columnSum); // 원값
         }
@@ -260,7 +260,7 @@ public class MxTrendServiceImpl implements MxTrendService {
         // 각 행의 합계(행 방향 합계) → rowSum
         for (Map<String, Object> row : table) {
             double rowSum = eqpIds.stream()
-                    .mapToDouble(eqpId -> ((Number) row.getOrDefault(eqpId, 0.0)).doubleValue())
+                    .mapToDouble(eqpId -> toDoubleOrZero(row.get(eqpId)))
                     .sum();
             row.put("rowSum", rowSum); // 원값
         }
@@ -329,6 +329,11 @@ public class MxTrendServiceImpl implements MxTrendService {
         if (value instanceof Integer || value instanceof Long) return value;
         if (value instanceof Number) return round4(((Number) value).doubleValue());
         return value;
+    }
+
+    // 공통: null → 0.0, Number → double, 그 외 → 0.0
+    private static double toDoubleOrZero(Object value) {
+        return (value instanceof Number) ? ((Number) value).doubleValue() : 0.0;
     }
 
     /** 출력용 반올림: eqp/rowSum/daySec/dayMin은 4자리 반올림, count는 정수 유지, null 그대로 */
