@@ -237,6 +237,12 @@ public class MxTrendServiceImpl implements MxTrendService {
             table.add(row);
         }
 
+        // action_name 기준으로 재정렬
+        table.sort(Comparator.comparing(
+            row -> ((String) row.get("action_name")).toLowerCase(),
+            Comparator.nullsLast(String::compareTo)
+        ));
+
         // 설비별 합계 행(total_sum)
         Map<String, Object> equipmentTotalsRow = new LinkedHashMap<>();
         equipmentTotalsRow.put("action_name", "total_sum");
