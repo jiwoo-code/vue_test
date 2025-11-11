@@ -324,41 +324,28 @@ public class MxTrendServiceImpl implements MxTrendService {
         return Math.round(value * 10000.0) / 10000.0;
     }
 
-    /** 출력용 반올림: eqp계열/rowSum/daySec/dayMin은 4자리 반올림, count는 정수 유지, null은 그대로 */
+    private static Object roundForDisplay(Object value) {
+        if (value == null) return null;
+        if (value instanceof Integer || value instanceof Long) return value;
+        if (value instanceof Number) return round4(((Number) value).doubleValue());
+        return value;
+    }
+
+    /** 출력용 반올림: eqp/rowSum/daySec/dayMin은 4자리 반올림, count는 정수 유지, null 그대로 */
     private static Map<String, Object> roundRowForOutput(Map<String, Object> row, List<String> eqpIds) {
         Map<String, Object> outputRow = new LinkedHashMap<>();
         outputRow.put("ActionName", row.get("ActionName"));
         outputRow.put("component", row.get("component"));
 
+        // EQP별 값 반올림
         for (String eqpId : eqpIds) {
-            Object value = row.get(eqpId);
-            if (value == null) {
-                outputRow.put(eqpId, null);
-            } else if (value instanceof Integer || value instanceof Long) {
-                outputRow.put(eqpId, value);
-            } else if (value instanceof Number) {
-                outputRow.put(eqpId, round4(((Number) value).doubleValue()));
-            } else {
-                outputRow.put(eqpId, value);
-            }
+            outputRow.put(eqpId, roundForDisplay(row.get(eqpId)));
         }
 
-        Object rowSum = row.get("rowSum");
-        if (rowSum == null) {
-            outputRow.put("rowSum", null);
-        } else if (rowSum instanceof Integer || rowSum instanceof Long) {
-            outputRow.put("rowSum", rowSum);
-        } else if (rowSum instanceof Number) {
-            outputRow.put("rowSum", round4(((Number) rowSum).doubleValue()));
-        } else {
-            outputRow.put("rowSum", rowSum);
-        }
-
-        Object daySec = row.get("daySec");
-        outputRow.put("daySec", (daySec instanceof Number) ? round4(((Number) daySec).doubleValue()) : daySec);
-
-        Object dayMin = row.get("dayMin");
-        outputRow.put("dayMin", (dayMin instanceof Number) ? round4(((Number) dayMin).doubleValue()) : dayMin);
+        // 공통 규칙 적용
+        outputRow.put("rowSum", roundForDisplay(row.get("rowSum")));
+        outputRow.put("daySec", roundForDisplay(row.get("daySec")));
+        outputRow.put("dayMin", roundForDisplay(row.get("dayMin")));
 
         return outputRow;
     }
