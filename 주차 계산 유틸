@@ -1,0 +1,136 @@
+// week-utils.js
+// 일요일 시작 + 전년도 포함 주차 유틸
+// 기준: "해당 연도의 1월 1일이 포함된 주의 일요일"이 week1 시작일
+
+import dayjs from 'dayjs'
+
+/**
+ * 내부 헬퍼:
+ * year의 "week1 시작 일요일" 찾기
+ * 규칙: 해당 연도의 1월 1일이 포함된 주의 일요일
+ */
+function getSundayBasedWeek1Start(year) {
+  const jan1 = dayjs(`${year}-01-01`, 'YYYY-MM-DD')
+  const weekday = jan1.day() // 0=Sun ~ 6=Sat
+
+  // jan1이 포함된 주의 일요일
+  return jan1.subtract(weekday, 'day')
+}
+
+/**
+ * 1. 오늘이 해당 연도에서 몇 번째 week인지 구한다.
+ * 즉, "current Sunday-based week number"
+ */
+export function getCurrentSundayBasedWeek(year) {
+  const today = dayjs()
+  const targetYear = year || today.year()
+
+  const week1Sunday = getSundayBasedWeek1Start(targetYear)
+  const daysSinceWeek1 = today.diff(week1Sunday, 'day')
+
+  // 0~6 → week1
+  // 7~13 → week2 ...
+  return Math.floor(daysSinceWeek1 / 7) + 1
+}
+
+/**
+ * 2. 오늘까지의 주차 배열 생성
+ * 결과 예: ['w1', 'w2', ..., 'w45']
+ */
+export function getSundayBasedWeeksUntilToday(year) {
+  const currentYear = year || dayjs().year()
+  const currentWeek = getCurrentSundayBasedWeek(currentYear)
+
+  return Array.from(
+    { length: currentWeek },
+    (_, index) => `w${index + 1}`
+  )
+}
+
+/**
+ * 3. 특정 날짜 범위(startDate~endDate)에 포함되는 주차 배열 반환
+ * 결과 예: ['w3', 'w4', 'w5']
+ */
+export function getSundayBasedWeeksInDateRange(year, startDateStr, endDateStr) {
+  const targetYear = year
+  const startDate = dayjs(startDateStr, 'YYYY-MM-DD')
+  const endDate = dayjs(endDateStr, 'YYYY-MM-DD')
+
+  const week1Sunday = getSundayBasedWeek1Start(targetYear)
+
+  const maxWeeks = 60 // 충분한 범위
+
+  const matched = []
+
+  for (let index = 0; index < maxWeeks; index += 1) {
+    const weekStart = week1Sunday.add(index * 7, 'day')
+    const weekEnd = weekStart.add(6, 'day')
+
+    const overlaps =
+      weekEnd.isSameOrAfter(startDate, 'day') &&
+      weekStart.isSameOrBefore(endDate, 'day')
+
+    if (overlaps) {
+      matched.push(`w${index + 1}`)
+    }
+  }
+
+  return matched
+}
+
+/**
+ * 4. 주차 또는 주차 배열 → 해당 날짜 범위 반환
+ * 입력: 'w3' 또는 ['w3', 'w4']
+ * 반환: { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
+ */
+export function getSundayBasedDateRangeForWeeks(year, weekInputs) {
+  if (!weekInputs) return null
+
+  const weekList = Array.isArray(weekInputs) ? weekInputs : [weekInputs]
+
+  const targetYear = year
+  const week1Sunday = getSundayBasedWeek1Start(targetYear)
+
+  let minStart = null
+  let maxEnd = null
+
+  weekList.forEach((weekStr) => {
+    const num = parseInt(weekStr.toLowerCase().replace('w', ''), 10)
+    if (!num || num <= 0) return
+
+    const weekStart = week1Sunday.add((num - 1) * 7, 'day')
+    const weekEnd = weekStart.add(6, 'day')
+
+    if (!minStart || weekStart.isBefore(minStart)) minStart = weekStart
+    if (!maxEnd || weekEnd.isAfter(maxEnd)) maxEnd = weekEnd
+  })
+
+  if (!minStart || !maxEnd) return null
+
+  return {
+    startDate: minStart.format('YYYY-MM-DD'),
+    endDate: maxEnd.format('YYYY-MM-DD')
+  }
+}
+
+
+
+
+ㅡㅡㅡㅡㅡㅡㅡ
+
+
+import {
+  getCurrentSundayBasedWeek,
+  getSundayBasedWeeksUntilToday,
+  getSundayBasedWeeksInDateRange,
+  getSundayBasedDateRangeForWeeks
+} from '@/utils/week-utils'
+
+created() {
+  const year = this.$dayjs().year()
+
+  this.weekOptions = getSundayBasedWeeksUntilToday(year)
+
+  const currentWeek = getCurrentSundayBasedWeek(year)
+  this.selectedWeek = `w${currentWeek - 1}` // 직전 주차 선택
+}
