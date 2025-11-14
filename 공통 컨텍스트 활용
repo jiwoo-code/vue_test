@@ -414,3 +414,56 @@ public class MxTrendServiceImpl implements MxTrendService {
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * 결과 리스트 정렬 함수
+ * - yearWeek가 있으면: actionName → component → yearWeek 순
+ * - yearWeek가 없으면: actionName → component 순
+ */
+private List<Map<String, Object>> sortTrendRows(List<Map<String, Object>> rows) {
+
+    if (rows == null || rows.isEmpty()) {
+        return rows;
+    }
+
+    boolean hasYearWeek = rows.stream().anyMatch(row -> row.get("yearWeek") != null);
+
+    // 공통 comparator: actionName → component
+    Comparator<Map<String, Object>> baseComparator =
+        Comparator.<Map<String, Object>, String>comparing(
+                row -> (String) row.get("actionName"),
+                Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)
+        ).thenComparing(
+                row -> (String) row.get("component"),
+                Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)
+        );
+
+    if (hasYearWeek) {
+        // yearWeek까지 추가 정렬
+        baseComparator = baseComparator.thenComparing(
+                row -> (String) row.get("yearWeek"),
+                Comparator.nullsLast(String::compareTo)
+        );
+    }
+
+    rows.sort(baseComparator);
+    return rows;
+}
