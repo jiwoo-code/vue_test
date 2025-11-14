@@ -1,270 +1,194 @@
-// week-utils.js
-// 일요일 시작 + 전년도 포함 주차 유틸
-// 규칙: 해당 연도의 1월 1일이 포함된 주의 일요일이 week1 시작일
-
-import dayjs from 'dayjs'
-
-/**
- * year의 week1 시작 일요일을 반환한다.
- * 규칙: 해당 연도의 1월 1일이 포함된 주의 일요일
- */
-function getWeek1Sunday(year) {
-  const januaryFirst = dayjs(`${year}-01-01`, 'YYYY-MM-DD')
-  const weekday = januaryFirst.day()  // 0=Sun ~ 6=Sat
-  return januaryFirst.subtract(weekday, 'day')
-}
-
-/**
- * 오늘 날짜가 해당 연도에서 몇 번째 Sunday-based week인지 반환한다.
- * (내부 전용 헬퍼)
- */
-function getCurrentSundayBasedWeek(year) {
-  const today = dayjs()
-  const targetYear = year || today.year()
-
-  const week1Sunday = getWeek1Sunday(targetYear)
-  const daysSinceWeek1 = today.diff(week1Sunday, 'day')
-
-  return Math.floor(daysSinceWeek1 / 7) + 1
-}
-
-export default {
-  /**
-   * 오늘까지의 Sunday-based week 배열을 반환한다.
-   * 예: ['w1', 'w2', ..., 'w45']
-   *
-   * @param {number} year 기준 연도 (생략 시 today.year())
-   * @returns {string[]} ['w1', 'w2', ...]
-   */
-  getSundayBasedWeeksUntilToday(year) {
-    const currentYear = year || dayjs().year()
-    const currentWeek = getCurrentSundayBasedWeek(currentYear)
-
-    return Array.from(
-      { length: currentWeek },
-      (_, index) => `w${index + 1}`
-    )
-  },
-
-  /**
-   * 날짜 범위(시작일 ~ 종료일)에 포함되는 Sunday-based week 배열을 반환한다.
-   * 예: ['w3', 'w4', 'w5']
-   *
-   * @param {number} year 기준 연도
-   * @param {string} startDateStr 'YYYY-MM-DD'
-   * @param {string} endDateStr   'YYYY-MM-DD'
-   * @returns {string[]} ['wN', ...]
-   */
-  getSundayBasedWeeksInDateRange(year, startDateStr, endDateStr) {
-    const startDate = dayjs(startDateStr, 'YYYY-MM-DD')
-    const endDate = dayjs(endDateStr, 'YYYY-MM-DD')
-
-    const week1Sunday = getWeek1Sunday(year)
-    const matchedWeeks = []
-    const maxWeeks = 60
-
-    for (let index = 0; index < maxWeeks; index += 1) {
-      const weekStart = week1Sunday.add(index * 7, 'day')
-      const weekEnd = weekStart.add(6, 'day')
-
-      const overlaps =
-        weekEnd.isSameOrAfter(startDate, 'day') &&
-        weekStart.isSameOrBefore(endDate, 'day')
-
-      if (overlaps) {
-        matchedWeeks.push(`w${index + 1}`)
-      }
-    }
-
-    return matchedWeeks
-  },
-
-  /**
-   * 주차 또는 주차 배열에 해당하는 전체 날짜 범위를 반환한다.
-   * 예: { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
-   *
-   * @param {number} year 기준 연도
-   * @param {string|string[]} weekInputs 'w3' 또는 ['w3', 'w4', ...]
-   * @returns {{ startDate: string, endDate: string } | null}
-   */
-  getSundayBasedDateRangeForWeeks(year, weekInputs) {
-    if (!weekInputs) {
-      return null
-    }
-
-    const weekList = Array.isArray(weekInputs) ? weekInputs : [weekInputs]
-    const week1Sunday = getWeek1Sunday(year)
-
-    let minStart = null
-    let maxEnd = null
-
-    weekList.forEach((weekString) => {
-      const weekNumber = parseInt(String(weekString).toLowerCase().replace('w', ''), 10)
-      if (!weekNumber || weekNumber <= 0) {
-        return
-      }
-
-      const weekStart = week1Sunday.add((weekNumber - 1) * 7, 'day')
-      const weekEnd = weekStart.add(6, 'day')
-
-      if (!minStart || weekStart.isBefore(minStart)) {
-        minStart = weekStart
-      }
-      if (!maxEnd || weekEnd.isAfter(maxEnd)) {
-        maxEnd = weekEnd
-      }
-    })
-
-    if (!minStart || !maxEnd) {
-      return null
-    }
-
-    return {
-      startDate: minStart.format('YYYY-MM-DD'),
-      endDate: maxEnd.format('YYYY-MM-DD')
-    }
-  }
-}
-
-
-
-
-
-ㅡㅡㅡㅡㅡㅡㅡㅡㅡ
-
-자바용
-
-
-
 package com.example.utils;
 
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
+/**
+ * 일요일 시작(Sunday-based) 주차 계산 유틸리티.
+ * 규칙: 해당 날짜가 속한 주의 '일요일'을 기준으로 weekYear, weekNumber를 계산한다.
+ */
 public class WeekUtils {
 
     /**
-     * year의 week1 시작 일요일을 계산한다.
-     * 규칙: 해당 연도의 1월 1일이 포함된 주의 '일요일'
+     * 특정 weekYear의 week1 시작 일요일을 계산한다.
+     * 규칙: weekYear-01-01 이 포함된 주의 '일요일'
      *
-     * @param year 기준 연도
-     * @return LocalDate 해당 연도 week1의 시작 일요일
+     * @param weekYear 기준 연도
+     * @return 해당 연도의 week1 시작 일요일
      */
-    private LocalDate getWeek1Sunday(int year) {
-        LocalDate januaryFirst = LocalDate.of(year, 1, 1);
-
-        // Java: Monday=1 ~ Sunday=7
-        int dow = januaryFirst.getDayOfWeek().getValue();
-        int sundayOffset = dow % 7; // Sunday → 0
-
+    private LocalDate getWeek1Sunday(int weekYear) {
+        LocalDate januaryFirst = LocalDate.of(weekYear, 1, 1);
+        int dow = januaryFirst.getDayOfWeek().getValue(); // Monday=1 ~ Sunday=7
+        int sundayOffset = dow % 7; // Sunday -> 0
         return januaryFirst.minusDays(sundayOffset);
     }
 
     /**
-     * 오늘 날짜가 해당 연도에서 몇 번째 Sunday-based week인지 반환한다.
-     * week1은 해당 연도의 1월 1일이 포함된 주의 일요일을 기준으로 계산된다.
+     * (weekYear, weekNumber)에 해당하는 주차 정보를 생성한다.
      *
-     * @param year optional (null이면 LocalDate.now().getYear() 사용)
-     * @return int Sunday-based week index (1부터 시작)
+     * @param weekYear   기준 연도
+     * @param weekNumber 1 이상인 주차 번호
+     * @return WeekInfo (weekYear, weekNumber, startDate, endDate)
      */
-    public int getCurrentSundayBasedWeek(Integer year) {
-        LocalDate today = LocalDate.now();
-        int targetYear = (year == null ? today.getYear() : year);
+    private WeekInfo buildWeekInfo(int weekYear, int weekNumber) {
+        LocalDate week1Sunday = getWeek1Sunday(weekYear);
+        LocalDate weekStart = week1Sunday.plusDays((long) (weekNumber - 1) * 7);
+        LocalDate weekEnd = weekStart.plusDays(6);
 
-        LocalDate week1Sunday = getWeek1Sunday(targetYear);
-        long daysSinceWeek1 = ChronoUnit.DAYS.between(week1Sunday, today);
-
-        return (int) (daysSinceWeek1 / 7) + 1;
+        return new WeekInfo(
+            weekYear,
+            weekNumber,
+            weekStart.toString(),
+            weekEnd.toString()
+        );
     }
 
     /**
-     * 오늘까지의 모든 Sunday-based week 목록을 반환한다.
-     * 결과 예: ["w1", "w2", "w3", ..., "w46"]
+     * LocalDate 기준으로 Sunday 기반 WeekInfo를 계산한다.
      *
-     * @param year optional (null이면 올해 사용)
-     * @return List<String> "w1", "w2" ... 형태의 주차 리스트
+     * @param date 대상 날짜
+     * @return 대상 날짜가 속한 주의 WeekInfo
      */
-    public List<String> getSundayBasedWeeksUntilToday(Integer year) {
-        int targetYear = (year == null ? LocalDate.now().getYear() : year);
-        int currentWeek = getCurrentSundayBasedWeek(targetYear);
+    private WeekInfo getWeekInfoFromDate(LocalDate date) {
+        int dateYear = date.getYear();
+        int dow = date.getDayOfWeek().getValue();
+        int sundayOffset = dow % 7;
+        LocalDate weekStart = date.minusDays(sundayOffset);
 
-        List<String> weeks = new ArrayList<>();
-        for (int i = 1; i <= currentWeek; i++) {
-            weeks.add("w" + i);
+        LocalDate week1ThisYear = getWeek1Sunday(dateYear);
+        LocalDate week1NextYear = getWeek1Sunday(dateYear + 1);
+
+        int weekYear;
+        if (weekStart.isBefore(week1ThisYear)) {
+            weekYear = dateYear - 1;
+        } else if (!weekStart.isBefore(week1NextYear)) {
+            weekYear = dateYear + 1;
+        } else {
+            weekYear = dateYear;
         }
-        return weeks;
+
+        LocalDate week1Start = getWeek1Sunday(weekYear);
+        long daysDiff = ChronoUnit.DAYS.between(week1Start, weekStart);
+        int weekNumber = (int) (daysDiff / 7) + 1;
+
+        return buildWeekInfo(weekYear, weekNumber);
     }
 
     /**
-     * 날짜 범위가 포함하는 모든 Sunday-based week 문자열 목록을 반환한다.
+     * 날짜 문자열(YYYY-MM-DD)에 대해 Sunday 기반 WeekInfo를 계산한다.
      *
-     * - 특정 날짜가 어느 주차에 속하는지 판정
-     * - 범위에 걸친 모든 주차 반환
-     * - 규칙: week1은 해당 연도 1월 1일이 포함된 주의 일요일 기준
-     *
-     * @param startDateStr "YYYY-MM-DD"
-     * @param endDateStr   "YYYY-MM-DD"
-     * @param year optional (null이면 startDateStr 기준의 연도 사용)
-     * @return List<String> → ["w12", "w13", "w14"] 같은 주차 배열
+     * @param dateStr "YYYY-MM-DD" 형식의 날짜 문자열
+     * @return 해당 날짜가 속한 주차의 WeekInfo (weekYear, weekNumber, startDate, endDate)
      */
-    public List<String> getSundayBasedWeeksInDateRange(String startDateStr,
-                                                       String endDateStr,
-                                                       Integer year) {
+    public WeekInfo getSundayWeekInfoOfDate(String dateStr) {
+        LocalDate date = LocalDate.parse(dateStr);
+        return getWeekInfoFromDate(date);
+    }
 
+    /**
+     * 날짜 문자열(YYYY-MM-DD)에 대해 Sunday 기반 weekYear/weekNumber만 계산한다.
+     *
+     * @param dateStr "YYYY-MM-DD" 형식의 날짜 문자열
+     * @return SundayWeek (weekYear, weekNumber)
+     */
+    public SundayWeek getSundayWeekOfDate(String dateStr) {
+        WeekInfo info = getSundayWeekInfoOfDate(dateStr);
+        return new SundayWeek(info.weekYear, info.weekNumber);
+    }
+
+    /**
+     * 오늘 날짜까지의 Sunday 기반 주차 목록을 반환한다.
+     * 오늘이 속한 weekYear 기준으로 1주차부터 오늘이 속한 주차까지 생성한다.
+     *
+     * @return 오늘이 속한 week까지의 WeekInfo 리스트
+     */
+    public List<WeekInfo> getSundayWeeksUntilToday() {
+        LocalDate today = LocalDate.now();
+        WeekInfo current = getWeekInfoFromDate(today);
+
+        List<WeekInfo> result = new ArrayList<>();
+        for (int weekNumber = 1; weekNumber <= current.weekNumber; weekNumber++) {
+            result.add(buildWeekInfo(current.weekYear, weekNumber));
+        }
+        return result;
+    }
+
+    /**
+     * 날짜 범위(시작일 ~ 종료일)에 포함되는 모든 Sunday 기반 주차에 대해
+     * weekYear, weekNumber, startDate, endDate 를 함께 반환한다.
+     * 범위가 여러 해에 걸쳐도 모두 포함된다.
+     *
+     * @param startDateStr "YYYY-MM-DD" 형식의 시작일
+     * @param endDateStr   "YYYY-MM-DD" 형식의 종료일
+     * @return 주차 정보 리스트 (WeekInfo), 날짜 범위와 겹치는 모든 주차 포함
+     */
+    public List<WeekInfo> getSundayWeeksInDateRange(String startDateStr, String endDateStr) {
+        return getSundayWeeksInDateRange(startDateStr, endDateStr, null);
+    }
+
+    /**
+     * 날짜 범위(시작일 ~ 종료일)에 포함되는 Sunday 기반 주차 정보를 반환한다.
+     * fixedYear가 지정되면 해당 연도의 주차만 필터링한다.
+     *
+     * @param startDateStr "YYYY-MM-DD" 형식의 시작일
+     * @param endDateStr   "YYYY-MM-DD" 형식의 종료일
+     * @param fixedYear    특정 연도만 포함하고 싶을 때 사용하는 연도 (null 이면 전체 연도 포함)
+     * @return 주차 정보 리스트 (WeekInfo), 조건에 맞는 모든 주차 포함
+     */
+    public List<WeekInfo> getSundayWeeksInDateRange(String startDateStr,
+                                                    String endDateStr,
+                                                    Integer fixedYear) {
         LocalDate startDate = LocalDate.parse(startDateStr);
         LocalDate endDate = LocalDate.parse(endDateStr);
 
-        int targetYear = (year == null ? startDate.getYear() : year);
-        LocalDate week1Sunday = getWeek1Sunday(targetYear);
+        List<WeekInfo> result = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
 
-        List<String> matchedWeeks = new ArrayList<>();
-        int maxWeeks = 60;
+        int dow = startDate.getDayOfWeek().getValue();
+        int sundayOffset = dow % 7;
+        LocalDate weekStart = startDate.minusDays(sundayOffset); // 시작일이 속한 주의 일요일
 
-        for (int index = 0; index < maxWeeks; index++) {
-            LocalDate weekStart = week1Sunday.plusDays(index * 7L);
-            LocalDate weekEnd = weekStart.plusDays(6);
+        while (!weekStart.isAfter(endDate)) {
+            WeekInfo info = getWeekInfoFromDate(weekStart);
 
-            boolean overlaps =
-                !weekEnd.isBefore(startDate) &&
-                !weekStart.isAfter(endDate);
-
-            if (overlaps) {
-                matchedWeeks.add("w" + (index + 1));
+            if (fixedYear == null || info.weekYear == fixedYear) {
+                String key = info.weekYear + "-" + info.weekNumber;
+                if (!seen.contains(key)) {
+                    seen.add(key);
+                    result.add(info);
+                }
             }
+
+            weekStart = weekStart.plusDays(7);
         }
-        return matchedWeeks;
+
+        return result;
     }
 
     /**
-     * 여러 주차(wN → N)를 입력받아 해당되는 전체 날짜 범위를 반환한다.
-     * 
-     * 사용 예:
-     *   ["w3", "w4"] → 3주차 시작일 ~ 4주차 종료일
+     * 여러 SundayWeek(weekYear, weekNumber)에 대해 전체 날짜 범위를 계산한다.
+     * 주어진 모든 주차의 시작일 중 가장 이른 날짜와, 종료일 중 가장 늦은 날짜를 반환한다.
      *
-     * @param weekInputs ["w3"] 또는 ["w3","w4","w5"] 또는 단일 "w3" 도 가능
-     * @param year optional (null이면 LocalDate.now().getYear())
-     * @return DateRange { startDate: "YYYY-MM-DD", endDate: "YYYY-MM-DD" }
+     * @param weeks SundayWeek 리스트
+     * @return DateRange (startDate, endDate), 주차 리스트가 비어 있으면 null
      */
-    public DateRange getSundayBasedDateRangeForWeeks(List<String> weekInputs, Integer year) {
-
-        if (weekInputs == null || weekInputs.isEmpty()) {
+    public DateRange getSundayDateRangeForWeeks(List<SundayWeek> weeks) {
+        if (weeks == null || weeks.isEmpty()) {
             return null;
         }
-
-        int targetYear = (year == null ? LocalDate.now().getYear() : year);
-        LocalDate week1Sunday = getWeek1Sunday(targetYear);
 
         LocalDate minStart = null;
         LocalDate maxEnd = null;
 
-        for (String weekStr : weekInputs) {
-            int weekNumber = Integer.parseInt(weekStr.toLowerCase().replace("w", ""));
-            if (weekNumber <= 0) continue;
+        for (SundayWeek week : weeks) {
+            if (week == null) {
+                continue;
+            }
 
-            LocalDate weekStart = week1Sunday.plusDays((weekNumber - 1L) * 7);
-            LocalDate weekEnd = weekStart.plusDays(6);
+            WeekInfo info = buildWeekInfo(week.weekYear, week.weekNumber);
+            LocalDate weekStart = LocalDate.parse(info.startDate);
+            LocalDate weekEnd = LocalDate.parse(info.endDate);
 
             if (minStart == null || weekStart.isBefore(minStart)) {
                 minStart = weekStart;
@@ -282,9 +206,83 @@ public class WeekUtils {
     }
 
     /**
-     * 날짜 범위를 담는 DTO
+     * WeekInfo -> "yyyy_wNN" 문자열로 포맷한다.
+     * 예: 2024년 1주차 -> "2024_w01"
      *
-     * @return startDate, endDate 두 값을 포함하는 단순 객체
+     * @param info 대상 WeekInfo
+     * @return "yyyy_wNN" 형식 문자열. info가 null이면 빈 문자열 반환
+     */
+    public String formatWeekLabel(WeekInfo info) {
+        if (info == null) {
+            return "";
+        }
+        String padded = String.format("%02d", info.weekNumber);
+        return info.weekYear + "_w" + padded;
+    }
+
+    /**
+     * 여러 WeekInfo -> ["yyyy_wNN", ...] 문자열 리스트로 변환한다.
+     *
+     * @param infos WeekInfo 리스트
+     * @return 각 WeekInfo를 "yyyy_wNN" 형식으로 변환한 문자열 리스트
+     */
+    public List<String> formatWeekLabels(List<WeekInfo> infos) {
+        List<String> result = new ArrayList<>();
+        if (infos == null) {
+            return result;
+        }
+        for (WeekInfo info : infos) {
+            result.add(formatWeekLabel(info));
+        }
+        return result;
+    }
+
+    /**
+     * "yyyy_wNN" 문자열을 파싱하여 해당 주차의 WeekInfo를 반환한다.
+     * 예: "2024_w51" -> 2024년 51주차의 weekYear, weekNumber, startDate, endDate
+     *
+     * @param label "yyyy_wNN" 형식 문자열
+     * @return WeekInfo (weekYear, weekNumber, startDate, endDate)
+     * @throws IllegalArgumentException 형식이 맞지 않거나 주차 번호가 1보다 작은 경우
+     */
+    public WeekInfo parseWeekLabel(String label) {
+        if (label == null) {
+            throw new IllegalArgumentException("label must not be null");
+        }
+
+        String trimmed = label.trim();
+        if (!trimmed.matches("^\\d{4}_w\\d{1,2}$")) {
+            throw new IllegalArgumentException("Invalid week label: " + label);
+        }
+
+        String[] parts = trimmed.split("_w");
+        int weekYear = Integer.parseInt(parts[0]);
+        int weekNumber = Integer.parseInt(parts[1]);
+
+        if (weekNumber <= 0) {
+            throw new IllegalArgumentException("Invalid week number in label: " + label);
+        }
+
+        return buildWeekInfo(weekYear, weekNumber);
+    }
+
+    /**
+     * weekYear/weekNumber만 필요할 때 사용하는 DTO.
+     * 예: 2024년 52주차 -> weekYear=2024, weekNumber=52
+     */
+    public static class SundayWeek {
+        public final int weekYear;
+        public final int weekNumber;
+
+        public SundayWeek(int weekYear, int weekNumber) {
+            this.weekYear = weekYear;
+            this.weekNumber = weekNumber;
+        }
+    }
+
+    /**
+     * 날짜 범위를 표현하는 DTO.
+     * 예: startDate=2024-12-22, endDate=2025-01-04
      */
     public static class DateRange {
         public final String startDate;
@@ -295,4 +293,311 @@ public class WeekUtils {
             this.endDate = endDate;
         }
     }
+
+    /**
+     * weekYear, weekNumber, startDate, endDate를 모두 포함하는 DTO.
+     * 한 주차에 대한 모든 정보를 담는다.
+     */
+    public static class WeekInfo {
+        public final int weekYear;
+        public final int weekNumber;
+        public final String startDate;
+        public final String endDate;
+
+        public WeekInfo(int weekYear, int weekNumber, String startDate, String endDate) {
+            this.weekYear = weekYear;
+            this.weekNumber = weekNumber;
+            this.startDate = startDate;
+            this.endDate = endDate;
+        }
+    }
+}
+
+
+
+
+ㅡㅡㅡㅡㅡㅡㅡㅡ
+
+
+
+// week-utils.js
+// 일요일 시작 + 전년도 포함 Sunday-based Week 유틸
+// 규칙: 해당 날짜가 속한 주의 '일요일'을 기준으로 weekYear, weekNumber를 계산
+
+import dayjs from 'dayjs'
+
+/**
+ * 특정 weekYear의 week1 시작 일요일을 반환한다.
+ * 규칙: weekYear-01-01 이 포함된 주의 일요일
+ *
+ * @param {number} weekYear 기준 연도
+ * @returns {import('dayjs').Dayjs} week1 일요일(dayjs 객체)
+ */
+function getWeek1Sunday(weekYear) {
+  const januaryFirst = dayjs(`${weekYear}-01-01`, 'YYYY-MM-DD')
+  const weekday = januaryFirst.day() // 0=Sun ~ 6=Sat
+  return januaryFirst.subtract(weekday, 'day')
+}
+
+/**
+ * (weekYear, weekNumber)에 해당하는 주차 정보를 생성한다.
+ *
+ * @param {number} weekYear 기준 연도
+ * @param {number} weekNumber 1 이상인 주차 번호
+ * @returns {{ weekYear: number, weekNumber: number, startDate: string, endDate: string }}
+ *          weekYear, weekNumber, startDate(YYYY-MM-DD), endDate(YYYY-MM-DD)를 포함한 WeekInfo
+ */
+function createWeekInfo(weekYear, weekNumber) {
+  const week1Sunday = getWeek1Sunday(weekYear)
+  const weekStart = week1Sunday.add((weekNumber - 1) * 7, 'day')
+  const weekEnd = weekStart.add(6, 'day')
+
+  return {
+    weekYear,
+    weekNumber,
+    startDate: weekStart.format('YYYY-MM-DD'),
+    endDate: weekEnd.format('YYYY-MM-DD')
+  }
+}
+
+/**
+ * Dayjs 날짜를 Sunday 기반 WeekInfo로 변환한다.
+ *
+ * @param {import('dayjs').Dayjs} date 대상 dayjs 날짜 객체
+ * @returns {{ weekYear: number, weekNumber: number, startDate: string, endDate: string }}
+ *          해당 날짜가 속한 주차의 WeekInfo
+ */
+function getWeekInfoFromDate(date) {
+  const dateYear = date.year()
+  const weekday = date.day() // 0=Sun ~ 6=Sat
+  const weekStart = date.subtract(weekday, 'day') // 해당 주의 일요일
+
+  const week1ThisYear = getWeek1Sunday(dateYear)
+  const week1NextYear = getWeek1Sunday(dateYear + 1)
+
+  let weekYear
+  if (weekStart.isBefore(week1ThisYear, 'day')) {
+    weekYear = dateYear - 1
+  } else if (!weekStart.isBefore(week1NextYear, 'day')) {
+    weekYear = dateYear + 1
+  } else {
+    weekYear = dateYear
+  }
+
+  const week1Start = getWeek1Sunday(weekYear)
+  const daysDiff = weekStart.diff(week1Start, 'day')
+  const weekNumber = Math.floor(daysDiff / 7) + 1
+
+  return createWeekInfo(weekYear, weekNumber)
+}
+
+export default {
+  /**
+   * 특정 날짜(YYYY-MM-DD)가 속한 Sunday 기반 주차의 WeekInfo를 반환한다.
+   *
+   * @param {string} dateStr 'YYYY-MM-DD' 형식의 날짜 문자열
+   * @returns {{ weekYear: number, weekNumber: number, startDate: string, endDate: string }}
+   *          해당 날짜가 속한 주차의 WeekInfo
+   */
+  getSundayWeekInfoOfDate(dateStr) {
+    const date = dayjs(dateStr, 'YYYY-MM-DD')
+    if (!date.isValid()) {
+      throw new Error(`Invalid date string: ${dateStr}`)
+    }
+    return getWeekInfoFromDate(date)
+  },
+
+  /**
+   * 특정 날짜(YYYY-MM-DD)가 속한 Sunday 기반 주차의 연도/주차 번호만 반환한다.
+   *
+   * @param {string} dateStr 'YYYY-MM-DD' 형식의 날짜 문자열
+   * @returns {{ weekYear: number, weekNumber: number }}
+   *          weekYear, weekNumber만 포함한 객체
+   */
+  getSundayWeekOfDate(dateStr) {
+    const info = this.getSundayWeekInfoOfDate(dateStr)
+    return {
+      weekYear: info.weekYear,
+      weekNumber: info.weekNumber
+    }
+  },
+
+  /**
+   * 오늘 날짜까지의 Sunday 기반 주차 목록을 반환한다.
+   * 오늘이 속한 weekYear 기준으로 1주차부터 오늘이 속한 주차까지 생성한다.
+   *
+   * @returns {{ weekYear: number, weekNumber: number, startDate: string, endDate: string }[]}
+   *          오늘이 속한 주차까지의 WeekInfo 리스트
+   */
+  getSundayWeeksUntilToday() {
+    const todayInfo = getWeekInfoFromDate(dayjs())
+    const { weekYear, weekNumber } = todayInfo
+    const result = []
+
+    for (let index = 1; index <= weekNumber; index += 1) {
+      const weekInfo = createWeekInfo(weekYear, index)
+      result.push({
+        weekYear: weekInfo.weekYear,
+        weekNumber: weekInfo.weekNumber,
+        startDate: weekInfo.startDate,
+        endDate: weekInfo.endDate
+      })
+    }
+
+    return result
+  },
+
+  /**
+   * 날짜 범위(시작일 ~ 종료일)에 포함되는 모든 Sunday 기반 주차에 대해
+   * weekYear, weekNumber, startDate, endDate 를 함께 반환한다.
+   * 범위가 여러 해에 걸쳐도 모두 포함된다.
+   *
+   * 예:
+   *   '2024-12-15' ~ '2025-01-10' ->
+   *   [
+   *     { weekYear: 2024, weekNumber: 51, startDate: '2024-12-15', endDate: '2024-12-21' },
+   *     { weekYear: 2024, weekNumber: 52, startDate: '2024-12-22', endDate: '2024-12-28' },
+   *     { weekYear: 2025, weekNumber: 1,  startDate: '2024-12-29', endDate: '2025-01-04' },
+   *     ...
+   *   ]
+   *
+   * @param {string} startDateStr 'YYYY-MM-DD' 형식의 시작일
+   * @param {string} endDateStr   'YYYY-MM-DD' 형식의 종료일
+   * @returns {{ weekYear: number, weekNumber: number, startDate: string, endDate: string }[]}
+   *          날짜 범위와 겹치는 모든 주차의 WeekInfo 리스트
+   */
+  getSundayWeeksInDateRange(startDateStr, endDateStr) {
+    const startDate = dayjs(startDateStr, 'YYYY-MM-DD')
+    const endDate = dayjs(endDateStr, 'YYYY-MM-DD')
+
+    if (!startDate.isValid() || !endDate.isValid()) {
+      throw new Error('Invalid startDateStr or endDateStr')
+    }
+
+    const result = []
+    const seenKeys = new Set()
+
+    const startWeekday = startDate.day()
+    let weekStart = startDate.subtract(startWeekday, 'day')
+
+    while (weekStart.isSameOrBefore(endDate, 'day')) {
+      const weekInfo = getWeekInfoFromDate(weekStart)
+      const key = `${weekInfo.weekYear}-${weekInfo.weekNumber}`
+
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key)
+        result.push(weekInfo)
+      }
+
+      weekStart = weekStart.add(7, 'day')
+    }
+
+    return result
+  },
+
+  /**
+   * 여러 Sunday 기반 주차(weekYear, weekNumber 또는 WeekInfo) 목록에 대해
+   * 전체 날짜 범위를 계산한다.
+   * 주차 목록의 시작일 중 가장 이른 날짜와 종료일 중 가장 늦은 날짜를 반환한다.
+   *
+   * @param {{ weekYear: number, weekNumber: number }[]} weeks
+   *        weekYear, weekNumber를 포함한 객체 배열
+   * @returns {{ startDate: string, endDate: string } | null}
+   *          전체 구간의 시작일/종료일(YYYY-MM-DD).
+   *          유효한 주차가 없으면 null.
+   */
+  getSundayDateRangeForWeeks(weeks) {
+    if (!weeks || weeks.length === 0) {
+      return null
+    }
+
+    let minStart = null
+    let maxEnd = null
+
+    weeks.forEach((week) => {
+      if (!week || typeof week.weekYear !== 'number' || typeof week.weekNumber !== 'number') {
+        return
+      }
+
+      const weekInfo = createWeekInfo(week.weekYear, week.weekNumber)
+      const weekStart = dayjs(weekInfo.startDate, 'YYYY-MM-DD')
+      const weekEnd = dayjs(weekInfo.endDate, 'YYYY-MM-DD')
+
+      if (!minStart || weekStart.isBefore(minStart, 'day')) {
+        minStart = weekStart
+      }
+      if (!maxEnd || weekEnd.isAfter(maxEnd, 'day')) {
+        maxEnd = weekEnd
+      }
+    })
+
+    if (!minStart || !maxEnd) {
+      return null
+    }
+
+    return {
+      startDate: minStart.format('YYYY-MM-DD'),
+      endDate: maxEnd.format('YYYY-MM-DD')
+    }
+  },
+
+  /**
+   * WeekInfo -> 'yyyy_w주차' 문자열 포맷으로 변환한다.
+   * 예: { weekYear: 2024, weekNumber: 1 } -> '2024_w01'
+   *
+   * @param {{ weekYear: number, weekNumber: number }} week WeekInfo 또는 SundayWeek 형태의 객체
+   * @returns {string} 'yyyy_wNN' 형식 문자열. week가 유효하지 않으면 빈 문자열
+   */
+  formatWeekLabel(week) {
+    if (!week || typeof week.weekYear !== 'number' || typeof week.weekNumber !== 'number') {
+      return ''
+    }
+    const padded = String(week.weekNumber).padStart(2, '0')
+    return `${week.weekYear}_w${padded}`
+  },
+
+  /**
+   * 여러 WeekInfo -> ['yyyy_wNN', ...] 문자열 배열로 변환한다.
+   *
+   * @param {{ weekYear: number, weekNumber: number }[]} weeks WeekInfo 또는 SundayWeek 배열
+   * @returns {string[]} 각 요소를 'yyyy_wNN' 형식으로 변환한 문자열 배열
+   */
+  formatWeekLabels(weeks) {
+    if (!Array.isArray(weeks)) {
+      return []
+    }
+    return weeks.map((week) => this.formatWeekLabel(week))
+  },
+
+  /**
+   * 'yyyy_w주차' 포맷 문자열을 파싱하여 WeekInfo를 반환한다.
+   *
+   * 예:
+   *   '2024_w51' ->
+   *   {
+   *     weekYear: 2024,
+   *     weekNumber: 51,
+   *     startDate: '2024-12-15',
+   *     endDate: '2024-12-21'
+   *   }
+   *
+   * @param {string} label 'yyyy_wNN' 형식 문자열
+   * @returns {{ weekYear: number, weekNumber: number, startDate: string, endDate: string }}
+   *          파싱된 WeekInfo (weekYear, weekNumber, 시작일, 종료일)
+   */
+  parseWeekLabelToRange(label) {
+    const match = /^(\d{4})_w(\d{1,2})$/.exec(label)
+    if (!match) {
+      throw new Error(`Invalid week label: ${label}`)
+    }
+
+    const weekYear = parseInt(match[1], 10)
+    const weekNumber = parseInt(match[2], 10)
+
+    if (!weekYear || !weekNumber || weekNumber <= 0) {
+      throw new Error(`Invalid week label values: ${label}`)
+    }
+
+    return createWeekInfo(weekYear, weekNumber)
+  }
 }
