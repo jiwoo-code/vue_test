@@ -1,0 +1,416 @@
+package com.example.mx.application;
+
+import com.example.mx.domain.MxHistoryRow;
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.stereotype.Service;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+@Service
+public class MxTrendServiceImpl implements MxTrendService {
+
+    private final MxMapper mxMapper;
+
+    public MxTrendServiceImpl(MxMapper mxMapper) {
+        this.mxMapper = mxMapper;
+    }
+
+    // =====================================================
+    //                    Public APIs
+    // =====================================================
+
+    /**
+     * 1. 전체 트렌드 테이블 생성 (열 + 행 모두 추가)
+     * - 열: EQP별 값 + rowSum(항목별 ALL) + daySec + dayMin
+     * - 행: 일반 action/component 행 + sum + dailyMActionCount + mxPerDayMin
+     */
+    @Override
+    public List<Map<String, Object>> buildTrend(List<String> departments, String startDate, String endDate) {
+        TrendContext trendContext = createContext(departments, startDate, endDate);
+        if (trendContext == null) {
+            return Collections.emptyList();
+        }
+
+        // 1) 기본 테이블 생성 (ActionName, component, eqpId 컬럼)
+        // 2) 열 끝 메트릭(rowSum, daySec, dayMin) + 합계행(sum) 계산
+        addSumRow(trendContext);            // 설비별 합계행(열 방향 합계): ActionName = "sum"
+        addRowSum(trendContext);            // 각 행의 합계(행 방향 합계) → rowSum
+        calculateDailyCounts(trendContext); // Daily_MAction 수(설비별, 전체) 집계
+        addDaySecAndDayMin(trendContext);   // daySec, dayMin 계산
+
+        // 3) 행 끝 메트릭 행들 추가 (dailyMActionCount, mxPerDayMin)
+        addExtraMetricRows(trendContext);   // sum 행은 이미 추가됨
+
+        // 4) 반올림 적용 (열 메트릭 포함, yearWeek는 사용하지 않음)
+        return finalizeRounded(trendContext, true, false);
+    }
+
+    /**
+     * 2. 주차 단위 트렌드 테이블 (열만 추가 + 연도+주차 포함)
+     * - 열: EQP별 값 + rowSum + daySec + dayMin + yearWeek
+     * - 행: 일반 action/component 행만 사용 (sum, dailyMActionCount, mxPerDayMin 없음)
+     */
+    @Override
+    public List<Map<String, Object>> buildWeeklyTrendColumns(
+        List<String> departments,
+        String startDate,
+        String endDate,
+        String yearWeek
+    ) {
+        TrendContext trendContext = createContext(departments, startDate, endDate);
+        if (trendContext == null) {
+            return Collections.emptyList();
+        }
+
+        addRowSum(trendContext);            // 각 행의 합계(행 방향 합계) → rowSum
+        calculateDailyCounts(trendContext); // Daily_MAction 수(설비별, 전체) 집계
+        addDaySecAndDayMin(trendContext);   // daySec, dayMin 계산
+        addYearWeek(trendContext, yearWeek);
+
+        // 열 메트릭 포함, yearWeek 포함, 행 메트릭 행들은 추가하지 않음
+        return finalizeRounded(trendContext, true, true);
+    }
+
+    /**
+     * 3. 주차 단위 트렌드 테이블 (행만 추가 + 연도+주차 포함)
+     * - 열: EQP별 값 + yearWeek
+     * - 행: 일반 action/component 행 + sum + dailyMActionCount + mxPerDayMin
+     *   (rowSum, daySec, dayMin 컬럼은 만들지 않음)
+     */
+    @Override
+    public List<Map<String, Object>> buildWeeklyTrendRows(
+        List<String> departments,
+        String startDate,
+        String endDate,
+        String yearWeek
+    ) {
+        TrendContext trendContext = createContext(departments, startDate, endDate);
+        if (trendContext == null) {
+            return Collections.emptyList();
+        }
+
+        // 행 메트릭 계산에 필요한 것만 수행
+        addSumRow(trendContext);            // 설비별 합계행(열 방향 합계)
+        calculateDailyCounts(trendContext); // Daily_MAction 수(설비별, 전체) 집계
+        addExtraMetricRows(trendContext);   // dailyMActionCount, mxPerDayMin 행 추가
+        addYearWeek(trendContext, yearWeek);
+
+        // 열 메트릭(rowSum, daySec, dayMin)은 포함하지 않고, yearWeek만 포함
+        return finalizeRounded(trendContext, false, true);
+    }
+
+    // =====================================================
+    //                 Internal Helper Methods
+    // =====================================================
+
+    /**
+     * 공통 컨텍스트 생성
+     * - departments, 기간 조건으로 mxHistories 조회
+     * - EQP 목록 추출
+     * - 피벗 생성
+     * - 기본 테이블 생성 (ActionName, component, eqpId 컬럼)
+     */
+    private TrendContext createContext(List<String> departments, String startDate, String endDate) {
+        if (departments == null || departments.isEmpty()) {
+            return null;
+        }
+
+        List<MxHistoryRow> mxHistories =
+            mxMapper.getAllMxHistoryByDepartments(departments, startDate, endDate);
+        if (mxHistories == null || mxHistories.isEmpty()) {
+            return null;
+        }
+
+        List<String> eqpIds = extractEqpIds(mxHistories);
+        Map<String, Map<String, Double>> pivot = buildPivot(mxHistories);
+        List<Map<String, Object>> table = buildBaseTable(pivot, eqpIds);
+
+        return new TrendContext(mxHistories, eqpIds, table);
+    }
+
+    // EQP 컬럼 목록: DB 등장 순서 유지 + 중복 제거
+    private List<String> extractEqpIds(List<MxHistoryRow> mxHistories) {
+        return mxHistories.stream()
+            .map(MxHistoryRow::getEqpId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+    }
+
+    // 피벗 구조 만들기 (actionName+component 조합별 설비별 mxSeconds 합계 계산)
+    // key: "actionName|component", value: (eqpId → sum(mxSeconds))
+    private Map<String, Map<String, Double>> buildPivot(List<MxHistoryRow> mxHistories) {
+        Map<String, Map<String, Double>> pivot = new LinkedHashMap<>();
+
+        for (MxHistoryRow mxHistoryRow : mxHistories) {
+            String actionName = mxHistoryRow.getActionName();
+            String component = mxHistoryRow.getComponent() == null ? "" : mxHistoryRow.getComponent();
+            String pivotKey = actionName + "|" + component;
+
+            Map<String, Double> equipmentSums = pivot.computeIfAbsent(pivotKey, key -> new LinkedHashMap<>());
+            equipmentSums.merge(mxHistoryRow.getEqpId(), mxHistoryRow.getMxSeconds(), Double::sum);
+        }
+
+        return pivot;
+    }
+
+    // 피벗을 리스트 형태로 변환
+    // - 행: ActionName, component, 각 eqpId 컬럼
+    // - 값이 없으면 null (빈 셀로 사용)
+    // - ActionName 기준 정렬
+    private List<Map<String, Object>> buildBaseTable(
+        Map<String, Map<String, Double>> pivot,
+        List<String> eqpIds
+    ) {
+        List<Map<String, Object>> table = new ArrayList<>();
+
+        for (Map.Entry<String, Map<String, Double>> pivotEntry : pivot.entrySet()) {
+            String pivotKey = pivotEntry.getKey();
+            int separatorIndex = pivotKey.indexOf('|');
+            String actionName = separatorIndex >= 0 ? pivotKey.substring(0, separatorIndex) : pivotKey;
+            String component = separatorIndex >= 0 ? pivotKey.substring(separatorIndex + 1) : "";
+
+            Map<String, Double> equipmentSums = pivotEntry.getValue();
+
+            Map<String, Object> rowMap = new LinkedHashMap<>();
+            rowMap.put("ActionName", actionName);
+            rowMap.put("component", component);
+
+            for (String eqpId : eqpIds) {
+                rowMap.put(eqpId, equipmentSums.containsKey(eqpId) ? equipmentSums.get(eqpId) : null);
+            }
+            table.add(rowMap);
+        }
+
+        // actionName 기준으로 재정렬
+        table.sort(Comparator.comparing(
+            row -> ((String) row.get("ActionName")).toLowerCase(),
+            Comparator.nullsLast(String::compareTo)
+        ));
+
+        return table;
+    }
+
+    // 설비별 합계행(열 방향 합계) 추가: ActionName = "sum"
+    private void addSumRow(TrendContext trendContext) {
+        List<String> eqpIds = trendContext.getEqpIds();
+        List<Map<String, Object>> table = trendContext.getTable();
+
+        Map<String, Object> equipmentTotalsRow = new LinkedHashMap<>();
+        equipmentTotalsRow.put("ActionName", "sum");
+        equipmentTotalsRow.put("component", null);
+
+        for (String eqpId : eqpIds) {
+            double columnSum = table.stream()
+                .mapToDouble(row -> toDoubleOrZero(row.get(eqpId)))
+                .sum();
+            equipmentTotalsRow.put(eqpId, columnSum);
+        }
+
+        table.add(equipmentTotalsRow);
+        trendContext.setEquipmentTotalsRow(equipmentTotalsRow);
+    }
+
+    // null → 0.0, Number → double, 그 외 → 0.0 (합계 계산용)
+    private double toDoubleOrZero(Object value) {
+        return (value instanceof Number) ? ((Number) value).doubleValue() : 0.0;
+    }
+
+    // 각 행의 합계(행 방향 합계) → rowSum
+    private void addRowSum(TrendContext trendContext) {
+        List<String> eqpIds = trendContext.getEqpIds();
+        List<Map<String, Object>> table = trendContext.getTable();
+
+        for (Map<String, Object> row : table) {
+            double rowSum = eqpIds.stream()
+                .mapToDouble(eqpId -> toDoubleOrZero(row.get(eqpId)))
+                .sum();
+            row.put("rowSum", rowSum);
+        }
+    }
+
+    // Daily_MAction 수(설비별 count) 집계
+    private void calculateDailyCounts(TrendContext trendContext) {
+        Map<String, Long> dailyCountByEqp = trendContext.getMxHistories().stream()
+            .filter(mxHistoryRow -> "Daily_MAction".equals(mxHistoryRow.getActionName()))
+            .collect(Collectors.groupingBy(
+                MxHistoryRow::getEqpId,
+                LinkedHashMap::new,
+                Collectors.counting()
+            ));
+
+        long dailyTotalCount = dailyCountByEqp.values().stream()
+            .mapToLong(Long::longValue)
+            .sum();
+
+        trendContext.setDailyCountByEqp(dailyCountByEqp);
+        trendContext.setDailyTotalCount(dailyTotalCount);
+    }
+
+    // daySec, dayMin 계산 (분모 0 보호)
+    // - daySec = rowSum / dailyTotalCount
+    // - dayMin = daySec / 60
+    private void addDaySecAndDayMin(TrendContext trendContext) {
+        List<Map<String, Object>> table = trendContext.getTable();
+        long dailyTotalCount = trendContext.getDailyTotalCount();
+
+        double denominator = (dailyTotalCount == 0L) ? 1.0 : (double) dailyTotalCount;
+
+        for (Map<String, Object> row : table) {
+            double rowSum = toDoubleOrZero(row.get("rowSum"));
+            row.put("daySec", rowSum / denominator);
+            row.put("dayMin", (rowSum / denominator) / 60.0);
+        }
+    }
+
+    // sum, dailyMActionCount, mxPerDayMin 행 추가
+    // - sum 행은 addSumRow에서 이미 추가
+    // - 여기서는 dailyMActionCount, mxPerDayMin 두 행만 추가
+    private void addExtraMetricRows(TrendContext trendContext) {
+        List<String> eqpIds = trendContext.getEqpIds();
+        List<Map<String, Object>> table = trendContext.getTable();
+        Map<String, Object> equipmentTotalsRow = trendContext.getEquipmentTotalsRow();
+        Map<String, Long> dailyCountByEqp = trendContext.getDailyCountByEqp();
+
+        // Daily_MAction 수(설비별 count) 행: ActionName = "dailyMActionCount"
+        Map<String, Object> dailyCountRow = new LinkedHashMap<>();
+        dailyCountRow.put("ActionName", "dailyMActionCount");
+        dailyCountRow.put("component", null);
+
+        long dailyRowSum = 0L;
+        for (String eqpId : eqpIds) {
+            long count = dailyCountByEqp.getOrDefault(eqpId, 0L);
+            dailyCountRow.put(eqpId, count);
+            dailyRowSum += count;
+        }
+        dailyCountRow.put("rowSum", dailyRowSum);
+        dailyCountRow.put("daySec", null);
+        dailyCountRow.put("dayMin", null);
+
+        // MX/day(min) 행: 설비합 / 설비별 daily count / 60
+        Map<String, Object> mxPerDayMinRow = new LinkedHashMap<>();
+        mxPerDayMinRow.put("ActionName", "mxPerDayMin");
+        mxPerDayMinRow.put("component", null);
+
+        double mxDayMinTotal = 0.0;
+        for (String eqpId : eqpIds) {
+            double equipmentSum = toDoubleOrZero(equipmentTotalsRow.get(eqpId));
+            long dailyCount = ((Number) dailyCountRow.getOrDefault(eqpId, 0L)).longValue();
+            double value = (dailyCount == 0L) ? 0.0 : (equipmentSum / dailyCount / 60.0);
+            mxPerDayMinRow.put(eqpId, value);
+            mxDayMinTotal += value;
+        }
+        mxPerDayMinRow.put("rowSum", mxDayMinTotal);
+        mxPerDayMinRow.put("daySec", null);
+        mxPerDayMinRow.put("dayMin", null);
+
+        table.add(dailyCountRow);
+        table.add(mxPerDayMinRow);
+    }
+
+    // 모든 행에 yearWeek 컬럼 추가
+    private void addYearWeek(TrendContext trendContext, String yearWeek) {
+        if (yearWeek == null) {
+            return;
+        }
+        for (Map<String, Object> row : trendContext.getTable()) {
+            row.put("yearWeek", yearWeek);
+        }
+    }
+
+    // 소수점 4자리 반올림
+    private double round4(double value) {
+        return Math.round(value * 10000.0) / 10000.0;
+    }
+
+    // 출력용 반올림 규칙
+    // - null → null
+    // - Integer/Long → 그대로 유지
+    // - Number → round4
+    // - 그 외 → 그대로
+    private Object roundForDisplay(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Integer || value instanceof Long) {
+            return value;
+        }
+        if (value instanceof Number) {
+            return round4(((Number) value).doubleValue());
+        }
+        return value;
+    }
+
+    /**
+     * 최종 결과 구성
+     * - includeColumnMetrics: rowSum / daySec / dayMin 컬럼 포함 여부
+     * - includeYearWeek: yearWeek 컬럼 포함 여부
+     */
+    private List<Map<String, Object>> finalizeRounded(
+        TrendContext trendContext,
+        boolean includeColumnMetrics,
+        boolean includeYearWeek
+    ) {
+        List<String> eqpIds = trendContext.getEqpIds();
+        List<Map<String, Object>> table = trendContext.getTable();
+
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        for (Map<String, Object> row : table) {
+            Map<String, Object> outputRow = new LinkedHashMap<>();
+            outputRow.put("ActionName", row.get("ActionName"));
+            outputRow.put("component", row.get("component"));
+
+            for (String eqpId : eqpIds) {
+                outputRow.put(eqpId, roundForDisplay(row.get(eqpId)));
+            }
+
+            if (includeColumnMetrics) {
+                outputRow.put("rowSum", roundForDisplay(row.get("rowSum")));
+                outputRow.put("daySec", roundForDisplay(row.get("daySec")));
+                outputRow.put("dayMin", roundForDisplay(row.get("dayMin")));
+            }
+
+            if (includeYearWeek && row.containsKey("yearWeek")) {
+                outputRow.put("yearWeek", row.get("yearWeek"));
+            }
+
+            result.add(outputRow);
+        }
+
+        return result;
+    }
+
+    // =====================================================
+    //                 TrendContext (Internal)
+    // =====================================================
+
+    /**
+     * 공통 계산에 사용하는 컨텍스트
+     * - mxHistories, eqpIds, table은 생성 시 고정
+     * - dailyCountByEqp, dailyTotalCount, equipmentTotalsRow는 계산 단계에서 채움
+     */
+    @Getter
+    @Setter
+    private class TrendContext {
+        private List<MxHistoryRow> mxHistories;
+        private List<String> eqpIds;
+        private List<Map<String, Object>> table;
+
+        private Map<String, Long> dailyCountByEqp;
+        private long dailyTotalCount;
+        private Map<String, Object> equipmentTotalsRow;
+
+        public TrendContext(
+            List<MxHistoryRow> mxHistories,
+            List<String> eqpIds,
+            List<Map<String, Object>> table
+        ) {
+            this.mxHistories = mxHistories;
+            this.eqpIds = eqpIds;
+            this.table = table;
+        }
+    }
+}
