@@ -540,9 +540,9 @@ private List<Map<String, Object>> sortTrendRows(List<Map<String, Object>> rows) 
     boolean hasYearWeek = rows.stream()
         .anyMatch(row -> row.get("yearWeek") != null);
 
-    // 기본 comparator
+    // 기본 comparator: actionName → component
     Comparator<Map<String, Object>> baseComparator =
-        Comparator.comparing(
+        Comparator.<Map<String, Object>, String>comparing(
                 row -> (String) row.get("actionName"),
                 Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)
         ).thenComparing(
@@ -550,25 +550,31 @@ private List<Map<String, Object>> sortTrendRows(List<Map<String, Object>> rows) 
                 Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)
         );
 
-    if (hasYearWeek) {
-        baseComparator = baseComparator.thenComparing(
-            row -> (String) row.get("yearWeek"),
-            Comparator.nullsLast(String::compareTo)
-        );
-    }
+    // yearWeek가 있으면 yearWeek까지 포함한 comparator 생성
+    Comparator<Map<String, Object>> fullComparator = hasYearWeek
+        ? baseComparator.thenComparing(
+                row -> (String) row.get("yearWeek"),
+                Comparator.nullsLast(String::compareTo)
+          )
+        : baseComparator; // 재할당 없이 한 번만 대입
 
-    // 특수행 처리 포함 최종 comparator
-    rows.sort((a, b) -> {
-        String aAct = (String) a.get("actionName");
-        String bAct = (String) b.get("actionName");
+    rows.sort((rowA, rowB) -> {
+        String actionA = (String) rowA.get("actionName");
+        String actionB = (String) rowB.get("actionName");
 
-        boolean aSpecial = specialActions.contains(aAct);
-        boolean bSpecial = specialActions.contains(bAct);
+        boolean isSpecialA = specialActions.contains(actionA);
+        boolean isSpecialB = specialActions.contains(actionB);
 
-        if (aSpecial != bSpecial) {
-            return aSpecial ? 1 : -1;   // 일반 → 특수 순
+        // 한쪽만 특수행이면 → 일반행 먼저, 특수행은 뒤로
+        if (isSpecialA && !isSpecialB) {
+            return 1;
         }
-        return baseComparator.compare(a, b);
+        if (!isSpecialA && isSpecialB) {
+            return -1;
+        }
+
+        // 둘 다 일반 or 둘 다 특수 → 기본 정렬 규칙 사용
+        return fullComparator.compare(rowA, rowB);
     });
 
     return rows;
