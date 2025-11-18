@@ -505,3 +505,71 @@ private TrendContext copyContext(TrendContext baseContext) {
 
     return new TrendContext(mxHistories, eqpIds, copiedTable);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+정렬 개선
+
+
+/**
+ * 결과 리스트 정렬
+ * - 기본: actionName → component → (yearWeek 존재 시 yearWeek)
+ * - 특수 actionName(sum, dailyMActionCount, mxPerDayMin)은 항상 마지막
+ */
+private List<Map<String, Object>> sortTrendRows(List<Map<String, Object>> rows) {
+
+    if (rows == null || rows.isEmpty()) {
+        return rows;
+    }
+
+    List<String> specialActions = Arrays.asList(
+        "sum",
+        "dailyMActionCount",
+        "mxPerDayMin"
+    );
+
+    boolean hasYearWeek = rows.stream()
+        .anyMatch(row -> row.get("yearWeek") != null);
+
+    // 기본 comparator
+    Comparator<Map<String, Object>> baseComparator =
+        Comparator.comparing(
+                row -> (String) row.get("actionName"),
+                Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)
+        ).thenComparing(
+                row -> (String) row.get("component"),
+                Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)
+        );
+
+    if (hasYearWeek) {
+        baseComparator = baseComparator.thenComparing(
+            row -> (String) row.get("yearWeek"),
+            Comparator.nullsLast(String::compareTo)
+        );
+    }
+
+    // 특수행 처리 포함 최종 comparator
+    rows.sort((a, b) -> {
+        String aAct = (String) a.get("actionName");
+        String bAct = (String) b.get("actionName");
+
+        boolean aSpecial = specialActions.contains(aAct);
+        boolean bSpecial = specialActions.contains(bAct);
+
+        if (aSpecial != bSpecial) {
+            return aSpecial ? 1 : -1;   // 일반 → 특수 순
+        }
+        return baseComparator.compare(a, b);
+    });
+
+    return rows;
+}
