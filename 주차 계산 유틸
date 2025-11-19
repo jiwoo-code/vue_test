@@ -905,3 +905,177 @@ public class WeekUtils {
         }
     }
 }
+
+
+
+
+
+ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+
+테스트코드
+
+package com.example.utils;
+
+import com.example.utils.WeekUtils.DateRange;
+import com.example.utils.WeekUtils.SundayWeek;
+import com.example.utils.WeekUtils.WeekInfo;
+import org.junit.jupiter.api.Test;
+
+import java.time.LocalDate;
+import java.util.Arrays;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class WeekUtilsTest {
+
+    private final WeekUtils weekUtils = new WeekUtils();
+
+    @Test
+    void getSundayWeekInfoOfDate_SHOULD_return_week21_for_2025_05_18() {
+        WeekInfo info = weekUtils.getSundayWeekInfoOfDate("2025-05-18");
+
+        assertEquals(2025, info.weekYear);
+        assertEquals(21, info.weekNumber);
+        assertEquals("2025-05-18", info.startDate); // 일요일
+        assertEquals("2025-05-24", info.endDate);   // 토요일
+    }
+
+    @Test
+    void getSundayWeekInfoOfDate_SHOULD_treat_2024_12_29_as_week1_of_2025() {
+        WeekInfo info = weekUtils.getSundayWeekInfoOfDate("2024-12-29");
+
+        assertEquals(2025, info.weekYear);
+        assertEquals(1, info.weekNumber);
+        assertEquals("2024-12-29", info.startDate);
+        assertEquals("2025-01-04", info.endDate);
+    }
+
+    @Test
+    void getSundayWeekOfDate_SHOULD_return_only_year_and_weekNumber() {
+        SundayWeek sundayWeek = weekUtils.getSundayWeekOfDate("2025-05-18");
+
+        assertEquals(2025, sundayWeek.weekYear);
+        assertEquals(21, sundayWeek.weekNumber);
+    }
+
+    @Test
+    void getSundayWeeksInDateRange_SHOULD_include_cross_year_weeks() {
+        // 2024-12-15(일) ~ 2025-01-10 범위
+        List<WeekInfo> weeks = weekUtils.getSundayWeeksInDateRange("2024-12-15", "2025-01-10");
+
+        assertFalse(weeks.isEmpty());
+
+        boolean has2024w51 = weeks.stream().anyMatch(w ->
+            w.weekYear == 2024 && w.weekNumber == 51 &&
+                "2024-12-15".equals(w.startDate) &&
+                "2024-12-21".equals(w.endDate)
+        );
+
+        boolean has2024w52 = weeks.stream().anyMatch(w ->
+            w.weekYear == 2024 && w.weekNumber == 52 &&
+                "2024-12-22".equals(w.startDate) &&
+                "2024-12-28".equals(w.endDate)
+        );
+
+        boolean has2025w01 = weeks.stream().anyMatch(w ->
+            w.weekYear == 2025 && w.weekNumber == 1 &&
+                "2024-12-29".equals(w.startDate) &&
+                "2025-01-04".equals(w.endDate)
+        );
+
+        assertTrue(has2024w51);
+        assertTrue(has2024w52);
+        assertTrue(has2025w01);
+    }
+
+    @Test
+    void getSundayWeeksInDateRange_SHOULD_filter_by_fixedYear_when_provided() {
+        // 같은 범위지만 2024년만 필터링
+        List<WeekInfo> weeks2024 = weekUtils.getSundayWeeksInDateRange("2024-12-15", "2025-01-10", 2024);
+
+        assertFalse(weeks2024.isEmpty());
+        assertTrue(weeks2024.stream().allMatch(w -> w.weekYear == 2024));
+    }
+
+    @Test
+    void getSundayWeeksInDateRange_SHOULD_return_single_week_when_range_within_one_week() {
+        // 2025-05-18(일) ~ 2025-05-24 가 21주차
+        // 그 안쪽 일부(월~목)만 줘도 단일 주차만 나와야 한다.
+        List<WeekInfo> weeks = weekUtils.getSundayWeeksInDateRange("2025-05-19", "2025-05-22");
+
+        assertEquals(1, weeks.size(), "단일 주차만 포함되어야 한다");
+
+        WeekInfo info = weeks.get(0);
+        assertEquals(2025, info.weekYear);
+        assertEquals(21, info.weekNumber);
+        assertEquals("2025-05-18", info.startDate);
+        assertEquals("2025-05-24", info.endDate);
+    }
+
+    @Test
+    void getSundayDateRangeForWeeks_SHOULD_return_min_start_and_max_end() {
+        List<SundayWeek> weeks = Arrays.asList(
+            new SundayWeek(2024, 52), // 2024-12-22 ~ 2024-12-28
+            new SundayWeek(2025, 1)   // 2024-12-29 ~ 2025-01-04
+        );
+
+        DateRange range = weekUtils.getSundayDateRangeForWeeks(weeks);
+
+        assertNotNull(range);
+        assertEquals("2024-12-22", range.startDate);
+        assertEquals("2025-01-04", range.endDate);
+    }
+
+    @Test
+    void formatWeekLabel_and_parseWeekLabel_SHOULD_be_round_trip() {
+        WeekInfo original = weekUtils.getSundayWeekInfoOfDate("2025-05-18"); // 2025_w21
+        String label = weekUtils.formatWeekLabel(original);
+
+        assertEquals("2025_w21", label);
+
+        WeekInfo parsed = weekUtils.parseWeekLabel(label);
+
+        assertEquals(original.weekYear, parsed.weekYear);
+        assertEquals(original.weekNumber, parsed.weekNumber);
+        assertEquals(original.startDate, parsed.startDate);
+        assertEquals(original.endDate, parsed.endDate);
+    }
+
+    @Test
+    void getSundayWeeksUntilToday_SHOULD_end_with_today_week() {
+        LocalDate today = LocalDate.now();
+        WeekInfo todayWeekInfo = weekUtils.getSundayWeekInfoOfDate(today.toString());
+
+        List<WeekInfo> weeks = weekUtils.getSundayWeeksUntilToday();
+
+        assertFalse(weeks.isEmpty());
+        WeekInfo last = weeks.get(weeks.size() - 1);
+
+        assertEquals(todayWeekInfo.weekYear, last.weekYear);
+        assertEquals(todayWeekInfo.weekNumber, last.weekNumber);
+        assertEquals(todayWeekInfo.startDate, last.startDate);
+        assertEquals(todayWeekInfo.endDate, last.endDate);
+    }
+
+    @Test
+    void formatWeekLabels_SHOULD_format_multiple_weeks() {
+        List<WeekInfo> infos = Arrays.asList(
+            weekUtils.getSundayWeekInfoOfDate("2024-12-15"), // 2024_w51
+            weekUtils.getSundayWeekInfoOfDate("2024-12-22")  // 2024_w52
+        );
+
+        List<String> labels = weekUtils.formatWeekLabels(infos);
+
+        assertEquals(2, labels.size());
+        assertEquals("2024_w51", labels.get(0));
+        assertEquals("2024_w52", labels.get(1));
+    }
+
+    @Test
+    void parseWeekLabel_SHOULD_throw_exception_for_invalid_format() {
+        assertThrows(IllegalArgumentException.class, () -> weekUtils.parseWeekLabel("2024-51"));
+        assertThrows(IllegalArgumentException.class, () -> weekUtils.parseWeekLabel("abcd_w01"));
+        assertThrows(IllegalArgumentException.class, () -> weekUtils.parseWeekLabel("2024_w0"));
+    }
+}
