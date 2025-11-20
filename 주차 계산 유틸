@@ -1079,3 +1079,39 @@ class WeekUtilsTest {
         assertThrows(IllegalArgumentException.class, () -> weekUtils.parseWeekLabel("2024_w0"));
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+public static class WeekInfo {
+    public final int weekYear;
+    public final int weekNumber;
+    public final String startDate;
+    public final String endDate;
+
+    public WeekInfo(int weekYear, int weekNumber, String startDate, String endDate) {
+        this.weekYear = weekYear;
+        this.weekNumber = weekNumber;
+        this.startDate = startDate;
+        this.endDate = endDate;
+    }
+
+    /**
+     * summaryDate가 이 주차 범위 안에 포함되는지 여부
+     * (startDate <= summaryDate <= endDate)
+     */
+    public boolean contains(String summaryDate) {
+        if (summaryDate == null || startDate == null || endDate == null) {
+            return false;
+        }
+        return summaryDate.compareTo(startDate) >= 0
+            && summaryDate.compareTo(endDate)   <= 0;
+    }
+}
