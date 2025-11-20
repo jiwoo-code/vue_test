@@ -579,3 +579,178 @@ private List<Map<String, Object>> sortTrendRows(List<Map<String, Object>> rows) 
 
     return rows;
 }
+
+
+
+
+
+
+ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+
+성능 개선
+
+
+
+
+/**
+ * 공통 컨텍스트 생성
+ * - departments, 기간 조건으로 mxHistories 조회
+ * - EQP 목록 추출
+ * - 피벗 생성
+ * - 기본 테이블 생성 (ActionName, component, eqpId 컬럼)
+ */
+private TrendContext createContext(List<String> departments, String startDate, String endDate) {
+    if (departments == null || departments.isEmpty()) {
+        return null;
+    }
+
+    List<MxHistoryRow> mxHistories =
+        mxMapper.getAllMxHistoryByDepartments(departments, startDate, endDate);
+    if (mxHistories == null || mxHistories.isEmpty()) {
+        return null;
+    }
+
+    // 👉 여기서부터는 공통 로직이므로 아래 오버로드로 위임
+    return createContext(mxHistories);
+}
+
+/**
+ * 공통 컨텍스트 생성 (이미 조회된 mxHistories로부터)
+ * - EQP 목록 추출
+ * - 피벗 생성
+ * - 기본 테이블 생성 (ActionName, component, eqpId 컬럼)
+ */
+private TrendContext createContext(List<MxHistoryRow> mxHistories) {
+    if (mxHistories == null || mxHistories.isEmpty()) {
+        return null;
+    }
+
+    List<String> eqpIds = extractEqpIds(mxHistories);
+    Map<String, Map<String, Double>> pivot = buildPivot(mxHistories);
+    List<Map<String, Object>> table = buildBaseTable(pivot, eqpIds);
+
+    return new TrendContext(mxHistories, eqpIds, table);
+}
+
+
+
+
+
+
+public Map<String, Object> getActionAndEqpData(
+        List<String> departments,
+        String startDate,
+        String endDate
+) {
+    List<Map<String, Object>> actionTrend = new ArrayList<>();
+    List<Map<String, Object>> eqpTrend = new ArrayList<>();
+
+    WeekUtils weekUtils = new WeekUtils();
+    List<WeekInfo> weekInfos = weekUtils.getSundayWeeksInDateRange(startDate, endDate);
+
+    if (departments == null || departments.isEmpty() || weekInfos.isEmpty()) {
+        Map<String, Object> emptyResult = new LinkedHashMap<>();
+        emptyResult.put("actionTrend", Collections.emptyList());
+        emptyResult.put("eqpTrend", Collections.emptyList());
+        return emptyResult;
+    }
+
+    // ✅ 1) 전체 기간에 대해 한 번만 조회
+    List<MxHistoryRow> allHistories =
+        mxMapper.getAllMxHistoryByDepartments(departments, startDate, endDate);
+    if (allHistories == null || allHistories.isEmpty()) {
+        Map<String, Object> emptyResult = new LinkedHashMap<>();
+        emptyResult.put("actionTrend", Collections.emptyList());
+        emptyResult.put("eqpTrend", Collections.emptyList());
+        return emptyResult;
+    }
+
+    // ✅ 2) 주차별로 미리 나누기 (키 = weekLabel, 예: 2025_W36)
+    Map<String, List<MxHistoryRow>> historiesByWeek =
+        groupHistoriesByWeek(allHistories, weekInfos, weekUtils);
+
+    // ✅ 3) 주차별로 context 만들어서 기존 로직 재사용
+    for (WeekInfo weekInfo : weekInfos) {
+        String weekLabel = weekUtils.formatWeekLabel(weekInfo);
+        List<MxHistoryRow> weekHistories =
+            historiesByWeek.getOrDefault(weekLabel, Collections.emptyList());
+
+        if (weekHistories.isEmpty()) {
+            continue;
+        }
+
+        TrendContext actionContext = createContext(weekHistories);
+        TrendContext eqpContext = copyContext(actionContext);
+
+        if (actionContext != null) {
+            List<Map<String, Object>> actionData =
+                getActionTrendData(actionContext, weekLabel);
+            actionTrend.addAll(actionData);
+        }
+        if (eqpContext != null) {
+            List<Map<String, Object>> eqpData =
+                getEqpTrendData(eqpContext, weekLabel);
+            eqpTrend.addAll(eqpData);
+        }
+    }
+
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("actionTrend", sortTrendRows(actionTrend));
+    result.put("eqpTrend", sortTrendRows(eqpTrend));
+    return result;
+}
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * 전체 mxHistories를 weekInfos 기준으로 주차별로 나누기
+ * - key: weekLabel (예: "2025_W36")
+ * - value: 해당 주에 속하는 MxHistoryRow 리스트
+ */
+private Map<String, List<MxHistoryRow>> groupHistoriesByWeek(
+        List<MxHistoryRow> allHistories,
+        List<WeekInfo> weekInfos,
+        WeekUtils weekUtils
+) {
+    Map<String, List<MxHistoryRow>> grouped = new LinkedHashMap<>();
+
+    if (allHistories == null || allHistories.isEmpty() || weekInfos == null || weekInfos.isEmpty()) {
+        return grouped;
+    }
+
+    for (WeekInfo weekInfo : weekInfos) {
+        String weekLabel = weekUtils.formatWeekLabel(weekInfo);
+        String weekStart = weekInfo.getStartDate(); // WeekInfo에 맞게 메서드명 조정 필요
+        String weekEnd = weekInfo.getEndDate();     // 예: [weekStart, weekEnd) 또는 [weekStart, weekEnd] 규칙에 맞춰 사용
+
+        List<MxHistoryRow> weekRows = allHistories.stream()
+            .filter(row -> isWithinRange(row.getSummaryDate(), weekStart, weekEnd))
+            .collect(Collectors.toList());
+
+        if (!weekRows.isEmpty()) {
+            grouped.put(weekLabel, weekRows);
+        }
+    }
+
+    return grouped;
+}
+
+/**
+ * summaryDate가 [startDate, endDate) 구간에 포함되는지 여부
+ * - 날짜 포맷이 "yyyy-MM-dd" 라고 가정하고 문자열 비교
+ */
+private boolean isWithinRange(String summaryDate, String startDate, String endDate) {
+    if (summaryDate == null || startDate == null || endDate == null) {
+        return false;
+    }
+    return summaryDate.compareTo(startDate) >= 0
+        && summaryDate.compareTo(endDate) < 0; // endDate 포함/미포함은 WeekUtils 규칙에 맞게 조정
+}
