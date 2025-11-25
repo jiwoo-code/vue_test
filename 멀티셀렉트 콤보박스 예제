@@ -1,0 +1,865 @@
+
+“빈 폴더 + 파일 하나”만으로 바로 열어볼 수 있는 CDN 기반 Vue2 샘플이랑,
+실제 프로젝트에 붙일 때 쓸 수 있는 SFC 버전 구조까지 같이 줄게요.
+조건 다시 맞춰서 구현했습니다:
+약 2만 건 옵션 (예제에선 20,000개 생성)
+왼쪽 체크박스
+멀티일 때 상단에 선택 목록 표시
+대소문자 구분 없이 label 기준 오름차순 정렬
+싱글 / 멀티 둘 다 지원 (:multiple="true|false")
+1. “완전 빈 상태”에서 동작하는 샘플 (CDN + index.html 하나)
+빈 폴더에 index.html 하나 만들고 아래 내용 그대로 넣고
+브라우저로 파일 열면 바로 동작합니다.
+코드 복사
+Html
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Vue2 Virtual Combo Sample</title>
+    <!-- Vue 2 CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/vue@2/dist/vue.js"></script>
+    <!-- vue-virtual-scroller CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/vue-virtual-scroller@1.0.10/dist/vue-virtual-scroller.umd.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/vue-virtual-scroller@1.0.10/dist/vue-virtual-scroller.css"
+    />
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        margin: 20px;
+      }
+
+      h2 {
+        margin-top: 32px;
+      }
+
+      .virtual-combo-select {
+        position: relative;
+        width: 320px;
+        font-size: 13px;
+        margin-bottom: 24px;
+      }
+
+      .vcs-control {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 34px;
+        padding: 4px 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        cursor: pointer;
+        background-color: #fff;
+      }
+
+      .vcs-placeholder {
+        color: #aaa;
+      }
+
+      .vcs-summary {
+        flex: 1;
+        margin-right: 8px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .vcs-arrow {
+        transition: transform 0.15s;
+      }
+
+      .vcs-arrow.open {
+        transform: rotate(180deg);
+      }
+
+      .vcs-dropdown {
+        position: absolute;
+        z-index: 2000;
+        top: 100%;
+        left: 0;
+        right: 0;
+        margin-top: 4px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        background-color: #fff;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      }
+
+      .vcs-selected-list {
+        display: flex;
+        flex-wrap: wrap;
+        padding: 4px 6px 0 6px;
+        border-bottom: 1px solid #eee;
+        max-height: 90px;
+        overflow-y: auto;
+      }
+
+      .vcs-tag {
+        padding: 2px 6px;
+        margin: 0 4px 4px 0;
+        border-radius: 10px;
+        background-color: #f0f4ff;
+        border: 1px solid #d0ddff;
+        font-size: 12px;
+      }
+
+      .vcs-search-input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 4px 8px;
+        border: 0;
+        border-bottom: 1px solid #eee;
+        outline: none;
+        font-size: 13px;
+      }
+
+      .vcs-options {
+        max-height: 260px;
+      }
+
+      .vcs-option-row {
+        display: flex;
+        align-items: center;
+        padding: 4px 8px;
+        box-sizing: border-box;
+        cursor: pointer;
+      }
+
+      .vcs-option-row:hover {
+        background-color: #f5f5f5;
+      }
+
+      .vcs-option-label {
+        margin-left: 6px;
+      }
+
+      .demo-container {
+        display: flex;
+        gap: 40px;
+        flex-wrap: wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <h1>Vue2 + vue-virtual-scroller 콤보박스 샘플</h1>
+
+      <div class="demo-container">
+        <!-- 멀티 셀렉트 예제 -->
+        <div>
+          <h2>멀티 셀렉트 (2만건 + 상단 정렬 목록)</h2>
+          <virtual-combo-select
+            v-model="selectedMulti"
+            :options="options"
+            :multiple="true"
+            placeholder="장비를 선택하세요 (다중 선택)"
+            search-placeholder="장비 ID / 이름 검색"
+          ></virtual-combo-select>
+          <p>선택된 ID: {{ selectedMulti }}</p>
+        </div>
+
+        <!-- 싱글 셀렉트 예제 -->
+        <div>
+          <h2>싱글 셀렉트 (2만건)</h2>
+          <virtual-combo-select
+            v-model="selectedSingle"
+            :options="options"
+            :multiple="false"
+            placeholder="장비를 하나 선택하세요"
+            search-placeholder="장비 ID / 이름 검색"
+          ></virtual-combo-select>
+          <p>선택된 ID: {{ selectedSingle }}</p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // vue-virtual-scroller 전역 등록
+      Vue.component(
+        'RecycleScroller',
+        VueVirtualScroller.RecycleScroller
+      )
+
+      // 가상 스크롤 기반 콤보 컴포넌트
+      Vue.component('virtual-combo-select', {
+        props: {
+          // v-model 값
+          value: {
+            type: [Array, String, Number, Object, null],
+            default: null
+          },
+          // { id, label } 구조의 옵션 배열
+          options: {
+            type: Array,
+            required: true
+          },
+          // true: 멀티, false: 싱글
+          multiple: {
+            type: Boolean,
+            default: false
+          },
+          placeholder: {
+            type: String,
+            default: '선택하세요'
+          },
+          searchPlaceholder: {
+            type: String,
+            default: '검색...'
+          }
+        },
+        data: function () {
+          return {
+            isOpen: false,
+            keyword: ''
+          }
+        },
+        computed: {
+          normalizedSelectedIds: function () {
+            if (this.multiple) {
+              if (Array.isArray(this.value)) {
+                return this.value
+              }
+              return []
+            }
+
+            if (this.value === null || this.value === undefined) {
+              return []
+            }
+            return [this.value]
+          },
+          filteredOptions: function () {
+            var trimmed = this.keyword.trim()
+            if (!trimmed) {
+              return this.options
+            }
+
+            var lowerKeyword = trimmed.toLowerCase()
+            return this.options.filter(function (option) {
+              var label = ''
+              if (option && option.label !== undefined && option.label !== null) {
+                label = String(option.label)
+              }
+              return label.toLowerCase().indexOf(lowerKeyword) !== -1
+            })
+          },
+          // 멀티 선택 시 상단에 보여줄, 라벨 기준 정렬된 선택 목록
+          sortedSelectedOptions: function () {
+            var selectedIdSet = new Set(this.normalizedSelectedIds)
+
+            var selectedOptions = this.options.filter(function (option) {
+              return selectedIdSet.has(option.id)
+            })
+
+            var sorted = selectedOptions.slice()
+            sorted.sort(function (a, b) {
+              var labelA = ''
+              var labelB = ''
+
+              if (a && a.label !== undefined && a.label !== null) {
+                labelA = String(a.label).toLowerCase()
+              }
+              if (b && b.label !== undefined && b.label !== null) {
+                labelB = String(b.label).toLowerCase()
+              }
+
+              if (labelA < labelB) {
+                return -1
+              }
+              if (labelA > labelB) {
+                return 1
+              }
+              return 0
+            })
+
+            return sorted
+          },
+          summaryText: function () {
+            if (this.normalizedSelectedIds.length === 0) {
+              return ''
+            }
+
+            if (this.multiple) {
+              return this.normalizedSelectedIds.length + '개 선택됨'
+            }
+
+            // 싱글인 경우 라벨 텍스트
+            var selectedId = this.normalizedSelectedIds[0]
+            var found = this.options.find(function (option) {
+              return option.id === selectedId
+            })
+            if (found && found.label !== undefined && found.label !== null) {
+              return String(found.label)
+            }
+            return String(selectedId)
+          }
+        },
+        methods: {
+          toggleDropdown: function (event) {
+            event.stopPropagation()
+            this.isOpen = !this.isOpen
+          },
+          closeDropdown: function () {
+            this.isOpen = false
+          },
+          isChecked: function (option) {
+            return this.normalizedSelectedIds.indexOf(option.id) !== -1
+          },
+          toggleOption: function (option, event) {
+            if (event) {
+              event.stopPropagation()
+            }
+
+            if (this.multiple) {
+              var next = Array.isArray(this.value) ? this.value.slice() : []
+              var index = next.indexOf(option.id)
+
+              if (index === -1) {
+                next.push(option.id)
+              } else {
+                next.splice(index, 1)
+              }
+
+              this.$emit('input', next)
+              this.$emit('change', next)
+              return
+            }
+
+            // 싱글 모드
+            var currentId = this.normalizedSelectedIds[0] || null
+            var nextValue = option.id
+
+            // 같은 것을 한 번 더 누르면 해제할지 여부는 취향인데,
+            // 여기서는 해제 가능하게 구현
+            if (currentId === option.id) {
+              nextValue = null
+            }
+
+            this.$emit('input', nextValue)
+            this.$emit('change', nextValue)
+          },
+          handleClickOutside: function (event) {
+            // 컴포넌트 영역 밖 클릭 시 드롭다운 닫기
+            if (!this.$el.contains(event.target)) {
+              this.closeDropdown()
+            }
+          }
+        },
+        mounted: function () {
+          document.addEventListener('click', this.handleClickOutside)
+        },
+        beforeDestroy: function () {
+          document.removeEventListener('click', this.handleClickOutside)
+        },
+        template:
+          '<div class="virtual-combo-select">' +
+          '  <div class="vcs-control" @click="toggleDropdown">' +
+          '    <span v-if="summaryText" class="vcs-summary">{{ summaryText }}</span>' +
+          '    <span v-else class="vcs-summary vcs-placeholder">{{ placeholder }}</span>' +
+          '    <span class="vcs-arrow" :class="{ open: isOpen }">▾</span>' +
+          '  </div>' +
+          '  <div v-if="isOpen" class="vcs-dropdown">' +
+          '    <div v-if="multiple && sortedSelectedOptions.length" class="vcs-selected-list">' +
+          '      <span' +
+          '        v-for="item in sortedSelectedOptions"' +
+          '        :key="item.id"' +
+          '        class="vcs-tag"' +
+          '      >' +
+          '        {{ item.label }}' +
+          '      </span>' +
+          '    </div>' +
+          '    <input' +
+          '      v-model="keyword"' +
+          '      type="text"' +
+          '      class="vcs-search-input"' +
+          '      :placeholder="searchPlaceholder"' +
+          '      @click.stop' +
+          '    />' +
+          '    <RecycleScroller' +
+          '      class="vcs-options"' +
+          '      :items="filteredOptions"' +
+          '      :item-size="32"' +
+          '      key-field="id"' +
+          '    >' +
+          '      <div' +
+          '        slot-scope="{ item }"' +
+          '        class="vcs-option-row"' +
+          '        @click="toggleOption(item, $event)"' +
+          '      >' +
+          '        <input' +
+          '          type="checkbox"' +
+          '          :checked="isChecked(item)"' +
+          '          @change="toggleOption(item, $event)"' +
+          '        />' +
+          '        <span class="vcs-option-label">{{ item.label }}</span>' +
+          '      </div>' +
+          '    </RecycleScroller>' +
+          '  </div>' +
+          '</div>'
+      })
+
+      new Vue({
+        el: '#app',
+        data: function () {
+          return {
+            options: [],
+            selectedMulti: [],
+            selectedSingle: null
+          }
+        },
+        created: function () {
+          var tempOptions = []
+          var totalCount = 20000
+
+          for (var index = 1; index <= totalCount; index += 1) {
+            var id = 'EQP_' + index
+            var label = 'Eqp ' + index + ' (장비 ' + index + ')'
+            tempOptions.push({
+              id: id,
+              label: label
+            })
+          }
+
+          this.options = tempOptions
+        }
+      })
+    </script>
+  </body>
+</html>
+이걸로:
+멀티 콤보: 상단에 선택된 항목이 대소문자 구분 없이 label 기준 오름차순으로 정렬된 태그로 표시
+싱글 콤보: 한 개만 선택되도록 동작
+둘 다 RecycleScroller로 2만 건 가상 스크롤 처리
+2. 실제 Vue2 프로젝트(SFC)로 옮길 때 구조 예시
+위 로직을 SFC로 쓰려면:
+src/components/VirtualComboSelect.vue
+src/App.vue
+src/main.js
+이렇게 쪼개면 됩니다.
+2-1. main.js
+코드 복사
+Js
+// main.js
+import Vue from 'vue'
+import App from './App.vue'
+
+import { RecycleScroller } from 'vue-virtual-scroller'
+import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
+
+Vue.component('RecycleScroller', RecycleScroller)
+
+Vue.config.productionTip = false
+
+new Vue({
+  render: createElement => createElement(App)
+}).$mount('#app')
+2-2. VirtualComboSelect.vue
+코드 복사
+Vue
+<template>
+  <div class="virtual-combo-select">
+    <div class="vcs-control" @click.stop="toggleDropdown">
+      <span v-if="summaryText" class="vcs-summary">{{ summaryText }}</span>
+      <span v-else class="vcs-summary vcs-placeholder">
+        {{ placeholder }}
+      </span>
+      <span class="vcs-arrow" :class="{ open: isOpen }">▾</span>
+    </div>
+
+    <div v-if="isOpen" class="vcs-dropdown">
+      <div
+        v-if="multiple && sortedSelectedOptions.length"
+        class="vcs-selected-list"
+      >
+        <span
+          v-for="item in sortedSelectedOptions"
+          :key="item.id"
+          class="vcs-tag"
+        >
+          {{ item.label }}
+        </span>
+      </div>
+
+      <input
+        v-model="keyword"
+        type="text"
+        class="vcs-search-input"
+        :placeholder="searchPlaceholder"
+        @click.stop
+      />
+
+      <RecycleScroller
+        class="vcs-options"
+        :items="filteredOptions"
+        :item-size="32"
+        key-field="id"
+      >
+        <template v-slot="{ item }">
+          <div
+            class="vcs-option-row"
+            @click.stop="toggleOption(item, $event)"
+          >
+            <input
+              type="checkbox"
+              :checked="isChecked(item)"
+              @change.stop="toggleOption(item, $event)"
+            />
+            <span class="vcs-option-label">
+              {{ item.label }}
+            </span>
+          </div>
+        </template>
+      </RecycleScroller>
+    </div>
+  </div>
+</template>
+
+<script>
+export default {
+  name: 'VirtualComboSelect',
+  props: {
+    value: {
+      type: [Array, String, Number, Object, null],
+      default: null
+    },
+    options: {
+      type: Array,
+      required: true
+    },
+    multiple: {
+      type: Boolean,
+      default: false
+    },
+    placeholder: {
+      type: String,
+      default: '선택하세요'
+    },
+    searchPlaceholder: {
+      type: String,
+      default: '검색...'
+    }
+  },
+  data() {
+    return {
+      isOpen: false,
+      keyword: ''
+    }
+  },
+  computed: {
+    normalizedSelectedIds() {
+      if (this.multiple) {
+        if (Array.isArray(this.value)) {
+          return this.value
+        }
+        return []
+      }
+
+      if (this.value === null || this.value === undefined) {
+        return []
+      }
+      return [this.value]
+    },
+    filteredOptions() {
+      const trimmed = this.keyword.trim()
+      if (!trimmed) {
+        return this.options
+      }
+
+      const lowerKeyword = trimmed.toLowerCase()
+      return this.options.filter(option => {
+        let label = ''
+        if (option && option.label !== undefined && option.label !== null) {
+          label = String(option.label)
+        }
+        return label.toLowerCase().indexOf(lowerKeyword) !== -1
+      })
+    },
+    sortedSelectedOptions() {
+      const selectedIdSet = new Set(this.normalizedSelectedIds)
+
+      const selectedOptions = this.options.filter(option =>
+        selectedIdSet.has(option.id)
+      )
+
+      const sorted = selectedOptions.slice()
+      sorted.sort((a, b) => {
+        let labelA = ''
+        let labelB = ''
+
+        if (a && a.label !== undefined && a.label !== null) {
+          labelA = String(a.label).toLowerCase()
+        }
+        if (b && b.label !== undefined && b.label !== null) {
+          labelB = String(b.label).toLowerCase()
+        }
+
+        if (labelA < labelB) {
+          return -1
+        }
+        if (labelA > labelB) {
+          return 1
+        }
+        return 0
+      })
+
+      return sorted
+    },
+    summaryText() {
+      if (this.normalizedSelectedIds.length === 0) {
+        return ''
+      }
+
+      if (this.multiple) {
+        return this.normalizedSelectedIds.length + '개 선택됨'
+      }
+
+      const selectedId = this.normalizedSelectedIds[0]
+      const found = this.options.find(option => option.id === selectedId)
+      if (found && found.label !== undefined && found.label !== null) {
+        return String(found.label)
+      }
+
+      return String(selectedId)
+    }
+  },
+  methods: {
+    toggleDropdown() {
+      this.isOpen = !this.isOpen
+    },
+    closeDropdown() {
+      this.isOpen = false
+    },
+    isChecked(option) {
+      return this.normalizedSelectedIds.indexOf(option.id) !== -1
+    },
+    toggleOption(option) {
+      if (this.multiple) {
+        const next = Array.isArray(this.value) ? this.value.slice() : []
+        const index = next.indexOf(option.id)
+
+        if (index === -1) {
+          next.push(option.id)
+        } else {
+          next.splice(index, 1)
+        }
+
+        this.$emit('input', next)
+        this.$emit('change', next)
+        return
+      }
+
+      const currentId = this.normalizedSelectedIds[0] || null
+      let nextValue = option.id
+
+      if (currentId === option.id) {
+        nextValue = null
+      }
+
+      this.$emit('input', nextValue)
+      this.$emit('change', nextValue)
+    },
+    handleClickOutside(event) {
+      if (!this.$el.contains(event.target)) {
+        this.closeDropdown()
+      }
+    }
+  },
+  mounted() {
+    document.addEventListener('click', this.handleClickOutside)
+  },
+  beforeDestroy() {
+    document.removeEventListener('click', this.handleClickOutside)
+  }
+}
+</script>
+
+<style scoped>
+.virtual-combo-select {
+  position: relative;
+  width: 320px;
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+
+.vcs-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  background-color: #fff;
+}
+
+.vcs-placeholder {
+  color: #aaa;
+}
+
+.vcs-summary {
+  flex: 1;
+  margin-right: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vcs-arrow {
+  transition: transform 0.15s;
+}
+
+.vcs-arrow.open {
+  transform: rotate(180deg);
+}
+
+.vcs-dropdown {
+  position: absolute;
+  z-index: 2000;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.vcs-selected-list {
+  display: flex;
+  flex-wrap: wrap;
+  padding: 4px 6px 0 6px;
+  border-bottom: 1px solid #eee;
+  max-height: 90px;
+  overflow-y: auto;
+}
+
+.vcs-tag {
+  padding: 2px 6px;
+  margin: 0 4px 4px 0;
+  border-radius: 10px;
+  background-color: #f0f4ff;
+  border: 1px solid #d0ddff;
+  font-size: 12px;
+}
+
+.vcs-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 0;
+  border-bottom: 1px solid #eee;
+  outline: none;
+  font-size: 13px;
+}
+
+.vcs-options {
+  max-height: 260px;
+}
+
+.vcs-option-row {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.vcs-option-row:hover {
+  background-color: #f5f5f5;
+}
+
+.vcs-option-label {
+  margin-left: 6px;
+}
+</style>
+2-3. App.vue
+코드 복사
+Vue
+<template>
+  <div id="app">
+    <h1>Vue2 Virtual Combo Sample</h1>
+
+    <div class="demo-container">
+      <div>
+        <h2>멀티 셀렉트 (2만건)</h2>
+        <VirtualComboSelect
+          v-model="selectedMulti"
+          :options="options"
+          :multiple="true"
+          placeholder="장비를 선택하세요 (다중 선택)"
+          search-placeholder="장비 ID / 이름 검색"
+        />
+        <p>선택된 ID: {{ selectedMulti }}</p>
+      </div>
+
+      <div>
+        <h2>싱글 셀렉트 (2만건)</h2>
+        <VirtualComboSelect
+          v-model="selectedSingle"
+          :options="options"
+          :multiple="false"
+          placeholder="장비를 하나 선택하세요"
+          search-placeholder="장비 ID / 이름 검색"
+        />
+        <p>선택된 ID: {{ selectedSingle }}</p>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import VirtualComboSelect from './components/VirtualComboSelect.vue'
+
+export default {
+  name: 'App',
+  components: {
+    VirtualComboSelect
+  },
+  data() {
+    return {
+      options: [],
+      selectedMulti: [],
+      selectedSingle: null
+    }
+  },
+  created() {
+    const tempOptions = []
+    const totalCount = 20000
+
+    for (let index = 1; index <= totalCount; index += 1) {
+      const id = 'EQP_' + index
+      const label = 'Eqp ' + index + ' (장비 ' + index + ')'
+
+      tempOptions.push({
+        id,
+        label
+      })
+    }
+
+    this.options = tempOptions
+  }
+}
+</script>
+
+<style>
+#app {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  margin: 20px;
+}
+
+h2 {
+  margin-top: 32px;
+}
+
+.demo-container {
+  display: flex;
+  gap: 40px;
+  flex-wrap: wrap;
+}
+</style>
+이 정도면:
+“완전 빈 상태” → index.html 하나로 바로 확인 가능
+실제 프로젝트 → VirtualComboSelect만 옮겨 붙이면 재현 가능
