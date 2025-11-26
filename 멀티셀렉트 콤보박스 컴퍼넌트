@@ -1,67 +1,3 @@
-맞아, 방금 전에 준 svg는 내가 새로 그린 거라서, 지우님이 예전에 직접 가져온 svg랑 모양이 달라요.
-이번엔 지우님이 알려준 코드 그대로 .svg 파일로 분리한 버전으로 다시 정리해줄게요 😊
-1. SVG 파일들 (지우님이 준 코드 기반)
-경로:
-src/assets/style/svg/virtual-dropdown/
-1-1. arrow_down.svg
-지우님이 준 화살표 그대로:
-코드 복사
-Svg
-<svg
-  focusable="false"
-  xmlns="http://www.w3.org/2000/svg"
-  viewBox="0 0 30 30"
->
-  <polygon
-    points="15.1 23.3 2.3 10.5 3.3 9.5 15.1 21.2 26.8 9.5 27.9 10.5 15.1 23.3"
-  ></polygon>
-</svg>
-1-2. checkbox_unchecked.svg
-코드 복사
-Svg
-<svg
-  focusable="false"
-  xmlns="http://www.w3.org/2000/svg"
-  viewBox="0 0 30 30"
->
-  <path
-    d="M0 0 H30 V30 H0 V0 L2 2 V28 H28 V2 H2 L0 0Z"
-  ></path>
-</svg>
-1-3. checkbox_checked.svg
-지우님이 준 체크 아이콘 polygon 그대로:
-코드 복사
-Svg
-<svg
-  focusable="false"
-  xmlns="http://www.w3.org/2000/svg"
-  viewBox="0 0 30 30"
->
-  <polygon
-    points="0 37 37 37 37 0 0 0 0 37 14.6 28.3 5 18.7 7.1 16.6 14.7 24.1 29.9 9.7 32 11.9 14.6 28.3"
-  ></polygon>
-</svg>
-1-4. checkbox_indeterminate.svg
-코드 복사
-Svg
-<svg
-  focusable="false"
-  xmlns="http://www.w3.org/2000/svg"
-  viewBox="0 0 30 30"
->
-  <path
-    class="st0"
-    d="M30,0h-1.9H1.9H0v1.9V30h1.9h26.2H30v-1.9V0z M28.1,28.1H1.9V1.9h26.2V28.1z"
-  ></path>
-  <rect x="8" y="8" width="13.9" height="13.9"></rect>
-</svg>
-위 네 개는 지우님이 보내준 svg 구조 그대로 파일로 쪼갠 거야.
-색/라인 같은 건 svg 내부 기본값(대부분 검정) 그대로 쓰고, VirtualComboSelect에서는 CSS로 background-image만 바인딩해서 사용.
-2. VirtualComboSelect.vue 전체 코드 (주석 포함 + searchable + background svg)
-이 파일은 이전 메시지에서 만든 버전과 동일하고,
-svg 내부 내용과는 상관 없이 파일 경로만 신경 쓰면 돼.
-코드 복사
-Vue
 <template>
   <div class="virtual-combo-select">
     <!-- 컨트롤 영역 -->
@@ -73,8 +9,12 @@ Vue
         {{ placeholder }}
       </span>
 
-      <!-- 화살표 아이콘 (background-image 사용) -->
-      <i class="vcs-arrow-icon" :class="{ open: isOpen }"></i>
+      <!-- 화살표 아이콘 -->
+      <i
+        class="vcs-arrow-icon"
+        :class="{ open: isOpen }"
+        :style="arrowIconStyle"
+      ></i>
     </div>
 
     <!-- 드롭다운 -->
@@ -99,6 +39,7 @@ Vue
         <i
           class="vcs-checkbox"
           :class="selectAllCheckboxClass"
+          :style="selectAllCheckboxStyle"
           @click.stop.prevent="onSelectAllClick"
         ></i>
 
@@ -127,6 +68,7 @@ Vue
             <i
               class="vcs-checkbox"
               :class="checkboxClassForItem(item)"
+              :style="checkboxStyleForItem(item)"
               @click.stop.prevent="onRowClick(item)"
             ></i>
 
@@ -167,8 +109,8 @@ export default {
   props: {
     /**
      * v-model 값
-     *  - multiple=true  : Array
-     *  - multiple=false : 단일 값 (id)
+     *  - multiple = true  : Array
+     *  - multiple = false : 단일 값 (id)
      */
     value: {
       type: [Array, String, Number, Object, null],
@@ -224,13 +166,21 @@ export default {
       /**
        * 검색 키워드
        */
-      keyword: ''
+      keyword: '',
+      /**
+       * 체크박스/화살표 SVG 경로
+       *  - webpack의 require를 사용하여 번들링 시 경로를 안전하게 해석
+       */
+      checkboxCheckedImg: require('@/assets/style/svg/virtual-dropdown/checkbox_checked.svg'),
+      checkboxUncheckedImg: require('@/assets/style/svg/virtual-dropdown/checkbox_unchecked.svg'),
+      checkboxIndeterminateImg: require('@/assets/style/svg/virtual-dropdown/checkbox_indeterminate.svg'),
+      arrowDownImg: require('@/assets/style/svg/virtual-dropdown/arrow_down.svg')
     }
   },
   computed: {
     /**
      * 각 항목 id를 키로 하는 맵을 생성한다.
-     *  - id → item
+     *  - id -> item
      * @returns {Object<string, object>}
      */
     itemMap() {
@@ -266,7 +216,7 @@ export default {
 
     /**
      * 검색 조건이 반영된 항목 목록을 반환한다.
-     *  - searchable=false 이면 원본 items를 그대로 반환한다.
+     *  - searchable = false 이면 원본 items를 그대로 반환한다.
      * @returns {Array<object>}
      */
     filteredItems() {
@@ -409,6 +359,27 @@ export default {
      */
     ITEM_ROW_HEIGHT() {
       return ITEM_ROW_HEIGHT
+    },
+
+    /**
+     * 화살표 아이콘에 적용할 style 객체를 반환한다.
+     * @returns {{ backgroundImage: string }}
+     */
+    arrowIconStyle() {
+      return {
+        backgroundImage: 'url(' + this.arrowDownImg + ')'
+      }
+    },
+
+    /**
+     * Select All 체크박스에 적용할 style 객체를 반환한다.
+     * @returns {{ backgroundImage: string }}
+     */
+    selectAllCheckboxStyle() {
+      const image = this.selectAllImage()
+      return {
+        backgroundImage: 'url(' + image + ')'
+      }
     }
   },
   methods: {
@@ -534,6 +505,46 @@ export default {
     },
 
     /**
+     * 항목별 체크박스에 적용할 backgroundImage를 계산한다.
+     * @param {object} item : 항목 객체
+     * @returns {{ backgroundImage: string }}
+     */
+    checkboxStyleForItem(item) {
+      const image = this.checkboxImage(item)
+      return {
+        backgroundImage: 'url(' + image + ')'
+      }
+    },
+
+    /**
+     * 항목별 체크박스에 사용할 이미지 경로를 반환한다.
+     * @param {object} item : 항목 객체
+     * @returns {string}
+     */
+    checkboxImage(item) {
+      if (this.isChecked(item)) {
+        return this.checkboxCheckedImg
+      }
+      return this.checkboxUncheckedImg
+    },
+
+    /**
+     * Select All 체크박스에 사용할 이미지 경로를 반환한다.
+     * @returns {string}
+     */
+    selectAllImage() {
+      if (this.isAllSelected) {
+        return this.checkboxCheckedImg
+      }
+
+      if (this.isPartiallySelected) {
+        return this.checkboxIndeterminateImg
+      }
+
+      return this.checkboxUncheckedImg
+    },
+
+    /**
      * 컴포넌트 영역 밖을 클릭했을 때 드롭다운을 닫는다.
      * @param {MouseEvent} event : 클릭 이벤트
      * @returns {void}
@@ -587,15 +598,14 @@ export default {
   color: #444444;
 }
 
-/* 화살표 아이콘 (background-image) */
+/* 화살표 아이콘 */
 .vcs-arrow-icon {
   width: 10px;
   height: 10px;
   display: inline-block;
-  background:
-    transparent
-    url('~@/assets/style/svg/virtual-dropdown/arrow_down.svg')
-    center/contain no-repeat;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
   transition-duration: 0.3s;
   transform: rotate(0deg);
 }
@@ -653,7 +663,7 @@ export default {
   border-bottom: 1px solid #eeeeee;
 }
 
-/* 체크박스 공통 (background-image) */
+/* 체크박스 공통 */
 .vcs-checkbox {
   display: inline-block;
   width: 16px;
@@ -662,30 +672,6 @@ export default {
   background-position: center;
   background-repeat: no-repeat;
   background-size: contain;
-}
-
-/* 언체크 상태 */
-.vcs-checkbox.is-unchecked {
-  background:
-    transparent
-    url('~@/assets/style/svg/virtual-dropdown/checkbox_unchecked.svg')
-    center/contain no-repeat;
-}
-
-/* 체크 상태 */
-.vcs-checkbox.is-checked {
-  background:
-    transparent
-    url('~@/assets/style/svg/virtual-dropdown/checkbox_checked.svg')
-    center/contain no-repeat;
-}
-
-/* 일부 선택 상태 */
-.vcs-checkbox.is-partially-checked {
-  background:
-    transparent
-    url('~@/assets/style/svg/virtual-dropdown/checkbox_indeterminate.svg')
-    center/contain no-repeat;
 }
 
 /* 라벨 */
@@ -711,9 +697,3 @@ export default {
   font-weight: 400;
 }
 </style>
-이제:
-svg 파일은 지우님이 준 그대로
-컴포넌트는 background-image로만 그 svg들을 사용
-이라서, 실제 화면 모양도 원래 시스템이랑 거의 동일하게 나올 거예요.
-혹시 체크 아이콘 위치가 예전처럼 살짝 쏠려 보이면,
-그때는 viewBox를 0 0 37 37로 바꾼다든지, 폴리곤 포인트를 조금 조정해서 “센터 정렬 튜닝”도 같이 해볼 수 있어요.
