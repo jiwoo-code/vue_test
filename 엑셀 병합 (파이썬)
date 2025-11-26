@@ -1,53 +1,53 @@
 import pandas as pd
 
-# ==== 파일 경로 설정 ====
-dev_path = "dev.xlsx"   # dev 파일 경로
-ops_path = "ops.xlsx"   # ops 파일 경로
-output_path = "ops_merged.xlsx"  # 결과 파일
+# =============================
+# 파일 경로 설정
+# =============================
+dev_csv_path = "dev.csv"          # dev 데이터 CSV
+ops_csv_path = "ops.csv"          # ops 데이터 CSV
+output_xlsx_path = "ops_merged.xlsx"   # 최종 엑셀 출력 파일
 
-# ==== 엑셀 구조 설정 ====
-# 4행이 헤더라면, pandas에서는 0부터 세니까 3
-HEADER_ROW_INDEX = 3
-KEY_COLUMN_NAME = "MESSAGE_KEY"
+# =============================
+# 설정값
+# =============================
+KEY = "MESSAGE_KEY"   # 병합 기준 키 컬럼명
+SYSTEM_ID_COL = "SYSTEM_ID"   # 덮어쓰지 않을 컬럼(존재하면 제외)
 
-# A열 시스템 아이디 컬럼 이름 (데이터 행에 있는 경우에만 사용)
-# 엑셀에서 정확한 열 이름을 보고 맞춰주세요.
-SYSTEM_ID_COLUMN_NAME = "SYSTEM_ID"  # 예: "SYSTEM_ID" 또는 "시스템아이디" 등
+# =============================
+# CSV 읽기
+# =============================
+dev = pd.read_csv(dev_csv_path)
+ops = pd.read_csv(ops_csv_path)
 
-# ==== 엑셀 읽기 ====
-dev_df = pd.read_excel(dev_path, header=HEADER_ROW_INDEX)
-ops_df = pd.read_excel(ops_path, header=HEADER_ROW_INDEX)
+# =============================
+# index를 키로 설정
+# =============================
+dev_key = dev.set_index(KEY)
+ops_key = ops.set_index(KEY)
 
-# ==== 키를 인덱스로 설정 ====
-dev_by_key = dev_df.set_index(KEY_COLUMN_NAME)
-ops_by_key = ops_df.set_index(KEY_COLUMN_NAME)
+# =============================
+# 덮어쓸 컬럼 목록 결정
+# (SYSTEM_ID 같은 컬럼은 ops 값 유지)
+# =============================
+columns_to_update = [
+    col for col in dev_key.columns
+    if col != SYSTEM_ID_COL
+]
 
-# ==== 덮어쓸 컬럼 선정 (시스템 아이디는 덮어쓰지 않도록 제외) ====
-if SYSTEM_ID_COLUMN_NAME in dev_by_key.columns:
-    columns_to_update = [
-        col_name
-        for col_name in dev_by_key.columns
-        if col_name != SYSTEM_ID_COLUMN_NAME
-    ]
-else:
-    # 시스템 아이디가 데이터 컬럼이 아니라면 전체 컬럼 업데이트
-    columns_to_update = list(dev_by_key.columns)
+# =============================
+# 기존 키는 dev 값으로 덮어쓰기
+# =============================
+ops_key.loc[dev_key.index, columns_to_update] = dev_key[columns_to_update]
 
-# ==== 1) 기존 키는 dev 값으로 덮어쓰기 ====
-# dev에 있는 키 전체에 대해, 해당 컬럼 값을 dev 기준으로 복사
-ops_by_key.loc[dev_by_key.index, columns_to_update] = dev_by_key[columns_to_update]
+# =============================
+# ops에 없는 dev 키 추가
+# =============================
+missing_keys = dev_key.index.difference(ops_key.index)
+merged = pd.concat([ops_key, dev_key.loc[missing_keys]], axis=0)
 
-# ==== 2) ops에 없는 새 키는 추가 ====
-new_keys = dev_by_key.index.difference(ops_by_key.index)
-ops_with_new = pd.concat(
-    [ops_by_key, dev_by_key.loc[new_keys]],
-    axis=0
-)
+# =============================
+# 키를 컬럼으로 복구하고 저장
+# =============================
+merged.reset_index().to_excel(output_xlsx_path, index=False)
 
-# ==== 3) 다시 키를 컬럼으로 되돌리고 저장 ====
-result_df = ops_with_new.reset_index()  # MESSAGE_KEY가 다시 일반 컬럼으로 돌아감
-
-# 이 저장 결과는 "데이터 헤더만" 있는 형태입니다.
-# (엑셀의 1~3행에 설명문이나 타이틀이 따로 있다면,
-#  결과 파일에서 복사/붙여넣기 해주시면 됩니다.)
-result_df.to_excel(output_path, index=False)
+print("완료! 결과 파일 생성됨 →", output_xlsx_path)
