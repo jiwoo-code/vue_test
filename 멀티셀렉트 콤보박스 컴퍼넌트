@@ -58,12 +58,12 @@
             />
           </svg>
 
-          <!-- 체크된 상태 -->
+          <!-- 체크 -->
           <svg
             v-else-if="selectAllCheckboxClass === 'is-checked'"
             focusable="false"
             xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 30 30"
+            viewBox="0 0 37 37"
           >
             <polygon
               points="0 37 37 37 37 0 0 0 0 37 14.6 28.3 5 18.7 7.1 16.6 14.7 24.1 29.9 9.7 32 11.9 14.6 28.3"
@@ -71,7 +71,7 @@
             />
           </svg>
 
-          <!-- 일부 선택 상태 -->
+          <!-- 일부 선택 -->
           <svg
             v-else
             focusable="false"
@@ -113,7 +113,7 @@
             :class="{ 'is-selected': isChecked(item) }"
             @click.stop="onRowClick(item)"
           >
-            <!-- 체크박스: 싱글/멀티 모두 표시 -->
+            <!-- 체크박스: 싱글/멀티 공통 -->
             <i
               class="vcs-checkbox"
               :class="checkboxClassForItem(item)"
@@ -132,12 +132,12 @@
                 />
               </svg>
 
-              <!-- 체크 상태 -->
+              <!-- 체크 -->
               <svg
                 v-else
                 focusable="false"
                 xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 30 30"
+                viewBox="0 0 37 37"
               >
                 <polygon
                   points="0 37 37 37 37 0 0 0 0 37 14.6 28.3 5 18.7 7.1 16.6 14.7 24.1 29.9 9.7 32 11.9 14.6 28.3"
@@ -170,22 +170,42 @@ export default {
     RecycleScroller
   },
   props: {
+    /**
+     * v-model 값
+     *  - multiple=true  : Array
+     *  - multiple=false : 단일 값 (id)
+     */
     value: {
       type: [Array, String, Number, Object, null],
       default: null
     },
+    /**
+     * 콤보박스 항목 목록
+     *  - [{ id, label }, ...] 형태
+     */
     items: {
       type: Array,
       required: true
     },
+    /**
+     * 멀티 선택 여부
+     *  - true  : 멀티 셀렉트
+     *  - false : 싱글 셀렉트
+     */
     multiple: {
       type: Boolean,
       default: false
     },
+    /**
+     * 항목 미선택 시 표시할 플레이스홀더
+     */
     placeholder: {
       type: String,
       default: '선택하세요'
     },
+    /**
+     * 검색 인풋 플레이스홀더
+     */
     searchPlaceholder: {
       type: String,
       default: '검색...'
@@ -193,11 +213,21 @@ export default {
   },
   data() {
     return {
+      /**
+       * 드롭다운 열림 상태
+       */
       isOpen: false,
+      /**
+       * 검색어
+       */
       keyword: ''
     }
   },
   computed: {
+    /**
+     * 선택된 id를 항상 배열 형태로 정규화한다.
+     * @returns {Array<any>}
+     */
     normalizedSelectedIds() {
       if (this.multiple) {
         if (Array.isArray(this.value)) {
@@ -211,6 +241,11 @@ export default {
       }
       return [this.value]
     },
+
+    /**
+     * 검색어가 반영된 항목 목록을 반환한다.
+     * @returns {Array<object>}
+     */
     filteredItems() {
       const trimmedKeyword = this.keyword.trim()
       if (!trimmedKeyword) {
@@ -226,45 +261,94 @@ export default {
         return label.toLowerCase().indexOf(lowerKeyword) !== -1
       })
     },
+
     /**
-     * 선택된 항목 라벨을 ", " 로 이어붙인 텍스트
-     * - 예: "Eqp 1(장비 1), Eqp 2(장비 2), Eqp 3(장..."
-     * - 실제 줄임은 CSS ellipsis로 처리
+     * 컨트롤 영역에 표시할 요약 텍스트를 반환한다.
+     *  - 싱글: 선택된 항목의 라벨
+     *  - 멀티: 앞에서부터 최대 7개 라벨을 ", "로 연결, 초과 시 ", ..." 추가
+     * @returns {string}
      */
     summaryText() {
-      if (this.normalizedSelectedIds.length === 0) {
+      const selectedIds = this.normalizedSelectedIds
+      const selectedCount = selectedIds.length
+
+      if (selectedCount === 0) {
         return ''
       }
 
-      const selectedIdSet = new Set(this.normalizedSelectedIds)
-      const selectedItems = this.items.filter(item =>
-        selectedIdSet.has(item.id)
-      )
-
-      const labels = selectedItems.map(item => {
-        if (item && item.label !== undefined && item.label !== null) {
-          return String(item.label)
+      // 싱글 모드
+      if (!this.multiple) {
+        const selectedId = selectedIds[0]
+        const found = this.items.find(item => item.id === selectedId)
+        if (found && found.label !== undefined && found.label !== null) {
+          return String(found.label)
         }
-        return String(item.id)
-      })
+        return String(selectedId)
+      }
 
-      return labels.join(', ')
+      // 멀티 모드: 앞에서부터 최대 MAX_LABEL_COUNT 개만 표시
+      const MAX_LABEL_COUNT = 7
+      const labels = []
+      const limit = Math.min(selectedCount, MAX_LABEL_COUNT)
+
+      for (let index = 0; index < limit; index += 1) {
+        const id = selectedIds[index]
+        const found = this.items.find(item => item.id === id)
+
+        if (found && found.label !== undefined && found.label !== null) {
+          labels.push(String(found.label))
+        } else {
+          labels.push(String(id))
+        }
+      }
+
+      let text = labels.join(', ')
+      if (selectedCount > MAX_LABEL_COUNT) {
+        text += ', ...'
+      }
+
+      return text
     },
+
+    /**
+     * 전체 항목 수를 반환한다.
+     * @returns {number}
+     */
     totalCount() {
       return this.items.length
     },
+
+    /**
+     * 선택된 항목 수를 반환한다.
+     * @returns {number}
+     */
     selectedCount() {
       return this.normalizedSelectedIds.length
     },
+
+    /**
+     * 전체 선택 여부를 판단한다.
+     * @returns {boolean}
+     */
     isAllSelected() {
       return this.totalCount > 0 && this.selectedCount === this.totalCount
     },
+
+    /**
+     * 일부 선택(부분 선택) 상태인지 여부를 판단한다.
+     * @returns {boolean}
+     */
     isPartiallySelected() {
       return (
         this.selectedCount > 0 &&
         this.selectedCount < this.totalCount
       )
     },
+
+    /**
+     * Select All 체크박스에 적용할 클래스명을 반환한다.
+     * @returns {string}
+     */
     selectAllCheckboxClass() {
       if (this.isAllSelected) {
         return 'is-checked'
@@ -274,6 +358,11 @@ export default {
       }
       return 'is-unchecked'
     },
+
+    /**
+     * Select All 라벨에 적용할 클래스명을 반환한다.
+     * @returns {string}
+     */
     selectAllLabelClass() {
       if (this.isAllSelected || this.isPartiallySelected) {
         return 'is-checked'
@@ -282,15 +371,38 @@ export default {
     }
   },
   methods: {
+    /**
+     * 드롭다운 열림 상태를 토글한다.
+     * @returns {void}
+     */
     toggleDropdown() {
       this.isOpen = !this.isOpen
     },
+
+    /**
+     * 드롭다운을 닫는다.
+     * @returns {void}
+     */
     closeDropdown() {
       this.isOpen = false
     },
+
+    /**
+     * 주어진 항목이 선택되었는지 여부를 반환한다.
+     * @param {object} item : 항목 객체
+     * @returns {boolean}
+     */
     isChecked(item) {
       return this.normalizedSelectedIds.indexOf(item.id) !== -1
     },
+
+    /**
+     * 행 클릭 시 동작을 수행한다.
+     *  - 멀티: 선택 목록 토글
+     *  - 싱글: 선택 / 해제 후 드롭다운 닫기
+     * @param {object} item : 항목 객체
+     * @returns {void}
+     */
     onRowClick(item) {
       if (this.multiple) {
         const next = Array.isArray(this.value) ? this.value.slice() : []
@@ -318,6 +430,11 @@ export default {
       this.$emit('change', nextValue)
       this.closeDropdown()
     },
+
+    /**
+     * Select All 클릭 시 전체 선택/해제를 수행한다.
+     * @returns {void}
+     */
     onSelectAllClick() {
       if (!this.multiple) {
         return
@@ -333,12 +450,30 @@ export default {
       this.$emit('input', allIds)
       this.$emit('change', allIds)
     },
+
+    /**
+     * 항목별 체크박스에 적용할 클래스명을 반환한다.
+     * @param {object} item : 항목 객체
+     * @returns {string}
+     */
     checkboxClassForItem(item) {
       return this.isChecked(item) ? 'is-checked' : 'is-unchecked'
     },
+
+    /**
+     * 항목 라벨에 적용할 클래스명을 반환한다.
+     * @param {object} item : 항목 객체
+     * @returns {string}
+     */
     labelClassForItem(item) {
       return this.isChecked(item) ? 'is-checked' : 'is-unchecked'
     },
+
+    /**
+     * 컴포넌트 영역 밖을 클릭했을 때 드롭다운을 닫는다.
+     * @param {MouseEvent} event : 클릭 이벤트
+     * @returns {void}
+     */
     handleClickOutside(event) {
       if (!this.$el.contains(event.target)) {
         this.closeDropdown()
@@ -483,7 +618,7 @@ export default {
   height: 16px;
 }
 
-/* ===== 라벨 스타일 ===== */
+/* 라벨 */
 .vcs-option-label {
   margin-left: 8px;
   font-size: 12px;
@@ -506,3 +641,4 @@ export default {
   line-height: 16px;
 }
 </style>
+```0
