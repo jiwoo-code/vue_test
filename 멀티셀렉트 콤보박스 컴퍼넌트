@@ -104,7 +104,7 @@
       <RecycleScroller
         class="vcs-options"
         :items="filteredItems"
-        :item-size="32"
+        :item-size="28"
         key-field="id"
       >
         <template v-slot="{ item }">
@@ -573,10 +573,12 @@ export default {
   max-height: 260px;
 }
 
+/* 각 행: 간격 조금 줄이고 높이 안정화 */
 .vcs-option-row {
   display: flex;
   align-items: center;
-  padding: 4px 8px;
+  padding: 2px 8px;
+  min-height: 24px;
   box-sizing: border-box;
   cursor: pointer;
 }
@@ -626,6 +628,7 @@ export default {
   cursor: pointer;
   user-select: none;
   font-family: 'NoteSans', Arial, sans-serif !important;
+  line-height: 16px;
 }
 
 /* 체크된 상태 */
@@ -638,7 +641,5 @@ export default {
 .vcs-option-label.is-unchecked {
   color: #333333;
   font-weight: 400;
-  line-height: 16px;
 }
 </style>
-```0
