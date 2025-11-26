@@ -1,3 +1,67 @@
+맞아, 방금 전에 준 svg는 내가 새로 그린 거라서, 지우님이 예전에 직접 가져온 svg랑 모양이 달라요.
+이번엔 지우님이 알려준 코드 그대로 .svg 파일로 분리한 버전으로 다시 정리해줄게요 😊
+1. SVG 파일들 (지우님이 준 코드 기반)
+경로:
+src/assets/style/svg/virtual-dropdown/
+1-1. arrow_down.svg
+지우님이 준 화살표 그대로:
+코드 복사
+Svg
+<svg
+  focusable="false"
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 30 30"
+>
+  <polygon
+    points="15.1 23.3 2.3 10.5 3.3 9.5 15.1 21.2 26.8 9.5 27.9 10.5 15.1 23.3"
+  ></polygon>
+</svg>
+1-2. checkbox_unchecked.svg
+코드 복사
+Svg
+<svg
+  focusable="false"
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 30 30"
+>
+  <path
+    d="M0 0 H30 V30 H0 V0 L2 2 V28 H28 V2 H2 L0 0Z"
+  ></path>
+</svg>
+1-3. checkbox_checked.svg
+지우님이 준 체크 아이콘 polygon 그대로:
+코드 복사
+Svg
+<svg
+  focusable="false"
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 30 30"
+>
+  <polygon
+    points="0 37 37 37 37 0 0 0 0 37 14.6 28.3 5 18.7 7.1 16.6 14.7 24.1 29.9 9.7 32 11.9 14.6 28.3"
+  ></polygon>
+</svg>
+1-4. checkbox_indeterminate.svg
+코드 복사
+Svg
+<svg
+  focusable="false"
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 30 30"
+>
+  <path
+    class="st0"
+    d="M30,0h-1.9H1.9H0v1.9V30h1.9h26.2H30v-1.9V0z M28.1,28.1H1.9V1.9h26.2V28.1z"
+  ></path>
+  <rect x="8" y="8" width="13.9" height="13.9"></rect>
+</svg>
+위 네 개는 지우님이 보내준 svg 구조 그대로 파일로 쪼갠 거야.
+색/라인 같은 건 svg 내부 기본값(대부분 검정) 그대로 쓰고, VirtualComboSelect에서는 CSS로 background-image만 바인딩해서 사용.
+2. VirtualComboSelect.vue 전체 코드 (주석 포함 + searchable + background svg)
+이 파일은 이전 메시지에서 만든 버전과 동일하고,
+svg 내부 내용과는 상관 없이 파일 경로만 신경 쓰면 돼.
+코드 복사
+Vue
 <template>
   <div class="virtual-combo-select">
     <!-- 컨트롤 영역 -->
@@ -9,30 +73,22 @@
         {{ placeholder }}
       </span>
 
-      <!-- 화살표 아이콘 -->
-      <i class="vcs-arrow-icon" :class="{ open: isOpen }">
-        <svg
-          focusable="false"
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 30 30"
-        >
-          <polygon
-            points="15.1 23.3 2.3 10.5 3.3 9.5 15.1 21.2 26.8 9.5 27.9 10.5 15.1 23.3"
-          />
-        </svg>
-      </i>
+      <!-- 화살표 아이콘 (background-image 사용) -->
+      <i class="vcs-arrow-icon" :class="{ open: isOpen }"></i>
     </div>
 
     <!-- 드롭다운 -->
     <div v-if="isOpen" class="vcs-dropdown">
-      <!-- 검색 -->
-      <input
-        v-model="keyword"
-        type="text"
-        class="vcs-search-input"
-        :placeholder="searchPlaceholder"
-        @click.stop
-      />
+      <!-- 검색 영역: searchable = true 일 때만 표시 -->
+      <template v-if="searchable">
+        <input
+          v-model="keyword"
+          type="text"
+          class="vcs-search-input"
+          :placeholder="searchPlaceholder"
+          @click.stop
+        />
+      </template>
 
       <!-- 멀티일 때만 Select All -->
       <div
@@ -44,53 +100,7 @@
           class="vcs-checkbox"
           :class="selectAllCheckboxClass"
           @click.stop.prevent="onSelectAllClick"
-        >
-          <!-- 언체크드 -->
-          <svg
-            v-if="selectAllCheckboxClass === 'is-unchecked'"
-            focusable="false"
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 30 30"
-          >
-            <path
-              d="M0 0 H30 V30 H0 V0 L2 2 V28 H28 V2 H2 L0 0Z"
-              fill="currentColor"
-            />
-          </svg>
-
-          <!-- 체크 -->
-          <svg
-            v-else-if="selectAllCheckboxClass === 'is-checked'"
-            focusable="false"
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 37 37"
-          >
-            <polygon
-              points="0 37 37 37 37 0 0 0 0 37 14.6 28.3 5 18.7 7.1 16.6 14.7 24.1 29.9 9.7 32 11.9 14.6 28.3"
-              fill="currentColor"
-            />
-          </svg>
-
-          <!-- 일부 선택 -->
-          <svg
-            v-else
-            focusable="false"
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 30 30"
-          >
-            <path
-              d="M30,0h-1.9H1.9H0v1.9V30h1.9h26.2H30v-1.9V0z M28.1,28.1H1.9V1.9h26.2V28.1z"
-              fill="currentColor"
-            />
-            <rect
-              x="8"
-              y="8"
-              width="13.9"
-              height="13.9"
-              fill="currentColor"
-            />
-          </svg>
-        </i>
+        ></i>
 
         <span
           class="vcs-option-label"
@@ -104,7 +114,7 @@
       <RecycleScroller
         class="vcs-options"
         :items="filteredItems"
-        :item-size="28"
+        :item-size="ITEM_ROW_HEIGHT"
         key-field="id"
       >
         <template v-slot="{ item }">
@@ -113,38 +123,12 @@
             :class="{ 'is-selected': isChecked(item) }"
             @click.stop="onRowClick(item)"
           >
-            <!-- 체크박스: 싱글/멀티 공통 -->
+            <!-- 체크박스 -->
             <i
               class="vcs-checkbox"
               :class="checkboxClassForItem(item)"
               @click.stop.prevent="onRowClick(item)"
-            >
-              <!-- 언체크드 -->
-              <svg
-                v-if="!isChecked(item)"
-                focusable="false"
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 30 30"
-              >
-                <path
-                  d="M0 0 H30 V30 H0 V0 L2 2 V28 H28 V2 H2 L0 0Z"
-                  fill="currentColor"
-                />
-              </svg>
-
-              <!-- 체크 -->
-              <svg
-                v-else
-                focusable="false"
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 37 37"
-              >
-                <polygon
-                  points="0 37 37 37 37 0 0 0 0 37 14.6 28.3 5 18.7 7.1 16.6 14.7 24.1 29.9 9.7 32 11.9 14.6 28.3"
-                  fill="currentColor"
-                />
-              </svg>
-            </i>
+            ></i>
 
             <!-- 라벨 -->
             <span
@@ -163,6 +147,17 @@
 <script>
 import { RecycleScroller } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
+
+/**
+ * 컨트롤 영역에 표시할 라벨 개수의 상한
+ *  - 초과 시 ", ..." 으로 축약 표현
+ */
+const MAX_LABEL_COUNT = 7
+
+/**
+ * 각 행의 가상 스크롤 기준 높이(px)
+ */
+const ITEM_ROW_HEIGHT = 28
 
 export default {
   name: 'VirtualComboSelect',
@@ -197,7 +192,7 @@ export default {
       default: false
     },
     /**
-     * 항목 미선택 시 표시할 플레이스홀더
+     * 항목 미선택 시 컨트롤 영역에 표시할 플레이스홀더
      */
     placeholder: {
       type: String,
@@ -209,6 +204,15 @@ export default {
     searchPlaceholder: {
       type: String,
       default: '검색...'
+    },
+    /**
+     * 검색 기능 사용 여부
+     *  - true  : 검색 인풋 노출, 필터링 적용
+     *  - false : 검색 인풋 숨김, 필터링 미적용
+     */
+    searchable: {
+      type: Boolean,
+      default: true
     }
   },
   data() {
@@ -218,12 +222,29 @@ export default {
        */
       isOpen: false,
       /**
-       * 검색어
+       * 검색 키워드
        */
       keyword: ''
     }
   },
   computed: {
+    /**
+     * 각 항목 id를 키로 하는 맵을 생성한다.
+     *  - id → item
+     * @returns {Object<string, object>}
+     */
+    itemMap() {
+      const map = {}
+      const length = this.items.length
+
+      for (let index = 0; index < length; index += 1) {
+        const item = this.items[index]
+        map[item.id] = item
+      }
+
+      return map
+    },
+
     /**
      * 선택된 id를 항상 배열 형태로 정규화한다.
      * @returns {Array<any>}
@@ -239,14 +260,20 @@ export default {
       if (this.value === null || this.value === undefined) {
         return []
       }
+
       return [this.value]
     },
 
     /**
-     * 검색어가 반영된 항목 목록을 반환한다.
+     * 검색 조건이 반영된 항목 목록을 반환한다.
+     *  - searchable=false 이면 원본 items를 그대로 반환한다.
      * @returns {Array<object>}
      */
     filteredItems() {
+      if (!this.searchable) {
+        return this.items
+      }
+
       const trimmedKeyword = this.keyword.trim()
       if (!trimmedKeyword) {
         return this.items
@@ -255,9 +282,11 @@ export default {
       const lowerKeyword = trimmedKeyword.toLowerCase()
       return this.items.filter(item => {
         let label = ''
+
         if (item && item.label !== undefined && item.label !== null) {
           label = String(item.label)
         }
+
         return label.toLowerCase().indexOf(lowerKeyword) !== -1
       })
     },
@@ -265,7 +294,7 @@ export default {
     /**
      * 컨트롤 영역에 표시할 요약 텍스트를 반환한다.
      *  - 싱글: 선택된 항목의 라벨
-     *  - 멀티: 앞에서부터 최대 7개 라벨을 ", "로 연결, 초과 시 ", ..." 추가
+     *  - 멀티: 앞에서부터 최대 MAX_LABEL_COUNT개 라벨을 ", "로 연결, 초과 시 ", ..." 추가
      * @returns {string}
      */
     summaryText() {
@@ -279,24 +308,25 @@ export default {
       // 싱글 모드
       if (!this.multiple) {
         const selectedId = selectedIds[0]
-        const found = this.items.find(item => item.id === selectedId)
-        if (found && found.label !== undefined && found.label !== null) {
-          return String(found.label)
+        const item = this.itemMap[selectedId]
+
+        if (item && item.label !== undefined && item.label !== null) {
+          return String(item.label)
         }
+
         return String(selectedId)
       }
 
-      // 멀티 모드: 앞에서부터 최대 MAX_LABEL_COUNT 개만 표시
-      const MAX_LABEL_COUNT = 7
+      // 멀티 모드
       const labels = []
       const limit = Math.min(selectedCount, MAX_LABEL_COUNT)
 
       for (let index = 0; index < limit; index += 1) {
         const id = selectedIds[index]
-        const found = this.items.find(item => item.id === id)
+        const item = this.itemMap[id]
 
-        if (found && found.label !== undefined && found.label !== null) {
-          labels.push(String(found.label))
+        if (item && item.label !== undefined && item.label !== null) {
+          labels.push(String(item.label))
         } else {
           labels.push(String(id))
         }
@@ -353,9 +383,11 @@ export default {
       if (this.isAllSelected) {
         return 'is-checked'
       }
+
       if (this.isPartiallySelected) {
         return 'is-partially-checked'
       }
+
       return 'is-unchecked'
     },
 
@@ -367,7 +399,16 @@ export default {
       if (this.isAllSelected || this.isPartiallySelected) {
         return 'is-checked'
       }
+
       return 'is-unchecked'
+    },
+
+    /**
+     * 행 높이 상수를 템플릿에서 참조하기 위한 computed 필드.
+     * @returns {number}
+     */
+    ITEM_ROW_HEIGHT() {
+      return ITEM_ROW_HEIGHT
     }
   },
   methods: {
@@ -405,30 +446,53 @@ export default {
      */
     onRowClick(item) {
       if (this.multiple) {
-        const next = Array.isArray(this.value) ? this.value.slice() : []
-        const index = next.indexOf(item.id)
+        const currentIds = Array.isArray(this.value) ? this.value.slice() : []
+        const nextIds = this.buildNextMultiSelection(currentIds, item.id)
 
-        if (index === -1) {
-          next.push(item.id)
-        } else {
-          next.splice(index, 1)
-        }
-
-        this.$emit('input', next)
-        this.$emit('change', next)
+        this.$emit('input', nextIds)
+        this.$emit('change', nextIds)
         return
       }
 
       const currentId = this.normalizedSelectedIds[0] || null
-      let nextValue = item.id
-
-      if (currentId === item.id) {
-        nextValue = null
-      }
+      const nextValue = this.buildNextSingleSelection(currentId, item.id)
 
       this.$emit('input', nextValue)
       this.$emit('change', nextValue)
       this.closeDropdown()
+    },
+
+    /**
+     * 멀티 셀렉트에서 하나의 id를 토글한 뒤의 배열을 생성한다.
+     * @param {Array<any>} currentIds : 현재 선택된 id 배열
+     * @param {any} toggledId : 토글 대상 id
+     * @returns {Array<any>}
+     */
+    buildNextMultiSelection(currentIds, toggledId) {
+      const next = currentIds.slice()
+      const index = next.indexOf(toggledId)
+
+      if (index === -1) {
+        next.push(toggledId)
+      } else {
+        next.splice(index, 1)
+      }
+
+      return next
+    },
+
+    /**
+     * 싱글 셀렉트에서 현재 값과 토글 대상 id를 받아 다음 값을 계산한다.
+     * @param {any} currentId : 현재 선택된 id (또는 null)
+     * @param {any} toggledId : 토글 대상 id
+     * @returns {any}
+     */
+    buildNextSingleSelection(currentId, toggledId) {
+      if (currentId === toggledId) {
+        return null
+      }
+
+      return toggledId
     },
 
     /**
@@ -523,20 +587,17 @@ export default {
   color: #444444;
 }
 
-/* 화살표 아이콘 */
+/* 화살표 아이콘 (background-image) */
 .vcs-arrow-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  transition-duration: 0.3s;
-  transform: rotate(0deg);
-}
-
-.vcs-arrow-icon svg {
   width: 10px;
   height: 10px;
-  fill: #444444;
+  display: inline-block;
+  background:
+    transparent
+    url('~@/assets/style/svg/virtual-dropdown/arrow_down.svg')
+    center/contain no-repeat;
+  transition-duration: 0.3s;
+  transform: rotate(0deg);
 }
 
 .vcs-arrow-icon.open {
@@ -592,32 +653,39 @@ export default {
   border-bottom: 1px solid #eeeeee;
 }
 
-/* 체크박스 공통 */
+/* 체크박스 공통 (background-image) */
 .vcs-checkbox {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-block;
   width: 16px;
   height: 16px;
-  font-size: 16px;
-  line-height: 16px;
   cursor: pointer;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
 }
 
-/* 언체크 상태: 회색 */
+/* 언체크 상태 */
 .vcs-checkbox.is-unchecked {
-  color: #a5a5a5;
+  background:
+    transparent
+    url('~@/assets/style/svg/virtual-dropdown/checkbox_unchecked.svg')
+    center/contain no-repeat;
 }
 
-/* 체크/일부 선택: 검은색 */
-.vcs-checkbox.is-checked,
+/* 체크 상태 */
+.vcs-checkbox.is-checked {
+  background:
+    transparent
+    url('~@/assets/style/svg/virtual-dropdown/checkbox_checked.svg')
+    center/contain no-repeat;
+}
+
+/* 일부 선택 상태 */
 .vcs-checkbox.is-partially-checked {
-  color: #000000;
-}
-
-.vcs-checkbox svg {
-  width: 16px;
-  height: 16px;
+  background:
+    transparent
+    url('~@/assets/style/svg/virtual-dropdown/checkbox_indeterminate.svg')
+    center/contain no-repeat;
 }
 
 /* 라벨 */
@@ -643,3 +711,9 @@ export default {
   font-weight: 400;
 }
 </style>
+이제:
+svg 파일은 지우님이 준 그대로
+컴포넌트는 background-image로만 그 svg들을 사용
+이라서, 실제 화면 모양도 원래 시스템이랑 거의 동일하게 나올 거예요.
+혹시 체크 아이콘 위치가 예전처럼 살짝 쏠려 보이면,
+그때는 viewBox를 0 0 37 37로 바꾼다든지, 폴리곤 포인트를 조금 조정해서 “센터 정렬 튜닝”도 같이 해볼 수 있어요.
