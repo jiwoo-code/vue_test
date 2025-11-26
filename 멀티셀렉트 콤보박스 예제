@@ -863,3 +863,489 @@ h2 {
 이 정도면:
 “완전 빈 상태” → index.html 하나로 바로 확인 가능
 실제 프로젝트 → VirtualComboSelect만 옮겨 붙이면 재현 가능
+
+
+
+
+
+
+
+
+ㅡㅡㅡㅡㅡㅡㅡ
+
+
+
+
+<template>
+  <div class="virtual-combo-select">
+    <!-- 컨트롤 영역 -->
+    <div class="vcs-control" @click.stop="toggleDropdown">
+      <span v-if="summaryText" class="vcs-summary">
+        {{ summaryText }}
+      </span>
+      <span v-else class="vcs-summary vcs-placeholder">
+        {{ placeholder }}
+      </span>
+      <span class="vcs-arrow" :class="{ open: isOpen }">▾</span>
+    </div>
+
+    <!-- 드롭다운 -->
+    <div v-if="isOpen" class="vcs-dropdown">
+      <!-- 검색 -->
+      <input
+        v-model="keyword"
+        type="text"
+        class="vcs-search-input"
+        :placeholder="searchPlaceholder"
+        @click.stop
+      />
+
+      <!-- 멀티일 때만 Select All -->
+      <div
+        v-if="multiple"
+        class="vcs-option-row vcs-select-all-row"
+        @click.stop="onSelectAllClick"
+      >
+        <button
+          type="button"
+          class="vcs-checkbox"
+          :class="selectAllCheckboxClass"
+          @click.stop.prevent="onSelectAllClick"
+        >
+          <span class="vcs-checkbox-icon"></span>
+        </button>
+        <span
+          class="vcs-option-label"
+          :class="selectAllLabelClass"
+        >
+          전체 선택
+        </span>
+      </div>
+
+      <!-- 리스트 (가상 스크롤) -->
+      <RecycleScroller
+        class="vcs-options"
+        :items="filteredItems"
+        :item-size="32"
+        key-field="id"
+      >
+        <template v-slot="{ item }">
+          <div
+            class="vcs-option-row"
+            :class="{ 'is-selected': isChecked(item) }"
+            @click.stop="onRowClick(item)"
+          >
+            <!-- 멀티일 때만 체크박스 표시 -->
+            <template v-if="multiple">
+              <button
+                type="button"
+                class="vcs-checkbox"
+                :class="checkboxClassForItem(item)"
+                @click.stop.prevent="toggleItem(item)"
+              >
+                <span class="vcs-checkbox-icon"></span>
+              </button>
+            </template>
+
+            <!-- 라벨 -->
+            <span
+              class="vcs-option-label"
+              :class="labelClassForItem(item)"
+            >
+              {{ item.label }}
+            </span>
+          </div>
+        </template>
+      </RecycleScroller>
+    </div>
+  </div>
+</template>
+
+<script>
+import { RecycleScroller } from 'vue-virtual-scroller'
+import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
+
+export default {
+  name: 'VirtualComboSelect',
+  components: {
+    RecycleScroller
+  },
+  props: {
+    /**
+     * v-model 값:
+     *  - multiple=true  : Array
+     *  - multiple=false : 단일 값 (id)
+     */
+    value: {
+      type: [Array, String, Number, Object, null],
+      default: null
+    },
+    /**
+     * 아이템 목록: [{ id, label }, ...]
+     */
+    items: {
+      type: Array,
+      required: true
+    },
+    /**
+     * true  : 멀티 셀렉트
+     * false : 싱글 셀렉트
+     */
+    multiple: {
+      type: Boolean,
+      default: false
+    },
+    placeholder: {
+      type: String,
+      default: '선택하세요'
+    },
+    searchPlaceholder: {
+      type: String,
+      default: '검색...'
+    }
+  },
+  data() {
+    return {
+      isOpen: false,
+      keyword: ''
+    }
+  },
+  computed: {
+    /**
+     * 내부에서 공통으로 쓰기 위한 "선택된 id 배열"
+     */
+    normalizedSelectedIds() {
+      if (this.multiple) {
+        if (Array.isArray(this.value)) {
+          return this.value
+        }
+        return []
+      }
+
+      if (this.value === null || this.value === undefined) {
+        return []
+      }
+      return [this.value]
+    },
+    /**
+     * 검색어 반영된 아이템 목록
+     */
+    filteredItems() {
+      const trimmedKeyword = this.keyword.trim()
+      if (!trimmedKeyword) {
+        return this.items
+      }
+
+      const lowerKeyword = trimmedKeyword.toLowerCase()
+      return this.items.filter(item => {
+        let label = ''
+        if (item && item.label !== undefined && item.label !== null) {
+          label = String(item.label)
+        }
+        return label.toLowerCase().indexOf(lowerKeyword) !== -1
+      })
+    },
+    /**
+     * 선택 요약 텍스트
+     *  - 멀티 : "N개 선택됨"
+     *  - 싱글 : label (또는 id)
+     */
+    summaryText() {
+      if (this.normalizedSelectedIds.length === 0) {
+        return ''
+      }
+
+      if (this.multiple) {
+        return this.normalizedSelectedIds.length + '개 선택됨'
+      }
+
+      const selectedId = this.normalizedSelectedIds[0]
+      const found = this.items.find(item => item.id === selectedId)
+      if (found && found.label !== undefined && found.label !== null) {
+        return String(found.label)
+      }
+
+      return String(selectedId)
+    },
+    // --- Select All 상태 ---
+    totalCount() {
+      return this.items.length
+    },
+    selectedCount() {
+      return this.normalizedSelectedIds.length
+    },
+    isAllSelected() {
+      return this.totalCount > 0 && this.selectedCount === this.totalCount
+    },
+    isPartiallySelected() {
+      return (
+        this.selectedCount > 0 &&
+        this.selectedCount < this.totalCount
+      )
+    },
+    selectAllCheckboxClass() {
+      if (this.isAllSelected) {
+        return 'is-checked'
+      }
+      if (this.isPartiallySelected) {
+        return 'is-partially-checked'
+      }
+      return 'is-unchecked'
+    },
+    selectAllLabelClass() {
+      if (this.isAllSelected || this.isPartiallySelected) {
+        return 'is-checked'
+      }
+      return 'is-unchecked'
+    }
+  },
+  methods: {
+    toggleDropdown() {
+      this.isOpen = !this.isOpen
+    },
+    closeDropdown() {
+      this.isOpen = false
+    },
+    isChecked(item) {
+      return this.normalizedSelectedIds.indexOf(item.id) !== -1
+    },
+    /**
+     * 멀티: 특정 아이템 토글
+     */
+    toggleItem(item) {
+      if (!this.multiple) {
+        return
+      }
+
+      const next = Array.isArray(this.value) ? this.value.slice() : []
+      const index = next.indexOf(item.id)
+
+      if (index === -1) {
+        next.push(item.id)
+      } else {
+        next.splice(index, 1)
+      }
+
+      this.$emit('input', next)
+      this.$emit('change', next)
+    },
+    /**
+     * 행 클릭 동작
+     *  - 멀티 : 토글
+     *  - 싱글 : 선택 / 해제
+     */
+    onRowClick(item) {
+      if (this.multiple) {
+        this.toggleItem(item)
+        return
+      }
+
+      const currentId = this.normalizedSelectedIds[0] || null
+      let nextValue = item.id
+
+      if (currentId === item.id) {
+        nextValue = null
+      }
+
+      this.$emit('input', nextValue)
+      this.$emit('change', nextValue)
+      this.closeDropdown()
+    },
+    /**
+     * Select All 클릭
+     *  - 모두 선택되어 있으면 전체 해제
+     *  - 그 외에는 전체 선택
+     */
+    onSelectAllClick() {
+      if (!this.multiple) {
+        return
+      }
+
+      if (this.isAllSelected) {
+        this.$emit('input', [])
+        this.$emit('change', [])
+        return
+      }
+
+      const allIds = this.items.map(item => item.id)
+      this.$emit('input', allIds)
+      this.$emit('change', allIds)
+    },
+    checkboxClassForItem(item) {
+      return this.isChecked(item) ? 'is-checked' : 'is-unchecked'
+    },
+    labelClassForItem(item) {
+      return this.isChecked(item) ? 'is-checked' : 'is-unchecked'
+    },
+    handleClickOutside(event) {
+      if (!this.$el.contains(event.target)) {
+        this.closeDropdown()
+      }
+    }
+  },
+  mounted() {
+    document.addEventListener('click', this.handleClickOutside)
+  },
+  beforeDestroy() {
+    document.removeEventListener('click', this.handleClickOutside)
+  }
+}
+</script>
+
+<style scoped>
+.virtual-combo-select {
+  position: relative;
+  width: 320px;
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+
+/* 컨트롤 영역 */
+.vcs-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  background-color: #fff;
+}
+
+.vcs-placeholder {
+  color: #aaa;
+}
+
+.vcs-summary {
+  flex: 1;
+  margin-right: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vcs-arrow {
+  transition: transform 0.15s;
+}
+
+.vcs-arrow.open {
+  transform: rotate(180deg);
+}
+
+/* 드롭다운 */
+.vcs-dropdown {
+  position: absolute;
+  z-index: 2000;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* 검색 */
+.vcs-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 0;
+  border-bottom: 1px solid #eee;
+  outline: none;
+  font-size: 13px;
+}
+
+/* 리스트 */
+.vcs-options {
+  max-height: 260px;
+}
+
+.vcs-option-row {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.vcs-option-row:hover {
+  background-color: #f5f5f5;
+}
+
+.vcs-select-all-row {
+  border-bottom: 1px solid #eee;
+}
+
+/* ===== 체크박스 스타일 ===== */
+.vcs-checkbox {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+/* 체크 상태 */
+.vcs-checkbox.is-checked,
+.vcs-checkbox.is-partially-checked {
+  color: #000000;
+  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 16px;
+  cursor: pointer;
+  fill: currentColor;
+}
+
+/* 체크 해제 상태 */
+.vcs-checkbox.is-unchecked {
+  color: #A5A5A5;
+  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 16px;
+  cursor: pointer;
+  outline: none;
+}
+
+/* 체크박스 안의 아이콘(글자) */
+.vcs-checkbox-icon::before {
+  content: '';
+}
+
+/* 체크됨: 체크 표시 */
+.vcs-checkbox.is-checked .vcs-checkbox-icon::before {
+  content: '✓';
+}
+
+/* 일부 선택: 대시 표시 */
+.vcs-checkbox.is-partially-checked .vcs-checkbox-icon::before {
+  content: '–';
+}
+
+/* ===== 라벨 스타일 ===== */
+.vcs-option-label {
+  margin-left: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  font-family: 'NoteSans', Arial, sans-serif !important;
+}
+
+/* 체크된 상태 */
+.vcs-option-label.is-checked {
+  color: #444;
+  font-weight: 600;
+}
+
+/* 체크 해제 상태 */
+.vcs-option-label.is-unchecked {
+  color: #333333;
+  font-weight: 400;
+  line-height: 16px;
+}
+</style>
