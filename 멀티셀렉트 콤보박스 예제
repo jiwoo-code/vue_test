@@ -218,3 +218,63 @@ h2 {
   word-break: break-all;
 }
 </style>
+
+
+
+
+ㅡㅡㅡㅡㅡㅡㅡ
+
+
+1. SVG 파일들
+경로:
+src/assets/style/svg/virtual-dropdown/
+1-1. arrow_down.svg
+코드 복사
+Svg
+<svg
+  focusable="false"
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 30 30"
+>
+  <polygon
+    points="15.1 23.3 2.3 10.5 3.3 9.5 15.1 21.2 26.8 9.5 27.9 10.5 15.1 23.3"
+  ></polygon>
+</svg>
+1-2. checkbox_unchecked.svg
+코드 복사
+Svg
+<svg
+  focusable="false"
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 30 30"
+>
+  <path
+    d="M0 0 H30 V30 H0 V0 L2 2 V28 H28 V2 H2 L0 0Z"
+  ></path>
+</svg>
+1-3. checkbox_checked.svg
+코드 복사
+Svg
+<svg
+  focusable="false"
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 30 30"
+>
+  <polygon
+    points="0 37 37 37 37 0 0 0 0 37 14.6 28.3 5 18.7 7.1 16.6 14.7 24.1 29.9 9.7 32 11.9 14.6 28.3"
+  ></polygon>
+</svg>
+1-4. checkbox_indeterminate.svg
+코드 복사
+Svg
+<svg
+  focusable="false"
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 30 30"
+>
+  <path
+    class="st0"
+    d="M30,0h-1.9H1.9H0v1.9V30h1.9h26.2H30v-1.9V0z M28.1,28.1H1.9V1.9h26.2V28.1z"
+  ></path>
+  <rect x="8" y="8" width="13.9" height="13.9"></rect>
+</svg
