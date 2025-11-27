@@ -1,0 +1,77 @@
+import pandas as pd
+
+# =============================
+# 파일 경로 설정
+# =============================
+dev_tsv = "dev.tsv"
+ops_tsv = "ops.tsv"
+
+output_diff_xlsx = "diff_list.xlsx"
+
+# =============================
+# 설정값
+# =============================
+KEY = "MESSAGE_KEY"
+SYSTEM_ID_COL = "SYSTEM_ID"
+
+# =============================
+# TSV 읽기 (탭 구분, skiprows 없음)
+# =============================
+dev = pd.read_csv(dev_tsv, sep="\t", engine="python", dtype=str)
+ops = pd.read_csv(ops_tsv, sep="\t", engine="python", dtype=str)
+
+# =============================
+# 인덱스를 키로 설정
+# =============================
+dev_key = dev.set_index(KEY)
+ops_key = ops.set_index(KEY)
+
+# =============================
+# 1) 신규 키 목록 (dev → ops로 신규 추가되는 키)
+# =============================
+new_keys = dev_key.index.difference(ops_key.index)
+new_rows = dev_key.loc[new_keys].reset_index()
+
+# =============================
+# 2) 삭제 키 목록 (ops에는 있고 dev에는 없는 키)
+# =============================
+deleted_keys = ops_key.index.difference(dev_key.index)
+deleted_rows = ops_key.loc[deleted_keys].reset_index()
+
+# =============================
+# 3) 공통 키에 대해 컬럼 단위 diff
+# =============================
+common_keys = dev_key.index.intersection(ops_key.index)
+
+diff_list = []
+
+for key in common_keys:
+    dev_row = dev_key.loc[key]
+    ops_row = ops_key.loc[key]
+
+    for col in dev_key.columns:
+        if col == SYSTEM_ID_COL:
+            continue
+
+        dev_val = str(dev_row[col])
+        ops_val = str(ops_row[col])
+
+        if dev_val != ops_val:
+            diff_list.append({
+                KEY: key,
+                "COLUMN": col,
+                "OPS_VALUE": ops_val,
+                "DEV_VALUE": dev_val
+            })
+
+diff_df = pd.DataFrame(diff_list)
+
+# =============================
+# 엑셀로 결과 저장 (3개 시트)
+# =============================
+with pd.ExcelWriter(output_diff_xlsx, engine="openpyxl") as writer:
+    new_rows.to_excel(writer, sheet_name="NEW_KEYS", index=False)
+    deleted_rows.to_excel(writer, sheet_name="DELETED_KEYS", index=False)
+    diff_df.to_excel(writer, sheet_name="DIFF_VALUES", index=False)
+
+print("완료! 차이 목록 생성됨 →", output_diff_xlsx)
