@@ -174,3 +174,357 @@
     </div>
   </div>
 </template>
+
+<script>
+import { RecycleScroller } from 'vue-virtual-scroller'
+import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
+
+const MAX_LABEL_COUNT = 7
+const ITEM_ROW_HEIGHT = 28
+
+export default {
+  name: 'VirtualComboSelect',
+  components: {
+    RecycleScroller
+  },
+  props: {
+    value: {
+      type: [Array, String, Number, Object, null],
+      default: null
+    },
+    items: {
+      type: Array,
+      required: true
+    },
+    multiple: {
+      type: Boolean,
+      default: false
+    },
+    placeholder: {
+      type: String,
+      default: '선택하세요'
+    },
+    searchPlaceholder: {
+      type: String,
+      default: '검색...'
+    },
+    searchable: {
+      type: Boolean,
+      default: true
+    }
+  },
+  data() {
+    return {
+      isOpen: false,
+      keyword: ''
+    }
+  },
+  computed: {
+    itemMap() {
+      const map = {}
+      for (let index = 0; index < this.items.length; index += 1) {
+        const item = this.items[index]
+        map[item.id] = item
+      }
+      return map
+    },
+    normalizedSelectedIds() {
+      if (this.multiple) {
+        return Array.isArray(this.value) ? this.value : []
+      }
+      if (this.value === null || this.value === undefined) {
+        return []
+      }
+      return [this.value]
+    },
+    filteredItems() {
+      if (!this.searchable) {
+        return this.items
+      }
+      const kw = this.keyword.trim().toLowerCase()
+      if (!kw) return this.items
+      return this.items.filter(item =>
+        String(item.label || '').toLowerCase().includes(kw)
+      )
+    },
+    summaryText() {
+      const ids = this.normalizedSelectedIds
+      const count = ids.length
+      if (count === 0) return ''
+
+      if (!this.multiple) {
+        const id = ids[0]
+        const item = this.itemMap[id]
+        return item ? String(item.label) : String(id)
+      }
+
+      const labels = []
+      const limit = Math.min(count, MAX_LABEL_COUNT)
+      for (let index = 0; index < limit; index += 1) {
+        const id = ids[index]
+        const item = this.itemMap[id]
+        labels.push(item ? String(item.label) : String(id))
+      }
+
+      let text = labels.join(', ')
+      if (count > MAX_LABEL_COUNT) text += ', ...'
+      return text
+    },
+    totalCount() {
+      return this.items.length
+    },
+    selectedCount() {
+      return this.normalizedSelectedIds.length
+    },
+    isAllSelected() {
+      return this.totalCount > 0 && this.selectedCount === this.totalCount
+    },
+    isPartiallySelected() {
+      return (
+        this.selectedCount > 0 &&
+        this.selectedCount < this.totalCount
+      )
+    },
+    selectAllLabelClass() {
+      if (this.isAllSelected || this.isPartiallySelected) {
+        return 'is-checked'
+      }
+      return 'is-unchecked'
+    },
+    ITEM_ROW_HEIGHT() {
+      return ITEM_ROW_HEIGHT
+    }
+  },
+  methods: {
+    toggleDropdown() {
+      this.isOpen = !this.isOpen
+    },
+    closeDropdown() {
+      this.isOpen = false
+    },
+    isChecked(item) {
+      return this.normalizedSelectedIds.indexOf(item.id) !== -1
+    },
+    rowClassForItem(item) {
+      if (!this.isChecked(item)) {
+        return {}
+      }
+      if (this.multiple) {
+        return { 'is-selected': true }
+      }
+      return { 'is-selected-single': true }
+    },
+    onRowClick(item) {
+      if (this.multiple) {
+        const current = Array.isArray(this.value) ? this.value.slice() : []
+        const index = current.indexOf(item.id)
+        if (index === -1) {
+          current.push(item.id)
+        } else {
+          current.splice(index, 1)
+        }
+        this.$emit('input', current)
+        this.$emit('change', current)
+        return
+      }
+      const currentId = this.normalizedSelectedIds[0] || null
+      const nextValue = currentId === item.id ? null : item.id
+      this.$emit('input', nextValue)
+      this.$emit('change', nextValue)
+      this.closeDropdown()
+    },
+    onSelectAllClick() {
+      if (!this.multiple) return
+      if (this.isAllSelected) {
+        this.$emit('input', [])
+        this.$emit('change', [])
+        return
+      }
+      const allIds = this.items.map(item => item.id)
+      this.$emit('input', allIds)
+      this.$emit('change', allIds)
+    },
+    labelClassForItem(item) {
+      if (!this.isChecked(item)) {
+        return 'is-unchecked'
+      }
+      if (this.multiple) {
+        return 'is-checked'
+      }
+      return 'is-single-selected'
+    },
+    handleClickOutside(event) {
+      if (!this.$el.contains(event.target)) {
+        this.closeDropdown()
+      }
+    }
+  },
+  mounted() {
+    document.addEventListener('click', this.handleClickOutside)
+  },
+  beforeDestroy() {
+    document.removeEventListener('click', this.handleClickOutside)
+  }
+}
+</script>
+
+<style scoped>
+.virtual-combo-select {
+  position: relative;
+  width: 320px;
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+
+/* 컨트롤 영역 */
+.vcs-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid #bdbdbd;
+  cursor: pointer;
+  background-color: #ffffff;
+  border-radius: 0;
+}
+
+.vcs-summary {
+  flex: 1;
+  margin-right: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #444444;
+}
+
+.vcs-placeholder {
+  color: #aaaaaa;
+}
+
+/* 화살표 (inline svg) */
+.vcs-arrow-icon {
+  width: 10px;
+  height: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition-duration: 0.3s;
+  transform: rotate(0deg);
+}
+
+.vcs-arrow-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: #444444;
+}
+
+.vcs-arrow-icon.open {
+  transform: rotate(-180deg);
+}
+
+/* 드롭다운 */
+.vcs-dropdown {
+  position: absolute;
+  z-index: 2000;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  border: 1px solid #000000;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  background-color: #ffffff;
+  border-radius: 0;
+}
+
+/* 검색 */
+.vcs-search-input {
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-bottom: 1px solid #eeeeee;
+  outline: none;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+/* 리스트 */
+.vcs-options {
+  max-height: 260px;
+  width: 100%;
+}
+
+/* 각 row */
+.vcs-option-row {
+  display: flex;
+  align-items: center;
+  padding: 2px 8px;
+  min-height: 24px;
+  cursor: pointer;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+/* hover */
+.vcs-option-row:hover {
+  background-color: #f0f0f0;
+}
+
+/* 싱글 선택 시 – 배경/폰트 반전 */
+.vcs-option-row.is-selected-single {
+  background-color: #444444;
+}
+
+.vcs-option-row.is-selected-single:hover {
+  background-color: #444444;
+}
+
+/* 체크박스 컨테이너 */
+.vcs-checkbox {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.vcs-checkbox svg {
+  width: 100%;
+  height: 100%;
+  fill: #000000;
+}
+
+/* 라벨 */
+.vcs-option-label {
+  margin-left: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  font-family: 'NoteSans', Arial, sans-serif !important;
+}
+
+/* 멀티: 체크된 라벨 */
+.vcs-option-label.is-checked {
+  color: #444444;
+  font-weight: 600;
+}
+
+/* 싱글: 체크된 라벨 (배경 반전에 맞춰 흰색, 굵게 X) */
+.vcs-option-label.is-single-selected {
+  color: #ffffff;
+  font-weight: 400;
+}
+
+/* 체크 해제 라벨 */
+.vcs-option-label.is-unchecked {
+  color: #333333;
+  font-weight: 400;
+}
+
+/* Select All 구분선 */
+.vcs-select-all-row {
+  border-bottom: 1px solid #eeeeee;
+}
+</style>
