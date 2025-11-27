@@ -28,7 +28,7 @@
 
     <!-- 드롭다운 -->
     <div v-if="isOpen" class="vcs-dropdown">
-      <!-- 검색 (searchable=true일 때만 표시) -->
+      <!-- 검색 -->
       <input
         v-if="searchable"
         v-model="keyword"
@@ -100,7 +100,7 @@
           class="vcs-option-label"
           :class="selectAllLabelClass"
         >
-          전체 선택
+          Select All
         </span>
       </div>
 
@@ -176,10 +176,9 @@ export default {
   },
   props: {
     /**
-     * 컴포넌트 전체 가로너비(width)
-     *  - 숫자 : px 단위로 처리 (예: 320 -> 320px)
-     *  - 문자열 : 그대로 적용 (예: '100%', '24rem')
-     *  - 컨트롤 박스와 드롭다운 목록 모두에 동일하게 적용됨
+     * 컴포넌트 전체 가로너비
+     * 숫자: px 단위 (예: 320 -> 320px)
+     * 문자열: 그대로 적용 (예: '100%', '24rem')
      */
     width: {
       type: [String, Number],
@@ -187,8 +186,8 @@ export default {
     },
     /**
      * v-model 값
-     *  - multiple=true  : Array
-     *  - multiple=false : 단일 값 (id)
+     * multiple=true: Array
+     * multiple=false: 단일 값(id)
      */
     value: {
       type: [Array, String, Number, Object, null],
@@ -196,7 +195,7 @@ export default {
     },
     /**
      * 콤보박스 항목 목록
-     *  - [{ id, label }, ...] 형태
+     * [{ id, label }, ...] 형태
      */
     items: {
       type: Array,
@@ -204,8 +203,6 @@ export default {
     },
     /**
      * 멀티 선택 여부
-     *  - true  : 멀티 셀렉트
-     *  - false : 싱글 셀렉트
      */
     multiple: {
       type: Boolean,
@@ -216,7 +213,7 @@ export default {
      */
     placeholder: {
       type: String,
-      default: '선택하세요'
+      default: 'Select'
     },
     /**
      * 검색 인풋 플레이스홀더
@@ -227,8 +224,7 @@ export default {
     },
     /**
      * 검색 기능 사용 여부
-     *  - true  : 검색 인풋 표시 + 필터링 적용
-     *  - false : 검색 인풋 숨김 + 전체 항목 표시
+     * true면 검색 인풋 표시
      */
     searchable: {
       type: Boolean,
@@ -246,8 +242,7 @@ export default {
        */
       keyword: '',
       /**
-       * 선택 상태를 O(1)로 판별하기 위한 Set
-       *  - v-model(value)을 감시하여 동기화
+       * 선택 상태를 관리하는 Set
        */
       selectedSet: new Set()
     }
@@ -279,9 +274,8 @@ export default {
   },
   computed: {
     /**
-     * 검색 활성 상태인지 여부
-     *  - searchable=true 이면서 keyword가 공백이 아닌 경우
-     * @returns {boolean}
+     * 검색 활성 상태인지 여부를 반환한다.
+     * searchable=true이고 keyword가 공백이 아닌 경우
      */
     isFilteringActive() {
       if (!this.searchable) {
@@ -289,55 +283,47 @@ export default {
       }
       return this.keyword.trim().length > 0
     },
-
     /**
-     * 선택된 id를 배열 형태로 반환한다.
-     * @returns {Array<any>}
+     * 선택된 id를 배열로 반환한다.
      */
     normalizedSelectedIds() {
       return Array.from(this.selectedSet)
     },
-
     /**
      * 검색어가 반영된 항목 목록을 반환한다.
-     *  - searchable=false 이면 검색어 무시
-     * @returns {Array<object>}
      */
     filteredItems() {
       if (!this.searchable) {
         return this.items
       }
 
-      const trimmedKeyword = this.keyword.trim()
-      if (!trimmedKeyword) {
+      const trimmed = this.keyword.trim()
+      if (!trimmed) {
         return this.items
       }
 
-      const lowerKeyword = trimmedKeyword.toLowerCase()
+      const lower = trimmed.toLowerCase()
       return this.items.filter(item => {
         let label = ''
         if (item && item.label !== undefined && item.label !== null) {
           label = String(item.label)
         }
-        return label.toLowerCase().indexOf(lowerKeyword) !== -1
+        return label.toLowerCase().indexOf(lower) !== -1
       })
     },
-
     /**
      * 컨트롤 영역에 표시할 요약 텍스트를 반환한다.
-     *  - 싱글: 선택된 항목의 라벨
-     *  - 멀티: 앞에서부터 최대 7개 라벨을 ", "로 연결, 초과 시 ", ..." 추가
-     * @returns {string}
+     * 싱글: 선택된 항목 라벨
+     * 멀티: 최대 7개 라벨 표시 후 초과 시 "..." 추가
      */
     summaryText() {
       const selectedIds = this.normalizedSelectedIds
-      const selectedCount = selectedIds.length
+      const count = selectedIds.length
 
-      if (selectedCount === 0) {
+      if (count === 0) {
         return ''
       }
 
-      // 싱글 모드
       if (!this.multiple) {
         const selectedId = selectedIds[0]
         const found = this.items.find(item => item.id === selectedId)
@@ -347,10 +333,9 @@ export default {
         return String(selectedId)
       }
 
-      // 멀티 모드: 앞에서부터 최대 MAX_LABEL_COUNT 개만 표시
-      const MAX_LABEL_COUNT = 7
+      const maxCount = 7
       const labels = []
-      const limit = Math.min(selectedCount, MAX_LABEL_COUNT)
+      const limit = Math.min(count, maxCount)
 
       for (let index = 0; index < limit; index += 1) {
         const id = selectedIds[index]
@@ -364,40 +349,32 @@ export default {
       }
 
       let text = labels.join(', ')
-      if (selectedCount > MAX_LABEL_COUNT) {
+      if (count > maxCount) {
         text += ', ...'
       }
 
       return text
     },
-
     /**
      * 전체 항목 수를 반환한다.
-     * @returns {number}
      */
     totalCount() {
       return this.items.length
     },
-
     /**
      * 선택된 항목 수를 반환한다.
-     * @returns {number}
      */
     selectedCount() {
       return this.selectedSet.size
     },
-
     /**
      * 필터링된 항목 수를 반환한다.
-     * @returns {number}
      */
     filteredCount() {
       return this.filteredItems.length
     },
-
     /**
-     * 필터링된 항목 중에서 선택된 항목 수를 반환한다.
-     * @returns {number}
+     * 필터링된 항목 중 선택된 항목 수를 반환한다.
      */
     selectedInFilteredCount() {
       if (this.selectedSet.size === 0) {
@@ -413,12 +390,9 @@ export default {
       }
       return count
     },
-
     /**
-     * 전체 선택 여부를 판단한다.
-     *  - 검색 중일 때 : 필터링된 항목 기준으로 판단
-     *  - 검색 아닐 때 : 전체 items 기준으로 판단
-     * @returns {boolean}
+     * 전체 선택 여부를 반환한다.
+     * 검색 중에는 필터된 항목 기준으로 판단한다.
      */
     isAllSelected() {
       if (this.isFilteringActive) {
@@ -430,12 +404,9 @@ export default {
 
       return this.totalCount > 0 && this.selectedCount === this.totalCount
     },
-
     /**
-     * 일부 선택(부분 선택) 상태인지 여부를 판단한다.
-     *  - 검색 중일 때 : 필터링된 항목 내에서 일부만 선택된 경우
-     *  - 검색 아닐 때 : 전체 items 기준 일부 선택
-     * @returns {boolean}
+     * 일부 선택 상태인지 여부를 반환한다.
+     * 검색 중에는 필터된 항목 기준으로 판단한다.
      */
     isPartiallySelected() {
       if (this.isFilteringActive) {
@@ -450,10 +421,8 @@ export default {
         this.selectedCount < this.totalCount
       )
     },
-
     /**
-     * Select All 체크박스에 적용할 클래스명을 반환한다.
-     * @returns {string}
+     * Select All 체크박스 클래스명을 반환한다.
      */
     selectAllCheckboxClass() {
       if (this.isAllSelected) {
@@ -464,10 +433,8 @@ export default {
       }
       return 'is-unchecked'
     },
-
     /**
-     * Select All 라벨에 적용할 클래스명을 반환한다.
-     * @returns {string}
+     * Select All 라벨 클래스명을 반환한다.
      */
     selectAllLabelClass() {
       if (this.isAllSelected || this.isPartiallySelected) {
@@ -479,35 +446,26 @@ export default {
   methods: {
     /**
      * 드롭다운 열림 상태를 토글한다.
-     * @returns {void}
      */
     toggleDropdown() {
       this.isOpen = !this.isOpen
     },
-
     /**
      * 드롭다운을 닫는다.
-     * @returns {void}
      */
     closeDropdown() {
       this.isOpen = false
     },
-
     /**
-     * 주어진 항목이 선택되었는지 여부를 반환한다.
-     * @param {object} item : 항목 객체
-     * @returns {boolean}
+     * 항목이 선택되었는지 여부를 반환한다.
      */
     isChecked(item) {
       return this.selectedSet.has(item.id)
     },
-
     /**
-     * 행에 적용할 클래스명을 계산한다.
-     *  - 멀티: is-selected
-     *  - 싱글: is-selected-single (배경 검은색 + 글자 흰색)
-     * @param {object} item : 항목 객체
-     * @returns {object}
+     * 행 클래스명을 반환한다.
+     * 멀티: is-selected
+     * 싱글: is-selected-single
      */
     rowClassForItem(item) {
       if (!this.isChecked(item)) {
@@ -520,13 +478,10 @@ export default {
 
       return { 'is-selected-single': true }
     },
-
     /**
-     * 행 클릭 시 동작을 수행한다.
-     *  - 멀티: 선택 목록 토글
-     *  - 싱글: 선택 / 해제 후 드롭다운 닫기
-     * @param {object} item : 항목 객체
-     * @returns {void}
+     * 행 클릭 시 선택 상태를 토글한다.
+     * 멀티: Set 기반으로 추가/제거 후 배열로 emit
+     * 싱글: 단일 선택 토글 후 닫기
      */
     onRowClick(item) {
       if (this.multiple) {
@@ -559,37 +514,33 @@ export default {
       this.$emit('change', nextValue)
       this.closeDropdown()
     },
-
     /**
-     * Select All 클릭 시 전체 선택/해제를 수행한다.
-     *  - 검색 중 : 필터링된 항목만 대상으로 선택/해제
-     *  - 검색 없음 : 전체 항목 대상으로 선택/해제
-     * @returns {void}
+     * Select All 클릭 시 전체 선택 또는 해제를 수행한다.
+     * 검색 중에는 필터된 항목만 대상으로 동작한다.
      */
     onSelectAllClick() {
       if (!this.multiple) {
         return
       }
 
-      const nextSet = new Set(this.selectedSet)
-
       if (this.isFilteringActive) {
-        const filteredIds = this.filteredItems.map(item => item.id)
+        const filteredIdSet = new Set(this.filteredItems.map(item => item.id))
 
         if (this.isAllSelected) {
-          for (let index = 0; index < filteredIds.length; index += 1) {
-            nextSet.delete(filteredIds[index])
-          }
+          const nextSet = new Set(
+            Array.from(this.selectedSet).filter(id => !filteredIdSet.has(id))
+          )
+          this.selectedSet = nextSet
+          const nextArray = Array.from(nextSet)
+          this.$emit('input', nextArray)
+          this.$emit('change', nextArray)
         } else {
-          for (let index = 0; index < filteredIds.length; index += 1) {
-            nextSet.add(filteredIds[index])
-          }
+          const nextSet = new Set([...this.selectedSet, ...filteredIdSet])
+          this.selectedSet = nextSet
+          const nextArray = Array.from(nextSet)
+          this.$emit('input', nextArray)
+          this.$emit('change', nextArray)
         }
-
-        this.selectedSet = nextSet
-        const nextArray = Array.from(nextSet)
-        this.$emit('input', nextArray)
-        this.$emit('change', nextArray)
         return
       }
 
@@ -601,32 +552,23 @@ export default {
       }
 
       const allIds = this.items.map(item => item.id)
-      const filledSet = new Set()
-      for (let index = 0; index < allIds.length; index += 1) {
-        filledSet.add(allIds[index])
-      }
+      const filledSet = new Set(allIds)
 
       this.selectedSet = filledSet
       const nextArray = Array.from(filledSet)
       this.$emit('input', nextArray)
       this.$emit('change', nextArray)
     },
-
     /**
-     * 항목별 체크박스에 적용할 클래스명을 반환한다.
-     * @param {object} item : 항목 객체
-     * @returns {string}
+     * 항목별 체크박스 클래스명을 반환한다.
      */
     checkboxClassForItem(item) {
       return this.isChecked(item) ? 'is-checked' : 'is-unchecked'
     },
-
     /**
-     * 항목 라벨에 적용할 클래스명을 반환한다.
-     *  - 멀티: 선택 시 굵게
-     *  - 싱글: 선택 시 글자색 흰색, 굵게는 아님
-     * @param {object} item : 항목 객체
-     * @returns {string}
+     * 항목 라벨 클래스명을 반환한다.
+     * 멀티: 선택 시 굵게
+     * 싱글: 선택 시 흰색 글자
      */
     labelClassForItem(item) {
       if (!this.isChecked(item)) {
@@ -639,11 +581,8 @@ export default {
 
       return 'is-single-selected'
     },
-
     /**
-     * 컴포넌트 영역 밖을 클릭했을 때 드롭다운을 닫는다.
-     * @param {MouseEvent} event : 클릭 이벤트
-     * @returns {void}
+     * 컴포넌트 밖을 클릭하면 드롭다운을 닫는다.
      */
     handleClickOutside(event) {
       if (!this.$el.contains(event.target)) {
@@ -667,7 +606,7 @@ export default {
   margin-bottom: 24px;
 }
 
-/* 컨트롤 영역: 직각 사각형 + 옅은 회색 테두리 */
+/* 컨트롤 영역 */
 .vcs-control {
   display: flex;
   align-items: center;
@@ -719,7 +658,7 @@ export default {
   transform: rotate(-180deg);
 }
 
-/* 드롭다운: 검은색 테두리 + 직각 */
+/* 드롭다운 */
 .vcs-dropdown {
   position: absolute;
   z-index: 2000;
@@ -733,7 +672,7 @@ export default {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
-/* 검색 */
+/* 검색 인풋 */
 .vcs-search-input {
   width: 100%;
   box-sizing: border-box;
@@ -750,7 +689,7 @@ export default {
   width: 100%;
 }
 
-/* 각 행: block으로 전체 영역 채우기 */
+/* 각 행 */
 .vcs-option-row {
   display: block;
   padding: 0 8px;
@@ -760,19 +699,19 @@ export default {
   width: 100%;
 }
 
-/* row hover 시 회색 배경 */
+/* 행 hover 시 배경 */
 .vcs-option-row:hover {
   background-color: #e6e6e6;
 }
 
-/* Select All 행: 위아래 여백 6px, 테두리색과 동일한 구분선 */
+/* Select All 행 */
 .vcs-select-all-row {
   border-bottom: 1px solid #000000;
   padding: 6px 8px;
   height: auto;
 }
 
-/* 싱글 선택: 검은 배경 + 흰 글자 (hover도 유지) */
+/* 싱글 선택 행 */
 .vcs-option-row.is-selected-single {
   background-color: #000000;
 }
@@ -781,7 +720,7 @@ export default {
   background-color: #000000;
 }
 
-/* 체크박스 공통 */
+/* 체크박스 */
 .vcs-checkbox {
   display: inline-flex;
   align-items: center;
@@ -794,12 +733,11 @@ export default {
   vertical-align: middle;
 }
 
-/* 언체크 상태: 회색 */
+/* 체크 상태 색상 */
 .vcs-checkbox.is-unchecked {
   color: #a5a5a5;
 }
 
-/* 체크/일부 선택: 검은색 */
 .vcs-checkbox.is-checked,
 .vcs-checkbox.is-partially-checked {
   color: #000000;
@@ -822,19 +760,19 @@ export default {
   vertical-align: middle;
 }
 
-/* 멀티: 체크된 상태 */
+/* 멀티: 체크된 라벨 */
 .vcs-option-label.is-checked {
   color: #444444;
   font-weight: 600;
 }
 
-/* 싱글: 선택된 상태 (흰 글자, 굵게 X) */
+/* 싱글: 선택된 라벨 */
 .vcs-option-label.is-single-selected {
   color: #ffffff;
   font-weight: 400;
 }
 
-/* 체크 해제 상태 */
+/* 체크 해제 라벨 */
 .vcs-option-label.is-unchecked {
   color: #333333;
   font-weight: 400;
