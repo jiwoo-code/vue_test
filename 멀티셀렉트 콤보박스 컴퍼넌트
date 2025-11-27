@@ -3,7 +3,6 @@
     class="virtual-combo-select"
     :style="{ width: typeof width === 'number' ? width + 'px' : width }"
   >
-    <!-- 컨트롤 영역 -->
     <div class="vcs-control" @click.stop="toggleDropdown">
       <span v-if="summaryText" class="vcs-summary">
         {{ summaryText }}
@@ -12,7 +11,6 @@
         {{ placeholder }}
       </span>
 
-      <!-- 화살표 아이콘 -->
       <i class="vcs-arrow-icon" :class="{ open: isOpen }">
         <svg
           focusable="false"
@@ -26,9 +24,7 @@
       </i>
     </div>
 
-    <!-- 드롭다운 -->
     <div v-if="isOpen" class="vcs-dropdown">
-      <!-- 검색 -->
       <input
         v-if="searchable"
         v-model="keyword"
@@ -38,7 +34,6 @@
         @click.stop
       />
 
-      <!-- 멀티일 때만 Select All -->
       <div
         v-if="multiple"
         class="vcs-option-row vcs-select-all-row"
@@ -49,7 +44,6 @@
           :class="selectAllCheckboxClass"
           @click.stop.prevent="onSelectAllClick"
         >
-          <!-- 언체크드 -->
           <svg
             v-if="selectAllCheckboxClass === 'is-unchecked'"
             focusable="false"
@@ -62,7 +56,6 @@
             />
           </svg>
 
-          <!-- 체크 -->
           <svg
             v-else-if="selectAllCheckboxClass === 'is-checked'"
             focusable="false"
@@ -75,7 +68,6 @@
             />
           </svg>
 
-          <!-- 일부 선택 -->
           <svg
             v-else
             focusable="false"
@@ -104,7 +96,6 @@
         </span>
       </div>
 
-      <!-- 리스트 (가상 스크롤) -->
       <RecycleScroller
         class="vcs-options"
         :items="filteredItems"
@@ -117,14 +108,12 @@
             :class="rowClassForItem(item)"
             @click.stop="onRowClick(item)"
           >
-            <!-- 체크박스: 멀티에서만 표시 -->
             <i
               v-if="multiple"
               class="vcs-checkbox"
               :class="checkboxClassForItem(item)"
               @click.stop.prevent="onRowClick(item)"
             >
-              <!-- 언체크드 -->
               <svg
                 v-if="!isChecked(item)"
                 focusable="false"
@@ -137,7 +126,6 @@
                 />
               </svg>
 
-              <!-- 체크 -->
               <svg
                 v-else
                 focusable="false"
@@ -151,7 +139,6 @@
               </svg>
             </i>
 
-            <!-- 라벨 -->
             <span
               class="vcs-option-label"
               :class="labelClassForItem(item)"
@@ -517,33 +504,41 @@ export default {
     /**
      * Select All 클릭 시 전체 선택 또는 해제를 수행한다.
      * 검색 중에는 필터된 항목만 대상으로 동작한다.
+     * [성능 최적화] map 사용을 제거하고 직접 순회하여 대용량 데이터 시 프리징 방지
      */
     onSelectAllClick() {
       if (!this.multiple) {
         return
       }
 
+      // 검색 활성화 상태
       if (this.isFilteringActive) {
-        const filteredIdSet = new Set(this.filteredItems.map(item => item.id))
+        const nextSet = new Set(this.selectedSet)
+        // filteredItems.map을 제거하고 직접 배열을 순회 (메모리 할당 및 순회 비용 감소)
+        const items = this.filteredItems
+        const isAll = this.isAllSelected
+        const len = items.length
 
-        if (this.isAllSelected) {
-          const nextSet = new Set(
-            Array.from(this.selectedSet).filter(id => !filteredIdSet.has(id))
-          )
-          this.selectedSet = nextSet
-          const nextArray = Array.from(nextSet)
-          this.$emit('input', nextArray)
-          this.$emit('change', nextArray)
+        if (isAll) {
+          // 전체 해제
+          for (let index = 0; index < len; index += 1) {
+            nextSet.delete(items[index].id)
+          }
         } else {
-          const nextSet = new Set([...this.selectedSet, ...filteredIdSet])
-          this.selectedSet = nextSet
-          const nextArray = Array.from(nextSet)
-          this.$emit('input', nextArray)
-          this.$emit('change', nextArray)
+          // 전체 선택
+          for (let index = 0; index < len; index += 1) {
+            nextSet.add(items[index].id)
+          }
         }
+
+        this.selectedSet = nextSet
+        const nextArray = Array.from(nextSet)
+        this.$emit('input', nextArray)
+        this.$emit('change', nextArray)
         return
       }
 
+      // 검색어가 없을 때
       if (this.isAllSelected) {
         this.selectedSet = new Set()
         this.$emit('input', [])
@@ -551,8 +546,14 @@ export default {
         return
       }
 
-      const allIds = this.items.map(item => item.id)
-      const filledSet = new Set(allIds)
+      // map을 사용하지 않고 전체 항목을 직접 순회하여 추가
+      const items = this.items
+      const len = items.length
+      const filledSet = new Set()
+      
+      for (let index = 0; index < len; index += 1) {
+        filledSet.add(items[index].id)
+      }
 
       this.selectedSet = filledSet
       const nextArray = Array.from(filledSet)
