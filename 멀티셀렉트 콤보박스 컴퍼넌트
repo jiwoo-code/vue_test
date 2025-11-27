@@ -244,7 +244,37 @@ export default {
       /**
        * 검색어
        */
-      keyword: ''
+      keyword: '',
+      /**
+       * 선택 상태를 O(1)로 판별하기 위한 Set
+       *  - v-model(value)을 감시하여 동기화
+       */
+      selectedSet: new Set()
+    }
+  },
+  watch: {
+    /**
+     * v-model 값 변경 시 내부 Set과 동기화한다.
+     */
+    value: {
+      immediate: true,
+      handler(newValue) {
+        const nextSet = new Set()
+
+        if (this.multiple) {
+          if (Array.isArray(newValue)) {
+            for (let index = 0; index < newValue.length; index += 1) {
+              nextSet.add(newValue[index])
+            }
+          }
+        } else {
+          if (newValue !== null && newValue !== undefined) {
+            nextSet.add(newValue)
+          }
+        }
+
+        this.selectedSet = nextSet
+      }
     }
   },
   computed: {
@@ -261,21 +291,11 @@ export default {
     },
 
     /**
-     * 선택된 id를 항상 배열 형태로 정규화한다.
+     * 선택된 id를 배열 형태로 반환한다.
      * @returns {Array<any>}
      */
     normalizedSelectedIds() {
-      if (this.multiple) {
-        if (Array.isArray(this.value)) {
-          return this.value
-        }
-        return []
-      }
-
-      if (this.value === null || this.value === undefined) {
-        return []
-      }
-      return [this.value]
+      return Array.from(this.selectedSet)
     },
 
     /**
@@ -364,7 +384,7 @@ export default {
      * @returns {number}
      */
     selectedCount() {
-      return this.normalizedSelectedIds.length
+      return this.selectedSet.size
     },
 
     /**
@@ -380,15 +400,14 @@ export default {
      * @returns {number}
      */
     selectedInFilteredCount() {
-      const selectedIds = this.normalizedSelectedIds
-      if (selectedIds.length === 0) {
+      if (this.selectedSet.size === 0) {
         return 0
       }
 
       let count = 0
       for (let index = 0; index < this.filteredItems.length; index += 1) {
         const item = this.filteredItems[index]
-        if (selectedIds.indexOf(item.id) !== -1) {
+        if (this.selectedSet.has(item.id)) {
           count += 1
         }
       }
@@ -480,12 +499,12 @@ export default {
      * @returns {boolean}
      */
     isChecked(item) {
-      return this.normalizedSelectedIds.indexOf(item.id) !== -1
+      return this.selectedSet.has(item.id)
     },
 
     /**
      * 행에 적용할 클래스명을 계산한다.
-     *  - 멀티: is-selected (기존 스타일 유지)
+     *  - 멀티: is-selected
      *  - 싱글: is-selected-single (배경 검은색 + 글자 흰색)
      * @param {object} item : 항목 객체
      * @returns {object}
@@ -511,27 +530,31 @@ export default {
      */
     onRowClick(item) {
       if (this.multiple) {
-        const next = Array.isArray(this.value) ? this.value.slice() : []
-        const index = next.indexOf(item.id)
+        const nextSet = new Set(this.selectedSet)
 
-        if (index === -1) {
-          next.push(item.id)
+        if (nextSet.has(item.id)) {
+          nextSet.delete(item.id)
         } else {
-          next.splice(index, 1)
+          nextSet.add(item.id)
         }
 
-        this.$emit('input', next)
-        this.$emit('change', next)
+        this.selectedSet = nextSet
+        const nextArray = Array.from(nextSet)
+        this.$emit('input', nextArray)
+        this.$emit('change', nextArray)
         return
       }
 
-      const currentId = this.normalizedSelectedIds[0] || null
+      const nextSet = new Set()
       let nextValue = item.id
 
-      if (currentId === item.id) {
+      if (this.selectedSet.has(item.id)) {
         nextValue = null
+      } else {
+        nextSet.add(item.id)
       }
 
+      this.selectedSet = nextSet
       this.$emit('input', nextValue)
       this.$emit('change', nextValue)
       this.closeDropdown()
@@ -548,40 +571,45 @@ export default {
         return
       }
 
-      // 검색 활성 상태에서는 필터링된 항목만 대상으로 동작
+      const nextSet = new Set(this.selectedSet)
+
       if (this.isFilteringActive) {
-        const current = Array.isArray(this.value) ? this.value.slice() : []
         const filteredIds = this.filteredItems.map(item => item.id)
 
         if (this.isAllSelected) {
-          // 필터링된 항목만 선택 해제 (나머지 선택은 유지)
-          const next = current.filter(id => filteredIds.indexOf(id) === -1)
-          this.$emit('input', next)
-          this.$emit('change', next)
-          return
+          for (let index = 0; index < filteredIds.length; index += 1) {
+            nextSet.delete(filteredIds[index])
+          }
+        } else {
+          for (let index = 0; index < filteredIds.length; index += 1) {
+            nextSet.add(filteredIds[index])
+          }
         }
 
-        // 필터링된 항목 모두 선택 (기존 선택 + 필터된 항목)
-        const set = new Set(current)
-        for (let index = 0; index < filteredIds.length; index += 1) {
-          set.add(filteredIds[index])
-        }
-        const next = Array.from(set)
-        this.$emit('input', next)
-        this.$emit('change', next)
+        this.selectedSet = nextSet
+        const nextArray = Array.from(nextSet)
+        this.$emit('input', nextArray)
+        this.$emit('change', nextArray)
         return
       }
 
-      // 검색이 아닐 때는 전체 items 기준으로 동작
       if (this.isAllSelected) {
+        this.selectedSet = new Set()
         this.$emit('input', [])
         this.$emit('change', [])
         return
       }
 
       const allIds = this.items.map(item => item.id)
-      this.$emit('input', allIds)
-      this.$emit('change', allIds)
+      const filledSet = new Set()
+      for (let index = 0; index < allIds.length; index += 1) {
+        filledSet.add(allIds[index])
+      }
+
+      this.selectedSet = filledSet
+      const nextArray = Array.from(filledSet)
+      this.$emit('input', nextArray)
+      this.$emit('change', nextArray)
     },
 
     /**
@@ -790,7 +818,7 @@ export default {
   cursor: pointer;
   user-select: none;
   font-family: 'NoteSans', Arial, sans-serif !important;
-  line-height: 22px; /* 지우님 지정 */
+  line-height: 18px;
   vertical-align: middle;
 }
 
