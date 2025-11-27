@@ -278,3 +278,34 @@ Svg
   ></path>
   <rect x="8" y="8" width="13.9" height="13.9"></rect>
 </svg
+
+
+
+
+
+
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  focusable="false"
+  viewBox="0 0 30 30"
+>
+  <!-- 검은 사각형 배경 -->
+  <rect
+    x="1.5"
+    y="1.5"
+    width="27"
+    height="27"
+    fill="#000000"
+    stroke="#000000"
+    stroke-width="2"
+  />
+  <!-- 중앙에 맞춘 흰색 체크 표시 -->
+  <polyline
+    points="7,16 13,22 23,8"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="3"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>
