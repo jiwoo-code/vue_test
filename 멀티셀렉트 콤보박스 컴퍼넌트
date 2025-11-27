@@ -104,7 +104,7 @@
       <RecycleScroller
         class="vcs-options"
         :items="filteredItems"
-        :item-size="ITEM_ROW_HEIGHT"
+        :item-size="28"
         key-field="id"
       >
         <template v-slot="{ item }">
@@ -163,17 +163,6 @@
 <script>
 import { RecycleScroller } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
-
-/**
- * 컨트롤 영역에 표시할 라벨 개수의 상한
- *  - 초과 시 ", ..." 으로 축약 표현
- */
-const MAX_LABEL_COUNT = 7
-
-/**
- * 각 행의 가상 스크롤 기준 높이(px)
- */
-const ITEM_ROW_HEIGHT = 28
 
 export default {
   name: 'VirtualComboSelect',
@@ -236,23 +225,6 @@ export default {
   },
   computed: {
     /**
-     * 각 항목 id를 키로 하는 맵을 생성한다.
-     *  - id → item
-     * @returns {Object<string, object>}
-     */
-    itemMap() {
-      const map = {}
-      const length = this.items.length
-
-      for (let index = 0; index < length; index += 1) {
-        const item = this.items[index]
-        map[item.id] = item
-      }
-
-      return map
-    },
-
-    /**
      * 선택된 id를 항상 배열 형태로 정규화한다.
      * @returns {Array<any>}
      */
@@ -293,7 +265,7 @@ export default {
     /**
      * 컨트롤 영역에 표시할 요약 텍스트를 반환한다.
      *  - 싱글: 선택된 항목의 라벨
-     *  - 멀티: 앞에서부터 최대 MAX_LABEL_COUNT개 라벨을 ", "로 연결, 초과 시 ", ..." 추가
+     *  - 멀티: 앞에서부터 최대 7개 라벨을 ", "로 연결, 초과 시 ", ..." 추가
      * @returns {string}
      */
     summaryText() {
@@ -304,25 +276,27 @@ export default {
         return ''
       }
 
+      // 싱글 모드
       if (!this.multiple) {
         const selectedId = selectedIds[0]
-        const item = this.itemMap[selectedId]
-
-        if (item && item.label !== undefined && item.label !== null) {
-          return String(item.label)
+        const found = this.items.find(item => item.id === selectedId)
+        if (found && found.label !== undefined && found.label !== null) {
+          return String(found.label)
         }
         return String(selectedId)
       }
 
+      // 멀티 모드: 앞에서부터 최대 MAX_LABEL_COUNT 개만 표시
+      const MAX_LABEL_COUNT = 7
       const labels = []
       const limit = Math.min(selectedCount, MAX_LABEL_COUNT)
 
       for (let index = 0; index < limit; index += 1) {
         const id = selectedIds[index]
-        const item = this.itemMap[id]
+        const found = this.items.find(item => item.id === id)
 
-        if (item && item.label !== undefined && item.label !== null) {
-          labels.push(String(item.label))
+        if (found && found.label !== undefined && found.label !== null) {
+          labels.push(String(found.label))
         } else {
           labels.push(String(id))
         }
@@ -394,14 +368,6 @@ export default {
         return 'is-checked'
       }
       return 'is-unchecked'
-    },
-
-    /**
-     * 행 높이 상수를 템플릿에서 참조하기 위한 computed 필드.
-     * @returns {number}
-     */
-    ITEM_ROW_HEIGHT() {
-      return ITEM_ROW_HEIGHT
     }
   },
   methods: {
@@ -439,52 +405,30 @@ export default {
      */
     onRowClick(item) {
       if (this.multiple) {
-        const currentIds = Array.isArray(this.value) ? this.value : []
-        const nextIds = this.buildNextMultiSelection(currentIds, item.id)
+        const next = Array.isArray(this.value) ? this.value.slice() : []
+        const index = next.indexOf(item.id)
 
-        this.$emit('input', nextIds)
-        this.$emit('change', nextIds)
+        if (index === -1) {
+          next.push(item.id)
+        } else {
+          next.splice(index, 1)
+        }
+
+        this.$emit('input', next)
+        this.$emit('change', next)
         return
       }
 
       const currentId = this.normalizedSelectedIds[0] || null
-      const nextValue = this.buildNextSingleSelection(currentId, item.id)
+      let nextValue = item.id
+
+      if (currentId === item.id) {
+        nextValue = null
+      }
 
       this.$emit('input', nextValue)
       this.$emit('change', nextValue)
       this.closeDropdown()
-    },
-
-    /**
-     * 멀티 셀렉트에서 하나의 id를 토글한 뒤의 배열을 생성한다.
-     * @param {Array<any>} currentIds : 현재 선택된 id 배열
-     * @param {any} toggledId : 토글 대상 id
-     * @returns {Array<any>}
-     */
-    buildNextMultiSelection(currentIds, toggledId) {
-      const next = currentIds.slice()
-      const index = next.indexOf(toggledId)
-
-      if (index === -1) {
-        next.push(toggledId)
-      } else {
-        next.splice(index, 1)
-      }
-
-      return next
-    },
-
-    /**
-     * 싱글 셀렉트에서 현재 값과 토글 대상 id를 받아 다음 값을 계산한다.
-     * @param {any} currentId : 현재 선택된 id (또는 null)
-     * @param {any} toggledId : 토글 대상 id
-     * @returns {any}
-     */
-    buildNextSingleSelection(currentId, toggledId) {
-      if (currentId === toggledId) {
-        return null
-      }
-      return toggledId
     },
 
     /**
@@ -699,4 +643,3 @@ export default {
   font-weight: 400;
 }
 </style>
-```0
