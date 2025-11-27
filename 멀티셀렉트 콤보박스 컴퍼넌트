@@ -9,12 +9,18 @@
         {{ placeholder }}
       </span>
 
-      <!-- 화살표 아이콘 -->
-      <i
-        class="vcs-arrow-icon"
-        :class="{ open: isOpen }"
-        :style="arrowIconStyle"
-      ></i>
+      <!-- 화살표 아이콘 (inline svg) -->
+      <i class="vcs-arrow-icon" :class="{ open: isOpen }">
+        <svg
+          focusable="false"
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 30 30"
+        >
+          <polygon
+            points="15.1 23.3 2.3 10.5 3.3 9.5 15.1 21.2 26.8 9.5 27.9 10.5 15.1 23.3"
+          ></polygon>
+        </svg>
+      </i>
     </div>
 
     <!-- 드롭다운 -->
@@ -36,12 +42,60 @@
         class="vcs-option-row vcs-select-all-row"
         @click.stop="onSelectAllClick"
       >
+        <!-- Select All 체크박스 -->
         <i
           class="vcs-checkbox"
-          :class="selectAllCheckboxClass"
-          :style="selectAllCheckboxStyle"
           @click.stop.prevent="onSelectAllClick"
-        ></i>
+        >
+          <!-- 언체크 -->
+          <svg
+            v-if="!isAllSelected && !isPartiallySelected"
+            focusable="false"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 30 30"
+          >
+            <path d="M0 0 H30 V30 H0 V0 L2 2 V28 H28 V2 H2 L0 0Z"></path>
+          </svg>
+
+          <!-- 전체 체크 -->
+          <svg
+            v-else-if="isAllSelected"
+            focusable="false"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 30 30"
+          >
+            <rect
+              x="1.5"
+              y="1.5"
+              width="27"
+              height="27"
+              fill="#000000"
+              stroke="#000000"
+              stroke-width="2"
+            />
+            <polyline
+              points="7,16 13,22 23,8"
+              fill="none"
+              stroke="#ffffff"
+              stroke-width="3"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+
+          <!-- 일부 선택 -->
+          <svg
+            v-else
+            focusable="false"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 30 30"
+          >
+            <path
+              d="M30,0h-1.9H1.9H0v1.9V30h1.9h26.2H30v-1.9V0z M28.1,28.1H1.9V1.9h26.2V28.1z"
+            ></path>
+            <rect x="8" y="8" width="13.9" height="13.9"></rect>
+          </svg>
+        </i>
 
         <span
           class="vcs-option-label"
@@ -61,17 +115,51 @@
         <template v-slot="{ item }">
           <div
             class="vcs-option-row"
-            :class="{ 'is-selected': isChecked(item) }"
+            :class="rowClassForItem(item)"
             @click.stop="onRowClick(item)"
           >
             <!-- 멀티 셀렉트일 때만 체크박스 -->
             <i
               v-if="multiple"
               class="vcs-checkbox"
-              :class="checkboxClassForItem(item)"
-              :style="checkboxStyleForItem(item)"
               @click.stop.prevent="onRowClick(item)"
-            ></i>
+            >
+              <!-- 언체크 -->
+              <svg
+                v-if="!isChecked(item)"
+                focusable="false"
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 30 30"
+              >
+                <path d="M0 0 H30 V30 H0 V0 L2 2 V28 H28 V2 H2 L0 0Z"></path>
+              </svg>
+
+              <!-- 체크 -->
+              <svg
+                v-else
+                focusable="false"
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 30 30"
+              >
+                <rect
+                  x="1.5"
+                  y="1.5"
+                  width="27"
+                  height="27"
+                  fill="#000000"
+                  stroke="#000000"
+                  stroke-width="2"
+                />
+                <polyline
+                  points="7,16 13,22 23,8"
+                  fill="none"
+                  stroke="#ffffff"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </i>
 
             <!-- 라벨 -->
             <span
@@ -86,431 +174,3 @@
     </div>
   </div>
 </template>
-
-<script>
-import { RecycleScroller } from 'vue-virtual-scroller'
-import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
-
-/**
- * 컨트롤 영역에 표시할 라벨 개수의 상한
- */
-const MAX_LABEL_COUNT = 7
-
-/**
- * 가상 스크롤 기준 행 높이(px)
- */
-const ITEM_ROW_HEIGHT = 28
-
-export default {
-  name: 'VirtualComboSelect',
-  components: {
-    RecycleScroller
-  },
-  props: {
-    /**
-     * v-model 값
-     */
-    value: {
-      type: [Array, String, Number, Object, null],
-      default: null
-    },
-    /**
-     * 콤보박스 항목
-     */
-    items: {
-      type: Array,
-      required: true
-    },
-    /**
-     * 멀티 선택 여부
-     */
-    multiple: {
-      type: Boolean,
-      default: false
-    },
-    /**
-     * 플레이스홀더
-     */
-    placeholder: {
-      type: String,
-      default: '선택하세요'
-    },
-    /**
-     * 검색 인풋 플레이스홀더
-     */
-    searchPlaceholder: {
-      type: String,
-      default: '검색...'
-    },
-    /**
-     * 검색 기능 사용 여부
-     */
-    searchable: {
-      type: Boolean,
-      default: true
-    }
-  },
-  data() {
-    return {
-      isOpen: false,
-      keyword: '',
-
-      /**
-       * require()로 불러온 SVG 경로
-       */
-      checkboxCheckedImg: require('@/assets/style/svg/virtual-dropdown/checkbox_checked.svg'),
-      checkboxUncheckedImg: require('@/assets/style/svg/virtual-dropdown/checkbox_unchecked.svg'),
-      checkboxIndeterminateImg: require('@/assets/style/svg/virtual-dropdown/checkbox_indeterminate.svg'),
-      arrowDownImg: require('@/assets/style/svg/virtual-dropdown/arrow_down.svg')
-    }
-  },
-  computed: {
-    /**
-     * id → item 맵
-     */
-    itemMap() {
-      const map = {}
-      for (let index = 0; index < this.items.length; index += 1) {
-        const i = this.items[index]
-        map[i.id] = i
-      }
-      return map
-    },
-
-    /**
-     * 선택된 id 배열
-     */
-    normalizedSelectedIds() {
-      if (this.multiple) {
-        return Array.isArray(this.value) ? this.value : []
-      }
-      if (this.value === null || this.value === undefined) {
-        return []
-      }
-      return [this.value]
-    },
-
-    /**
-     * 검색 필터링된 항목
-     */
-    filteredItems() {
-      if (!this.searchable) {
-        return this.items
-      }
-
-      const kw = this.keyword.trim().toLowerCase()
-      if (!kw) return this.items
-
-      return this.items.filter(i =>
-        String(i.label || '').toLowerCase().includes(kw)
-      )
-    },
-
-    /**
-     * 컨트롤 영역 요약텍스트
-     */
-    summaryText() {
-      const ids = this.normalizedSelectedIds
-      const count = ids.length
-      if (count === 0) return ''
-
-      if (!this.multiple) {
-        const id = ids[0]
-        const item = this.itemMap[id]
-        return item ? String(item.label) : String(id)
-      }
-
-      const labels = []
-      const limit = Math.min(count, MAX_LABEL_COUNT)
-
-      for (let idx = 0; idx < limit; idx += 1) {
-        const id = ids[idx]
-        const item = this.itemMap[id]
-        labels.push(item ? String(item.label) : String(id))
-      }
-
-      let txt = labels.join(', ')
-      if (count > MAX_LABEL_COUNT) txt += ', ...'
-      return txt
-    },
-
-    totalCount() {
-      return this.items.length
-    },
-
-    selectedCount() {
-      return this.normalizedSelectedIds.length
-    },
-
-    isAllSelected() {
-      return this.totalCount > 0 && this.selectedCount === this.totalCount
-    },
-
-    isPartiallySelected() {
-      return (
-        this.selectedCount > 0 &&
-        this.selectedCount < this.totalCount
-      )
-    },
-
-    selectAllCheckboxClass() {
-      if (this.isAllSelected) return 'is-checked'
-      if (this.isPartiallySelected) return 'is-partially-checked'
-      return 'is-unchecked'
-    },
-
-    selectAllLabelClass() {
-      if (this.isAllSelected || this.isPartiallySelected) return 'is-checked'
-      return 'is-unchecked'
-    },
-
-    ITEM_ROW_HEIGHT() {
-      return ITEM_ROW_HEIGHT
-    },
-
-    arrowIconStyle() {
-      return { backgroundImage: 'url(' + this.arrowDownImg + ')' }
-    },
-
-    selectAllCheckboxStyle() {
-      return {
-        backgroundImage: 'url(' + this.selectAllImage() + ')'
-      }
-    }
-  },
-  methods: {
-    /**
-     * SVG 미리 로딩하여 첫 클릭 지연 제거
-     */
-    preloadImages() {
-      [
-        this.checkboxCheckedImg,
-        this.checkboxUncheckedImg,
-        this.checkboxIndeterminateImg,
-        this.arrowDownImg
-      ].forEach(src => {
-        if (!src) return
-        const img = new Image()
-        img.src = src
-      })
-    },
-
-    toggleDropdown() {
-      this.isOpen = !this.isOpen
-    },
-
-    closeDropdown() {
-      this.isOpen = false
-    },
-
-    isChecked(item) {
-      return this.normalizedSelectedIds.indexOf(item.id) !== -1
-    },
-
-    onRowClick(item) {
-      if (this.multiple) {
-        const arr = Array.isArray(this.value) ? this.value.slice() : []
-        const idx = arr.indexOf(item.id)
-
-        if (idx === -1) arr.push(item.id)
-        else arr.splice(idx, 1)
-
-        this.$emit('input', arr)
-        this.$emit('change', arr)
-        return
-      }
-
-      const curr = this.normalizedSelectedIds[0] || null
-      const next = curr === item.id ? null : item.id
-
-      this.$emit('input', next)
-      this.$emit('change', next)
-      this.closeDropdown()
-    },
-
-    onSelectAllClick() {
-      if (!this.multiple) return
-
-      if (this.isAllSelected) {
-        this.$emit('input', [])
-        this.$emit('change', [])
-        return
-      }
-
-      const all = this.items.map(i => i.id)
-      this.$emit('input', all)
-      this.$emit('change', all)
-    },
-
-    checkboxClassForItem(item) {
-      return this.isChecked(item) ? 'is-checked' : 'is-unchecked'
-    },
-
-    labelClassForItem(item) {
-      return this.isChecked(item) ? 'is-checked' : 'is-unchecked'
-    },
-
-    checkboxStyleForItem(item) {
-      return {
-        backgroundImage: 'url(' + this.checkboxImage(item) + ')'
-      }
-    },
-
-    checkboxImage(item) {
-      return this.isChecked(item)
-        ? this.checkboxCheckedImg
-        : this.checkboxUncheckedImg
-    },
-
-    selectAllImage() {
-      if (this.isAllSelected) return this.checkboxCheckedImg
-      if (this.isPartiallySelected) return this.checkboxIndeterminateImg
-      return this.checkboxUncheckedImg
-    },
-
-    handleClickOutside(e) {
-      if (!this.$el.contains(e.target)) this.closeDropdown()
-    }
-  },
-  mounted() {
-    document.addEventListener('click', this.handleClickOutside)
-    this.preloadImages()
-  },
-  beforeDestroy() {
-    document.removeEventListener('click', this.handleClickOutside)
-  }
-}
-</script>
-
-<style scoped>
-.virtual-combo-select {
-  position: relative;
-  width: 320px;
-  font-size: 13px;
-  margin-bottom: 24px;
-}
-
-/* 컨트롤 영역 */
-.vcs-control {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 32px;
-  padding: 4px 8px;
-  border: 1px solid #bdbdbd;
-  cursor: pointer;
-  background-color: #ffffff;
-  border-radius: 0;
-}
-
-.vcs-summary {
-  flex: 1;
-  margin-right: 8px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: #444444;
-}
-
-.vcs-placeholder {
-  color: #aaaaaa;
-}
-
-/* 화살표 */
-.vcs-arrow-icon {
-  width: 10px;
-  height: 10px;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: contain;
-  transition-duration: 0.3s;
-  transform: rotate(0deg);
-}
-
-.vcs-arrow-icon.open {
-  transform: rotate(-180deg);
-}
-
-/* 드롭다운 */
-.vcs-dropdown {
-  position: absolute;
-  z-index: 2000;
-  top: 100%;
-  left: 0;
-  right: 0;
-  margin-top: 4px;
-  border: 1px solid #000000;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-  background-color: #ffffff;
-  border-radius: 0;
-}
-
-/* 검색 */
-.vcs-search-input {
-  width: 100%;
-  padding: 4px 8px;
-  border: 0;
-  border-bottom: 1px solid #eeeeee;
-  outline: none;
-  font-size: 13px;
-  box-sizing: border-box;
-}
-
-/* 리스트 width:100% 적용 */
-.vcs-options {
-  max-height: 260px;
-  width: 100%;
-}
-
-/* 각 row width:100% 적용 */
-.vcs-option-row {
-  display: flex;
-  align-items: center;
-  padding: 2px 8px;
-  min-height: 24px;
-  cursor: pointer;
-  box-sizing: border-box;
-  width: 100%;
-}
-
-/* hover */
-.vcs-option-row:hover {
-  background-color: #f0f0f0;
-}
-
-.vcs-select-all-row {
-  border-bottom: 1px solid #eeeeee;
-}
-
-/* 체크박스 */
-.vcs-checkbox {
-  width: 16px;
-  height: 16px;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: contain;
-  cursor: pointer;
-}
-
-/* 라벨 */
-.vcs-option-label {
-  margin-left: 8px;
-  font-size: 12px;
-  white-space: nowrap;
-  cursor: pointer;
-  user-select: none;
-  font-family: 'NoteSans', Arial, sans-serif !important;
-}
-
-/* 체크된 라벨 */
-.vcs-option-label.is-checked {
-  color: #444;
-  font-weight: 600;
-}
-
-/* 체크 해제 라벨 */
-.vcs-option-label.is-unchecked {
-  color: #333;
-  font-weight: 400;
-}
-</style>
