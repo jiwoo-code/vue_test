@@ -1,0 +1,810 @@
+
+
+1. 프론트(Vue2) 코드
+1-1. ErCodeManagerView.vue
+(버튼 + 팝업 호출)
+코드 복사
+Vue
+<!-- src/views/ErCodeManagerView.vue -->
+<template>
+  <div class="er-code-manager-view">
+    <button
+      type="button"
+      @click="onOpen"
+    >
+      ER Code 관리
+    </button>
+
+    <ErCodePopup
+      v-if="isVisible"
+      @close="onClose"
+    />
+  </div>
+</template>
+
+<script>
+import ErCodePopup from '@/components/er/ErCodePopup.vue';
+
+export default {
+  name: 'ErCodeManagerView',
+  components: {
+    ErCodePopup
+  },
+  data() {
+    return {
+      isVisible: false
+    };
+  },
+  methods: {
+    onOpen() {
+      this.isVisible = true;
+    },
+    onClose() {
+      this.isVisible = false;
+    }
+  }
+};
+</script>
+
+<style scoped>
+.er-code-manager-view {
+  padding: 16px;
+}
+</style>
+1-2. CustomPopup.vue
+(이미 프로젝트에 있으면 사용하시고, 없으면 이 예시로 시작)
+코드 복사
+Vue
+<!-- src/components/common/CustomPopup.vue -->
+<template>
+  <div class="custom-popup-backdrop">
+    <div class="custom-popup">
+      <div class="custom-popup-header">
+        <span class="custom-popup-title">
+          {{ title }}
+        </span>
+        <button
+          type="button"
+          class="custom-popup-close"
+          @click="$emit('close')"
+        >
+          ✕
+        </button>
+      </div>
+      <div class="custom-popup-body">
+        <slot />
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+export default {
+  name: 'CustomPopup',
+  props: {
+    title: {
+      type: String,
+      default: ''
+    }
+  }
+};
+</script>
+
+<style scoped>
+.custom-popup-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+
+.custom-popup {
+  min-width: 520px;
+  max-width: 800px;
+  max-height: 80vh;
+  background-color: #ffffff;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+}
+
+.custom-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid #ddd;
+}
+
+.custom-popup-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.custom-popup-close {
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.custom-popup-body {
+  padding: 12px;
+  overflow: auto;
+}
+</style>
+1-3. ErCodePopup.vue
+(ag-Grid 목록 + 폼 + 저장/삭제, type 기본값 SCN)
+코드 복사
+Vue
+<!-- src/components/er/ErCodePopup.vue -->
+<template>
+  <CustomPopup
+    :title="'ER Code 관리'"
+    @close="onClickClose"
+  >
+    <div class="er-code-popup">
+      <!-- ag-Grid 리스트 -->
+      <div class="er-code-grid-wrapper">
+        <ag-grid-vue
+          class="ag-theme-balham er-code-grid"
+          :columnDefs="columnDefs"
+          :rowData="erCodeList"
+          :rowSelection="'single'"
+          @grid-ready="onGridReady"
+          @rowClicked="onRowClicked"
+        />
+      </div>
+
+      <!-- 입력 폼 -->
+      <div class="er-code-form">
+        <div class="form-row">
+          <label for="erCode">
+            코드
+          </label>
+          <input
+            id="erCode"
+            v-model="editForm.erCode"
+            type="text"
+            :readonly="isEditMode"
+          >
+        </div>
+
+        <div class="form-row">
+          <label for="type">
+            타입
+          </label>
+          <select
+            id="type"
+            v-model="editForm.type"
+            :disabled="!canEditType"
+          >
+            <option
+              v-for="option in typeOptions"
+              :key="option"
+              :value="option"
+            >
+              {{ option }}
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 버튼 영역 -->
+      <div class="er-code-actions">
+        <button
+          type="button"
+          @click="onClickNew"
+        >
+          신규
+        </button>
+
+        <button
+          type="button"
+          :disabled="!hasEditPermission"
+          @click="onClickSave"
+        >
+          저장
+        </button>
+
+        <button
+          type="button"
+          :disabled="!hasEditPermission || !selectedErCode"
+          @click="onClickDelete"
+        >
+          삭제
+        </button>
+
+        <button
+          type="button"
+          @click="onClickClose"
+        >
+          닫기
+        </button>
+      </div>
+
+      <!-- 메시지 -->
+      <div
+        v-if="errorMessage"
+        class="er-code-message error"
+      >
+        {{ errorMessage }}
+      </div>
+      <div
+        v-if="infoMessage"
+        class="er-code-message info"
+      >
+        {{ infoMessage }}
+      </div>
+    </div>
+  </CustomPopup>
+</template>
+
+<script>
+import axios from 'axios';
+import { AgGridVue } from 'ag-grid-vue';
+import CustomPopup from '@/components/common/CustomPopup.vue';
+
+const DEFAULT_TYPE = 'SCN';
+
+export default {
+  name: 'ErCodePopup',
+  components: {
+    CustomPopup,
+    'ag-grid-vue': AgGridVue
+  },
+  data() {
+    return {
+      columnDefs: [
+        { headerName: '코드', field: 'erCode', width: 160 },
+        { headerName: '타입', field: 'type', width: 120 }
+      ],
+      erCodeList: [],
+      gridApi: null,
+      columnApi: null,
+
+      selectedErCode: null,
+      editForm: {
+        erCode: '',
+        type: DEFAULT_TYPE
+      },
+
+      typeOptions: [DEFAULT_TYPE],
+      canEditType: false, // 나중에 true로 열어주면 됨
+
+      hasEditPermission: false,
+      errorMessage: '',
+      infoMessage: ''
+    };
+  },
+  computed: {
+    isEditMode() {
+      return !!(this.selectedErCode && this.selectedErCode.erCode);
+    }
+  },
+  mounted() {
+    this.fetchErCodeList();
+    this.fetchEditPermission();
+  },
+  methods: {
+    onGridReady(params) {
+      this.gridApi = params.api;
+      this.columnApi = params.columnApi;
+      if (this.gridApi) {
+        this.gridApi.sizeColumnsToFit();
+      }
+    },
+    fetchErCodeList() {
+      this.errorMessage = '';
+      axios
+        .get('/api/er-codes')
+        .then((response) => {
+          this.erCodeList = response.data || [];
+          if (this.gridApi) {
+            this.gridApi.sizeColumnsToFit();
+          }
+        })
+        .catch(() => {
+          this.errorMessage = 'ER Code 목록 조회 중 오류가 발생했습니다.';
+        });
+    },
+    fetchEditPermission() {
+      axios
+        .get('/api/er-codes/permission')
+        .then((response) => {
+          this.hasEditPermission = !!(response.data && response.data.editable === true);
+        })
+        .catch(() => {
+          this.hasEditPermission = false;
+        });
+    },
+    resetForm() {
+      this.selectedErCode = null;
+      this.editForm = {
+        erCode: '',
+        type: DEFAULT_TYPE
+      };
+      this.errorMessage = '';
+      this.infoMessage = '';
+      if (this.gridApi) {
+        this.gridApi.deselectAll();
+      }
+    },
+    onClickNew() {
+      this.resetForm();
+    },
+    onRowClicked(event) {
+      const data = event && event.data;
+      if (!data) {
+        return;
+      }
+      this.selectedErCode = { ...data };
+      this.editForm = {
+        erCode: data.erCode,
+        type: data.type || DEFAULT_TYPE
+      };
+      this.errorMessage = '';
+      this.infoMessage = '';
+    },
+    onClickSave() {
+      this.errorMessage = '';
+      this.infoMessage = '';
+
+      const validationResult = this.validateErCode(this.editForm);
+      if (!validationResult.isValid) {
+        this.errorMessage = validationResult.message || '유효하지 않은 ER Code입니다.';
+        return;
+      }
+
+      if (!this.hasEditPermission) {
+        this.errorMessage = 'ER Code 수정/등록 권한이 없습니다.';
+        return;
+      }
+
+      if (this.isEditMode) {
+        this.updateErCode();
+      } else {
+        this.createErCode();
+      }
+    },
+    createErCode() {
+      axios
+        .post('/api/er-codes', this.editForm)
+        .then(() => {
+          this.infoMessage = 'ER Code가 등록되었습니다.';
+          this.fetchErCodeList();
+          this.onClickNew();
+        })
+        .catch(() => {
+          this.errorMessage = 'ER Code 등록 중 오류가 발생했습니다.';
+        });
+    },
+    updateErCode() {
+      axios
+        .put(`/api/er-codes/${encodeURIComponent(this.editForm.erCode)}`, this.editForm)
+        .then(() => {
+          this.infoMessage = 'ER Code가 수정되었습니다.';
+          this.fetchErCodeList();
+        })
+        .catch(() => {
+          this.errorMessage = 'ER Code 수정 중 오류가 발생했습니다.';
+        });
+    },
+    onClickDelete() {
+      if (!this.selectedErCode) {
+        return;
+      }
+      if (!this.hasEditPermission) {
+        this.errorMessage = 'ER Code 삭제 권한이 없습니다.';
+        return;
+      }
+
+      const confirmDelete = window.confirm(`ER Code [${this.selectedErCode.erCode}] 를 삭제하시겠습니까?`);
+      if (!confirmDelete) {
+        return;
+      }
+
+      axios
+        .delete(`/api/er-codes/${encodeURIComponent(this.selectedErCode.erCode)}`)
+        .then(() => {
+          this.infoMessage = 'ER Code가 삭제되었습니다.';
+          this.fetchErCodeList();
+          this.onClickNew();
+        })
+        .catch(() => {
+          this.errorMessage = 'ER Code 삭제 중 오류가 발생했습니다.';
+        });
+    },
+    onClickClose() {
+      this.$emit('close');
+    },
+    /**
+     * ER Code 검증 함수
+     *
+     * @param {object} form : 검증 대상 폼 데이터
+     * @returns {{ isValid: boolean, message: string }}
+     */
+    validateErCode(form) {
+      if (!form) {
+        return {
+          isValid: false,
+          message: '폼 데이터가 없습니다.'
+        };
+      }
+
+      if (!form.erCode || !form.erCode.trim()) {
+        return {
+          isValid: false,
+          message: '코드는 필수 항목입니다.'
+        };
+      }
+
+      if (!form.type || !form.type.trim()) {
+        form.type = DEFAULT_TYPE;
+      }
+
+      return {
+        isValid: true,
+        message: ''
+      };
+    }
+  }
+};
+</script>
+
+<style scoped>
+.er-code-popup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ag-Grid 영역 */
+.er-code-grid-wrapper {
+  height: 260px;
+}
+
+.er-code-grid {
+  width: 100%;
+  height: 100%;
+}
+
+/* 폼 */
+.er-code-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid #ddd;
+  padding: 8px;
+}
+
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-row label {
+  width: 70px;
+  font-size: 13px;
+}
+
+.form-row input,
+.form-row select {
+  flex: 1;
+  font-size: 13px;
+}
+
+/* 버튼 영역 */
+.er-code-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 메시지 */
+.er-code-message {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.er-code-message.error {
+  color: #d9534f;
+}
+
+.er-code-message.info {
+  color: #5cb85c;
+}
+</style>
+ag-Grid CSS는 보통 진입점에서 한 번만:
+코드 복사
+Js
+import 'ag-grid-community/styles/ag-grid.css';
+import 'ag-grid-community/styles/ag-theme-balham.css';
+2. 백엔드(Java) 코드
+패키지명은 예시로 com.example.ercode 사용했습니다.
+프로젝트 패키지에 맞게 바꾸시면 됩니다.
+2-1. ErCodeVo.java
+코드 복사
+Java
+// src/main/java/com/example/ercode/domain/ErCodeVo.java
+package com.example.ercode.domain;
+
+import lombok.Getter;
+import lombok.Setter;
+import lombok.ToString;
+
+@Getter
+@Setter
+@ToString
+public class ErCodeVo {
+
+    private String erCode;
+    private String type;
+}
+2-2. ErCodeMapper.java
+코드 복사
+Java
+// src/main/java/com/example/ercode/mapper/ErCodeMapper.java
+package com.example.ercode.mapper;
+
+import java.util.List;
+
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+
+import com.example.ercode.domain.ErCodeVo;
+
+@Mapper
+public interface ErCodeMapper {
+
+    List<ErCodeVo> selectErCodeList();
+
+    int insertErCode(ErCodeVo erCodeVo);
+
+    int updateErCode(ErCodeVo erCodeVo);
+
+    int deleteErCode(@Param("erCode") String erCode);
+}
+2-3. ErCodeService.java
+코드 복사
+Java
+// src/main/java/com/example/ercode/service/ErCodeService.java
+package com.example.ercode.service;
+
+import java.util.List;
+
+import com.example.ercode.domain.ErCodeVo;
+
+public interface ErCodeService {
+
+    List<ErCodeVo> getErCodeList();
+
+    void createErCode(ErCodeVo erCodeVo);
+
+    void updateErCode(ErCodeVo erCodeVo);
+
+    void deleteErCode(String erCode);
+
+    /**
+     * ER Code 수정/등록/삭제 권한 여부 조회.
+     * 실제 권한 체크 로직은 추후 구현.
+     *
+     * @param userId : 사용자 ID
+     * @return boolean : true 이면 편집 가능
+     */
+    boolean hasErCodeEditPermission(String userId);
+
+    /**
+     * ER Code 검증 함수.
+     * 향후 type 규칙 추가 시 이 메소드에 룰을 모아서 관리.
+     *
+     * @param erCodeVo : 검증 대상 ER Code
+     */
+    void validateErCode(ErCodeVo erCodeVo);
+}
+2-4. ErCodeServiceImpl.java
+코드 복사
+Java
+// src/main/java/com/example/ercode/service/ErCodeServiceImpl.java
+package com.example.ercode.service;
+
+import java.util.List;
+
+import org.springframework.stereotype.Service;
+
+import com.example.ercode.domain.ErCodeVo;
+import com.example.ercode.mapper.ErCodeMapper;
+
+@Service
+public class ErCodeServiceImpl implements ErCodeService {
+
+    private static final String DEFAULT_TYPE = "SCN";
+
+    private final ErCodeMapper erCodeMapper;
+
+    public ErCodeServiceImpl(ErCodeMapper erCodeMapper) {
+        this.erCodeMapper = erCodeMapper;
+    }
+
+    @Override
+    public List<ErCodeVo> getErCodeList() {
+        return erCodeMapper.selectErCodeList();
+    }
+
+    @Override
+    public void createErCode(ErCodeVo erCodeVo) {
+        validateErCode(erCodeVo);
+        erCodeMapper.insertErCode(erCodeVo);
+    }
+
+    @Override
+    public void updateErCode(ErCodeVo erCodeVo) {
+        validateErCode(erCodeVo);
+        erCodeMapper.updateErCode(erCodeVo);
+    }
+
+    @Override
+    public void deleteErCode(String erCode) {
+        erCodeMapper.deleteErCode(erCode);
+    }
+
+    @Override
+    public boolean hasErCodeEditPermission(String userId) {
+        // TODO: 권한 체크 로직 구현
+        // 현재는 임시로 true 반환
+        return true;
+    }
+
+    @Override
+    public void validateErCode(ErCodeVo erCodeVo) {
+        if (erCodeVo == null) {
+            throw new IllegalArgumentException("ER Code 정보가 존재하지 않습니다.");
+        }
+        if (erCodeVo.getErCode() == null || erCodeVo.getErCode().trim().isEmpty()) {
+            throw new IllegalArgumentException("ER Code는 필수 입력 값입니다.");
+        }
+
+        if (erCodeVo.getType() == null || erCodeVo.getType().trim().isEmpty()) {
+            erCodeVo.setType(DEFAULT_TYPE);
+        }
+
+        // TODO: 나중에 type이 여러 개로 늘어나면 허용값 리스트 체크 추가
+        // 예)
+        // List<String> allowedTypes = Arrays.asList("SCN", "ABC", "DEF");
+        // if (!allowedTypes.contains(erCodeVo.getType())) { ... }
+    }
+}
+2-5. ErCodeController.java
+코드 복사
+Java
+// src/main/java/com/example/ercode/controller/ErCodeController.java
+package com.example.ercode.controller;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.example.ercode.domain.ErCodeVo;
+import com.example.ercode.service.ErCodeService;
+
+@RestController
+@RequestMapping("/api/er-codes")
+public class ErCodeController {
+
+    private final ErCodeService erCodeService;
+
+    public ErCodeController(ErCodeService erCodeService) {
+        this.erCodeService = erCodeService;
+    }
+
+    @GetMapping
+    public List<ErCodeVo> getErCodeList() {
+        return erCodeService.getErCodeList();
+    }
+
+    @PostMapping
+    public void createErCode(@RequestBody ErCodeVo erCodeVo) {
+        erCodeService.createErCode(erCodeVo);
+    }
+
+    @PutMapping("/{erCode}")
+    public void updateErCode(@PathVariable("erCode") String erCode, @RequestBody ErCodeVo erCodeVo) {
+        erCodeVo.setErCode(erCode);
+        erCodeService.updateErCode(erCodeVo);
+    }
+
+    @DeleteMapping("/{erCode}")
+    public void deleteErCode(@PathVariable("erCode") String erCode) {
+        erCodeService.deleteErCode(erCode);
+    }
+
+    @GetMapping("/permission")
+    public Map<String, Object> getErCodeEditPermission() {
+        String userId = getCurrentUserId();
+        boolean editable = erCodeService.hasErCodeEditPermission(userId);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("editable", editable);
+        return result;
+    }
+
+    private String getCurrentUserId() {
+        // TODO: 실제 로그인 사용자 정보에서 ID 추출
+        // 예) SecurityContextHolder.getContext().getAuthentication().getName();
+        return "tempUser";
+    }
+}
+2-6. ErCodeMapper.xml
+코드 복사
+Xml
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.ercode.mapper.ErCodeMapper">
+
+    <resultMap id="ErCodeResultMap" type="com.example.ercode.domain.ErCodeVo">
+        <id     property="erCode" column="er_code" />
+        <result property="type"   column="type" />
+    </resultMap>
+
+    <!-- ER Code 목록 조회 -->
+    <select id="selectErCodeList" resultMap="ErCodeResultMap">
+SELECT
+    er_code,
+    type
+FROM
+    ER_CODE
+ORDER BY
+    er_code
+    </select>
+
+    <!-- ER Code 등록 -->
+    <insert id="insertErCode" parameterType="com.example.ercode.domain.ErCodeVo">
+INSERT INTO ER_CODE
+(
+    er_code,
+    type
+)
+VALUES
+(
+    #{erCode},
+    #{type}
+)
+    </insert>
+
+    <!-- ER Code 수정 -->
+    <update id="updateErCode" parameterType="com.example.ercode.domain.ErCodeVo">
+UPDATE
+    ER_CODE
+SET
+    type = #{type}
+WHERE
+    er_code = #{erCode}
+    </update>
+
+    <!-- ER Code 삭제 -->
+    <delete id="deleteErCode">
+DELETE FROM
+    ER_CODE
+WHERE
+    er_code = #{erCode}
+    </delete>
+
+</mapper>
+
+
