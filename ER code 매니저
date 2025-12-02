@@ -142,118 +142,110 @@ export default {
 Vue
 <!-- src/components/er/ErCodePopup.vue -->
 <template>
-  <CustomPopup
-    :title="'ER Code 관리'"
-    @close="onClickClose"
-  >
-    <div class="er-code-popup">
-      <!-- ag-Grid 리스트 -->
-      <div class="er-code-grid-wrapper">
-        <ag-grid-vue
-          class="ag-theme-balham er-code-grid"
-          :columnDefs="columnDefs"
-          :rowData="erCodeList"
-          :rowSelection="'single'"
-          @grid-ready="onGridReady"
-          @rowClicked="onRowClicked"
-        />
+  <div class="er-code-popup">
+    <!-- ag-Grid 리스트 -->
+    <div class="er-code-grid-wrapper">
+      <ag-grid-vue
+        class="ag-theme-balham er-code-grid"
+        :columnDefs="columnDefs"
+        :rowData="erCodeList"
+        :rowSelection="'single'"
+        @grid-ready="onGridReady"
+        @rowClicked="onRowClicked"
+      />
+    </div>
+
+    <!-- 입력 폼 -->
+    <div class="er-code-form">
+      <div class="form-row">
+        <label for="erCode">
+          코드
+        </label>
+        <input
+          id="erCode"
+          v-model="editForm.erCode"
+          type="text"
+          :readonly="isEditMode"
+        >
       </div>
 
-      <!-- 입력 폼 -->
-      <div class="er-code-form">
-        <div class="form-row">
-          <label for="erCode">
-            코드
-          </label>
-          <input
-            id="erCode"
-            v-model="editForm.erCode"
-            type="text"
-            :readonly="isEditMode"
+      <div class="form-row">
+        <label for="type">
+          타입
+        </label>
+        <select
+          id="type"
+          v-model="editForm.type"
+          :disabled="!canEditType"
+        >
+          <option
+            v-for="option in typeOptions"
+            :key="option"
+            :value="option"
           >
-        </div>
-
-        <div class="form-row">
-          <label for="type">
-            타입
-          </label>
-          <select
-            id="type"
-            v-model="editForm.type"
-            :disabled="!canEditType"
-          >
-            <option
-              v-for="option in typeOptions"
-              :key="option"
-              :value="option"
-            >
-              {{ option }}
-            </option>
-          </select>
-        </div>
-      </div>
-
-      <!-- 버튼 영역 -->
-      <div class="er-code-actions">
-        <button
-          type="button"
-          @click="onClickNew"
-        >
-          신규
-        </button>
-
-        <button
-          type="button"
-          :disabled="!hasEditPermission"
-          @click="onClickSave"
-        >
-          저장
-        </button>
-
-        <button
-          type="button"
-          :disabled="!hasEditPermission || !selectedErCode"
-          @click="onClickDelete"
-        >
-          삭제
-        </button>
-
-        <button
-          type="button"
-          @click="onClickClose"
-        >
-          닫기
-        </button>
-      </div>
-
-      <!-- 메시지 -->
-      <div
-        v-if="errorMessage"
-        class="er-code-message error"
-      >
-        {{ errorMessage }}
-      </div>
-      <div
-        v-if="infoMessage"
-        class="er-code-message info"
-      >
-        {{ infoMessage }}
+            {{ option }}
+          </option>
+        </select>
       </div>
     </div>
-  </CustomPopup>
+
+    <!-- 버튼 영역 -->
+    <div class="er-code-actions">
+      <button
+        type="button"
+        @click="onClickNew"
+      >
+        신규
+      </button>
+
+      <button
+        type="button"
+        @click="onClickSave"
+      >
+        저장
+      </button>
+
+      <button
+        type="button"
+        :disabled="!selectedErCode"
+        @click="onClickDelete"
+      >
+        삭제
+      </button>
+
+      <button
+        type="button"
+        @click="onClickClose"
+      >
+        닫기
+      </button>
+    </div>
+
+    <!-- 메시지 -->
+    <div
+      v-if="errorMessage"
+      class="er-code-message error"
+    >
+      {{ errorMessage }}
+    </div>
+    <div
+      v-if="infoMessage"
+      class="er-code-message info"
+    >
+      {{ infoMessage }}
+    </div>
+  </div>
 </template>
 
 <script>
 import axios from 'axios';
 import { AgGridVue } from 'ag-grid-vue';
-import CustomPopup from '@/components/common/CustomPopup.vue';
 
 const DEFAULT_TYPE = 'SCN';
 
 export default {
   name: 'ErCodePopup',
   components: {
-    CustomPopup,
     'ag-grid-vue': AgGridVue
   },
   data() {
@@ -275,7 +267,6 @@ export default {
       typeOptions: [DEFAULT_TYPE],
       canEditType: false, // 나중에 true로 열어주면 됨
 
-      hasEditPermission: false,
       errorMessage: '',
       infoMessage: ''
     };
@@ -287,7 +278,6 @@ export default {
   },
   mounted() {
     this.fetchErCodeList();
-    this.fetchEditPermission();
   },
   methods: {
     onGridReady(params) {
@@ -300,7 +290,7 @@ export default {
     fetchErCodeList() {
       this.errorMessage = '';
       axios
-        .get('/api/er-codes')
+        .get('/api/er-codes/selectErInfos')
         .then((response) => {
           this.erCodeList = response.data || [];
           if (this.gridApi) {
@@ -309,16 +299,6 @@ export default {
         })
         .catch(() => {
           this.errorMessage = 'ER Code 목록 조회 중 오류가 발생했습니다.';
-        });
-    },
-    fetchEditPermission() {
-      axios
-        .get('/api/er-codes/permission')
-        .then((response) => {
-          this.hasEditPermission = !!(response.data && response.data.editable === true);
-        })
-        .catch(() => {
-          this.hasEditPermission = false;
         });
     },
     resetForm() {
@@ -353,17 +333,6 @@ export default {
       this.errorMessage = '';
       this.infoMessage = '';
 
-      const validationResult = this.validateErCode(this.editForm);
-      if (!validationResult.isValid) {
-        this.errorMessage = validationResult.message || '유효하지 않은 ER Code입니다.';
-        return;
-      }
-
-      if (!this.hasEditPermission) {
-        this.errorMessage = 'ER Code 수정/등록 권한이 없습니다.';
-        return;
-      }
-
       if (this.isEditMode) {
         this.updateErCode();
       } else {
@@ -372,33 +341,33 @@ export default {
     },
     createErCode() {
       axios
-        .post('/api/er-codes', this.editForm)
+        .post('/api/er-codes/createErInfo', this.editForm)
         .then(() => {
           this.infoMessage = 'ER Code가 등록되었습니다.';
           this.fetchErCodeList();
           this.onClickNew();
         })
-        .catch(() => {
-          this.errorMessage = 'ER Code 등록 중 오류가 발생했습니다.';
+        .catch((error) => {
+          this.errorMessage = (error && error.response && error.response.data && error.response.data.message)
+            ? error.response.data.message
+            : 'ER Code 등록 중 오류가 발생했습니다.';
         });
     },
     updateErCode() {
       axios
-        .put(`/api/er-codes/${encodeURIComponent(this.editForm.erCode)}`, this.editForm)
+        .put('/api/er-codes/updateErInfo', this.editForm)
         .then(() => {
           this.infoMessage = 'ER Code가 수정되었습니다.';
           this.fetchErCodeList();
         })
-        .catch(() => {
-          this.errorMessage = 'ER Code 수정 중 오류가 발생했습니다.';
+        .catch((error) => {
+          this.errorMessage = (error && error.response && error.response.data && error.response.data.message)
+            ? error.response.data.message
+            : 'ER Code 수정 중 오류가 발생했습니다.';
         });
     },
     onClickDelete() {
       if (!this.selectedErCode) {
-        return;
-      }
-      if (!this.hasEditPermission) {
-        this.errorMessage = 'ER Code 삭제 권한이 없습니다.';
         return;
       }
 
@@ -408,48 +377,24 @@ export default {
       }
 
       axios
-        .delete(`/api/er-codes/${encodeURIComponent(this.selectedErCode.erCode)}`)
+        .delete('/api/er-codes/deleteErInfo', {
+          data: {
+            erCode: this.selectedErCode.erCode
+          }
+        })
         .then(() => {
           this.infoMessage = 'ER Code가 삭제되었습니다.';
           this.fetchErCodeList();
           this.onClickNew();
         })
-        .catch(() => {
-          this.errorMessage = 'ER Code 삭제 중 오류가 발생했습니다.';
+        .catch((error) => {
+          this.errorMessage = (error && error.response && error.response.data && error.response.data.message)
+            ? error.response.data.message
+            : 'ER Code 삭제 중 오류가 발생했습니다.';
         });
     },
     onClickClose() {
       this.$emit('close');
-    },
-    /**
-     * ER Code 검증 함수
-     *
-     * @param {object} form : 검증 대상 폼 데이터
-     * @returns {{ isValid: boolean, message: string }}
-     */
-    validateErCode(form) {
-      if (!form) {
-        return {
-          isValid: false,
-          message: '폼 데이터가 없습니다.'
-        };
-      }
-
-      if (!form.erCode || !form.erCode.trim()) {
-        return {
-          isValid: false,
-          message: '코드는 필수 항목입니다.'
-        };
-      }
-
-      if (!form.type || !form.type.trim()) {
-        form.type = DEFAULT_TYPE;
-      }
-
-      return {
-        isValid: true,
-        message: ''
-      };
     }
   }
 };
