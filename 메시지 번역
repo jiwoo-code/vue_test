@@ -1,58 +1,57 @@
 
-ER Code 관련 메시지라 변수명도 통일감 있게 구성했습니다.
-✅ 1) ER Code 목록 조회 중 오류가 발생했습니다.
+✅ 1) 조회 중 오류가 발생했습니다.
 영어 번역:
-An error occurred while retrieving the ER Code list.
+An error occurred while retrieving the data.
 한국어 설명:
-"ER Code 목록을 조회하는 중 오류가 발생했습니다."
+"데이터를 조회하는 중 오류가 발생했습니다."
 변수명 추천:
-erCodeFetchErrorMsg
-✅ 2) ER Code가 등록되었습니다.
+fetchErrorMsg
+✅ 2) 등록되었습니다.
 영어 번역:
-The ER Code has been registered.
+The item has been registered.
 한국어 설명:
-"ER Code가 정상적으로 등록되었습니다."
+"등록이 완료되었습니다."
 변수명 추천:
-erCodeRegisteredMsg
-✅ 3) ER Code 등록 중 오류가 발생했습니다.
+registerSuccessMsg
+✅ 3) 등록 중 오류가 발생했습니다.
 영어 번역:
-An error occurred while registering the ER Code.
+An error occurred while registering the item.
 한국어 설명:
-"ER Code를 등록하는 중 오류가 발생했습니다."
+"등록 중 오류가 발생했습니다."
 변수명 추천:
-erCodeRegisterErrorMsg
-✅ 4) ER Code가 수정되었습니다.
+registerErrorMsg
+✅ 4) 수정되었습니다.
 영어 번역:
-The ER Code has been updated.
+The item has been updated.
 한국어 설명:
-"ER Code가 수정되었습니다."
+"수정이 완료되었습니다."
 변수명 추천:
-erCodeUpdatedMsg
-✅ 5) ER Code 수정 중 오류가 발생했습니다.
+updateSuccessMsg
+✅ 5) 수정 중 오류가 발생했습니다.
 영어 번역:
-An error occurred while updating the ER Code.
+An error occurred while updating the item.
 한국어 설명:
-"ER Code를 수정하는 중 오류가 발생했습니다."
+"수정 중 오류가 발생했습니다."
 변수명 추천:
-erCodeUpdateErrorMsg
-✅ 6) ER Code [  ] 를 삭제하시겠습니까?
+updateErrorMsg
+✅ 6) [  ] 를 삭제하시겠습니까?
 영어 번역:
-Are you sure you want to delete ER Code [  ]?
+Are you sure you want to delete [  ]?
 한국어 설명:
-"ER Code [  ] 를 삭제하시겠습니까?"
+"[  ] 를 삭제하시겠습니까?"
 변수명 추천:
-erCodeDeleteConfirmMsg
-✅ 7) ER Code가 삭제되었습니다.
+deleteConfirmMsg
+✅ 7) 삭제되었습니다.
 영어 번역:
-The ER Code has been deleted.
+The item has been deleted.
 한국어 설명:
-"ER Code가 삭제되었습니다."
+"삭제되었습니다."
 변수명 추천:
-erCodeDeletedMsg
-✅ 8) ER Code 삭제 중 오류가 발생했습니다.
+deleteSuccessMsg
+✅ 8) 삭제 중 오류가 발생했습니다.
 영어 번역:
-An error occurred while deleting the ER Code.
+An error occurred while deleting the item.
 한국어 설명:
-"ER Code를 삭제하는 중 오류가 발생했습니다."
+"삭제 중 오류가 발생했습니다."
 변수명 추천:
-erCodeDeleteErrorMsg
+deleteErrorMsg
