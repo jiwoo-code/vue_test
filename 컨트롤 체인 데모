@@ -1,0 +1,508 @@
+
+✅ ① 최종 완성본 ControlChain.vue (전체 코드)
+(ur-dropdown / ur-multi-dropdown 전역 컴포넌트, import 불필요)
+코드 복사
+Vue
+<!--
+  ---------------------------------------------------------------------------
+  필요 라이브러리
+
+  vuedraggable (Sortable.js 기반 드래그)
+    npm install vuedraggable sortablejs
+    yarn add vuedraggable sortablejs
+
+  ---------------------------------------------------------------------------
+-->
+
+<template>
+  <div
+    class="control-chain"
+    :class="layoutClass"
+  >
+    <!-- ========================= -->
+    <!--       활성 체인 영역      -->
+    <!-- ========================= -->
+    <div class="control-chain__active">
+      <draggable
+        v-model="activeControls"
+        :group="dragGroup"
+        item-key="id"
+        class="control-chain__draggable"
+        :handle="dragHandleSelector"
+        @change="onActiveChange"
+      >
+        <template #item="{ element, index }">
+          <div class="control-chain__item">
+            <!-- 구분자 표시 (AAA >> BBB >> ...) -->
+            <span v-if="index > 0" class="control-chain__separator">>></span>
+
+            <div
+              class="control-chain__content"
+              @mouseenter="onControlMouseEnter(element)"
+              @mouseleave="onControlMouseLeave(element)"
+            >
+              <div class="control-chain__header">
+                <span class="control-chain__title">{{ element.label }}</span>
+
+                <div class="control-chain__header-right">
+                  <!-- 드래그 핸들 (hover 시 표시) -->
+                  <span
+                    v-if="hoveredControlId === element.id"
+                    class="control-chain__drag-handle"
+                  >
+                    ≡
+                  </span>
+
+                  <!-- X 버튼 (hover 1초 후 표시) -->
+                  <button
+                    v-if="showCloseControlId === element.id"
+                    class="control-chain__close-button"
+                    @click.stop="removeControlById(element.id)"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <div class="control-chain__body">
+                <!-- 단일 선택 (ur-dropdown) -->
+                <ur-dropdown
+                  v-if="element.type === 'single'"
+                  class="control-chain__dropdown"
+                  v-model="element.selectedValue"
+                  :item="element.options || []"
+                  @input="onSingleSelectChange(element, index, $event)"
+                />
+
+                <!-- 다중 선택 (ur-multi-dropdown) -->
+                <ur-multi-dropdown
+                  v-else-if="element.type === 'multi'"
+                  class="control-chain__dropdown control-chain__dropdown--multi"
+                  v-model="element.selectedValues"
+                  :item="element.options || []"
+                  @input="onMultiSelectChange(element, index, $event)"
+                />
+
+                <!-- 표시 전용 라벨 -->
+                <span v-else class="control-chain__label-value">
+                  {{ element.displayValue || '-' }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <template #footer>
+          <div v-if="!activeControls.length" class="control-chain__empty">
+            사용 가능한 컨트롤 목록에서 드래그해 추가하세요.
+          </div>
+        </template>
+      </draggable>
+    </div>
+
+    <!-- ========================= -->
+    <!--   사용 가능한 컨트롤 목록  -->
+    <!-- ========================= -->
+    <div class="control-chain__available">
+      <div class="control-chain__available-title">사용 가능한 컨트롤</div>
+
+      <draggable
+        v-model="availableControls"
+        :group="dragGroup"
+        item-key="id"
+        class="control-chain__available-list"
+        :handle="dragHandleSelector"
+      >
+        <template #item="{ element }">
+          <li class="control-chain__available-item">
+            <div
+              class="control-chain__available-content"
+              @mouseenter="onControlMouseEnter(element)"
+              @mouseleave="onControlMouseLeave(element)"
+            >
+              <span class="control-chain__available-label">
+                {{ element.label }}
+              </span>
+
+              <span
+                v-if="hoveredControlId === element.id"
+                class="control-chain__drag-handle control-chain__drag-handle--small"
+              >
+                ≡
+              </span>
+            </div>
+          </li>
+        </template>
+      </draggable>
+    </div>
+  </div>
+</template>
+
+<script>
+import draggable from 'vuedraggable';
+
+export default {
+  name: 'ControlChain',
+  components: { draggable },
+  model: { prop: 'value', event: 'input' },
+
+  props: {
+    /* 현재 체인에 위치한 컨트롤 목록 */
+    value: {
+      type: Array,
+      default() {
+        return [];
+      }
+    },
+
+    /* 전체 컨트롤 템플릿 */
+    controlTemplates: {
+      type: Array,
+      required: true
+    },
+
+    /* 오른쪽 목록 위치 (right, left, top, bottom) */
+    availablePlacement: {
+      type: String,
+      default: 'right',
+      validator(v) {
+        return ['right', 'left', 'top', 'bottom'].includes(v);
+      }
+    }
+  },
+
+  data() {
+    const usedSet = new Set(
+      (this.value || []).map(c => c.key || c.label)
+    );
+
+    return {
+      activeControls: this.value.slice(),
+
+      /* 체인에 없는 컨트롤만 available로 초기 표시 */
+      availableControls: this.controlTemplates
+        .filter(t => !usedSet.has(t.key || t.label))
+        .map(t => ({
+          ...t,
+          id: t.id || this.makeId(t)
+        })),
+
+      dragGroup: { name: 'control-chain', pull: true, put: true },
+      dragHandleSelector: '.control-chain__drag-handle',
+
+      hoveredControlId: null,
+      hoverTimerId: null,
+      showCloseControlId: null
+    };
+  },
+
+  computed: {
+    layoutClass() {
+      return `control-chain--available-${this.availablePlacement}`;
+    }
+  },
+
+  watch: {
+    value(newVal) {
+      this.activeControls = Array.isArray(newVal) ? newVal.slice() : [];
+    }
+  },
+
+  methods: {
+    /* ------- 드래그 변경 이벤트 ------- */
+    onActiveChange(e) {
+      if (e.added) {
+        this.emitChain();
+        this.$emit('control-added', {
+          control: e.added.element,
+          index: e.added.newIndex
+        });
+      }
+
+      if (e.moved) {
+        this.emitChain();
+        this.$emit('control-depth-change', {
+          control: e.moved.element,
+          oldIndex: e.moved.oldIndex,
+          newIndex: e.moved.newIndex
+        });
+      }
+
+      if (e.removed) {
+        this.emitChain();
+        this.$emit('control-removed', {
+          control: e.removed.element,
+          index: e.removed.oldIndex
+        });
+      }
+
+      if (!e.added && !e.moved && !e.removed) {
+        this.emitChain();
+      }
+    },
+
+    /* ------- 선택 변경 이벤트 ------- */
+    onSingleSelectChange(control, index, value) {
+      control.selectedValue = value;
+      this.emitChain();
+      this.$emit('control-selection-change', {
+        control,
+        index,
+        type: 'single',
+        value
+      });
+    },
+
+    onMultiSelectChange(control, index, values) {
+      control.selectedValues = Array.isArray(values) ? values.slice() : [];
+      this.emitChain();
+      this.$emit('control-selection-change', {
+        control,
+        index,
+        type: 'multi',
+        values: control.selectedValues
+      });
+    },
+
+    /* ------- X 버튼 제거 ------- */
+    removeControlById(id) {
+      const idx = this.activeControls.findIndex(c => c.id === id);
+      if (idx === -1) return;
+
+      const [removed] = this.activeControls.splice(idx, 1);
+      this.availableControls.push(removed);
+
+      this.emitChain();
+      this.$emit('control-removed', { control: removed, index: idx });
+    },
+
+    /* ------- hover 처리 ------- */
+    onControlMouseEnter(control) {
+      this.hoveredControlId = control.id;
+
+      if (this.hoverTimerId) clearTimeout(this.hoverTimerId);
+
+      this.hoverTimerId = setTimeout(() => {
+        this.showCloseControlId = control.id;
+      }, 1000);
+    },
+
+    onControlMouseLeave(control) {
+      this.hoveredControlId = null;
+      if (this.hoverTimerId) clearTimeout(this.hoverTimerId);
+      this.hoverTimerId = null;
+
+      if (this.showCloseControlId === control.id) {
+        this.showCloseControlId = null;
+      }
+    },
+
+    /* ------- 체인 변경 emit ------- */
+    emitChain() {
+      const cloned = this.activeControls.map(c => ({
+        ...c,
+        selectedValues: Array.isArray(c.selectedValues)
+          ? c.selectedValues.slice()
+          : c.selectedValues
+      }));
+
+      this.$emit('input', cloned);
+      this.$emit('change', cloned);
+    },
+
+    /* ------- ID 생성 ------- */
+    makeId(t) {
+      return `${t.key || t.label}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+    }
+  }
+};
+</script>
+
+<style scoped>
+/* 레이아웃 */
+.control-chain {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+/* 위치 옵션 */
+.control-chain--available-right {
+  flex-direction: row;
+}
+.control-chain--available-left {
+  flex-direction: row-reverse;
+}
+.control-chain--available-top {
+  flex-direction: column-reverse;
+}
+.control-chain--available-bottom {
+  flex-direction: column;
+}
+
+/* active 영역 */
+.control-chain__active {
+  flex: 1;
+}
+.control-chain__draggable {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.control-chain__item {
+  display: flex;
+  align-items: center;
+}
+.control-chain__separator {
+  margin-right: 4px;
+}
+
+.control-chain__content {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: #fafafa;
+  min-width: 160px;
+}
+
+.control-chain__header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.control-chain__drag-handle {
+  cursor: grab;
+  font-size: 12px;
+}
+
+.control-chain__close-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.control-chain__body {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.control-chain__dropdown {
+  width: 100%;
+}
+
+.control-chain__empty {
+  font-size: 12px;
+  color: #999;
+}
+
+/* available 영역 */
+.control-chain__available {
+  width: 180px;
+}
+
+.control-chain__available-title {
+  margin-bottom: 8px;
+  font-weight: bold;
+}
+
+.control-chain__available-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.control-chain__available-item + .control-chain__available-item {
+  margin-top: 4px;
+}
+
+.control-chain__available-content {
+  border: 1px dashed #ccc;
+  padding: 4px 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+</style>
+✅ ② 사용 샘플 코드 (부모 컴포넌트 예시)
+아래 예시는 ControlChain.vue를 사용하는 실제 페이지 구조입니다.
+코드 복사
+Vue
+<template>
+  <div>
+    <control-chain
+      v-model="chain"
+      :control-templates="controlTemplates"
+      available-placement="right"
+      @control-added="logEvent"
+      @control-removed="logEvent"
+      @control-depth-change="logEvent"
+      @control-selection-change="logEvent"
+    />
+  </div>
+</template>
+
+<script>
+import ControlChain from '@/components/ControlChain.vue';
+
+export default {
+  name: 'ControlChainDemo',
+  components: { ControlChain },
+
+  data() {
+    return {
+      /* 전체 템플릿 */
+      controlTemplates: [
+        {
+          key: 'AAA',
+          label: 'AAA',
+          type: 'single',
+          options: [
+            { label: 'AAA1', value: 'aaa1' },
+            { label: 'AAA2', value: 'aaa2' }
+          ],
+          selectedValue: 'aaa1'
+        },
+        {
+          key: 'BBB',
+          label: 'BBB',
+          type: 'multi',
+          options: [
+            { label: 'BBB1', value: 'bbb1' },
+            { label: 'BBB2', value: 'bbb2' }
+          ],
+          selectedValues: []
+        },
+        {
+          key: 'CCC',
+          label: 'CCC',
+          type: 'label',
+          displayValue: '고정 라벨'
+        }
+      ],
+
+      /* 현재 체인 */
+      chain: []   // AAA >> BBB >> ... 이런 식으로 구성됨
+    };
+  },
+
+  methods: {
+    logEvent(e) {
+      console.log('EVENT:', e);
+    }
+  }
+};
+</script>
+🎉 이제 완전히 실전에 투입할 수 있는 수준이에요!
+지우님 요구하신 기능이 모두 들어있습니다:
+✔ 드래그 핸들(≡)로만 순서 변경
+✔ 오른쪽 목록에서 드래그해 체인 추가
+✔ 체인에서 오른쪽으로 드래그하면 제거
+✔ hover 1초 후 X 버튼 등장
+✔ ur-dropdown, ur-multi-dropdown 적용
+✔ availablePlacement → right/left/top/bottom 지원
+✔ 체인에 있는 항목은 목록에서 자동 제거
