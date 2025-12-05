@@ -1,7 +1,7 @@
 
-✅ ControlChain.vue
-코드 복사
-Vue
+✅ ControlChain.vue (요청 사항 반영 버전)
+
+
 <!--
   ---------------------------------------------------------------------------
   필요한 라이브러리
@@ -16,7 +16,7 @@ Vue
 <template>
   <div class="control-chain" :class="layoutClass">
 
-    <!-- 활성 체인 -->
+    <!-- 활성 체인 영역 -->
     <div class="control-chain__active">
       <draggable
         :list="activeControls"
@@ -35,7 +35,7 @@ Vue
 
           <div
             class="control-chain__content"
-            :style="getContentHoverStyle(index, element)"
+            :style="getContentStyle(index, element)"
           >
             <!-- 헤더에만 올렸을 때 드래그 아이콘 + X / 색상 변경 -->
             <div
@@ -67,7 +67,7 @@ Vue
               </div>
             </div>
 
-            <!-- 바디 영역 (라벨/드롭다운 공통 높이감 유지) -->
+            <!-- 바디 (드롭다운/라벨 공통 높이감 유지) -->
             <div class="control-chain__body">
               <ur-dropdown
                 v-if="element.type === 'single'"
@@ -98,14 +98,19 @@ Vue
         </div>
 
         <div v-if="!activeControls.length" class="control-chain__empty">
-          사용 가능한 컨트롤 목록에서 드래그해 추가해주세요.
+          {{ emptyGuideText }}
         </div>
       </draggable>
     </div>
 
-    <!-- 사용 가능한 컨트롤 -->
+    <!-- 사용 가능한 컨트롤 영역 -->
     <div class="control-chain__available">
-      <div class="control-chain__available-title">사용 가능한 컨트롤</div>
+      <div
+        v-if="availableTitle"
+        class="control-chain__available-title"
+      >
+        {{ availableTitle }}
+      </div>
 
       <draggable
         :list="availableControls"
@@ -170,6 +175,14 @@ export default {
       validator(v) {
         return ['right', 'left', 'top', 'bottom'].includes(v);
       }
+    },
+    emptyGuideText: {
+      type: String,
+      default: '목록에서 드래그하여 추가해 주세요.'
+    },
+    availableTitle: {
+      type: String,
+      default: ''
     }
   },
 
@@ -184,7 +197,6 @@ export default {
       },
       dragHandleSelector: '.control-chain__drag-handle',
       hoveredControlId: null,
-      hoverTimerId: null,
       showCloseControlId: null,
       idMap: {},
 
@@ -197,15 +209,18 @@ export default {
         '#1E5FCB',
         '#553CA5'
       ],
-      // 아주 살짝 더 은은하지만 물탄 느낌은 아니게 톤다운
+      // 은은한 배경 (물탄 느낌은 아니게)
       depthHighlightBgColors: [
-        '#F8DDDF', // D5383A 기반
-        '#FAE2D4', // EB702D 기반
-        '#FFF0C8', // FBB41A 기반
-        '#E0F0E8', // 2DA379 기반
-        '#E0EBFA', // 1E5FCB 기반
-        '#E5E0F6'  // 553CA5 기반
-      ]
+        '#F8DDDF',
+        '#FAE2D4',
+        '#FFF0C8',
+        '#E0F0E8',
+        '#E0EBFA',
+        '#E5E0F6'
+      ],
+
+      // 컨트롤 기본 max-width(px) – 템플릿에서 maxWidth로 override 가능
+      defaultMaxWidth: 240
     };
   },
 
@@ -233,6 +248,16 @@ export default {
   },
 
   methods: {
+    // 외부에서 색 변경: this.$refs.controlChain.setHighlightColors([...], [...])
+    setHighlightColors(borderColors, backgroundColors) {
+      if (Array.isArray(borderColors) && borderColors.length) {
+        this.depthHighlightColors = borderColors.slice();
+      }
+      if (Array.isArray(backgroundColors) && backgroundColors.length) {
+        this.depthHighlightBgColors = backgroundColors.slice();
+      }
+    },
+
     getStableId(control) {
       const key = control.key || control.label || 'control';
       if (!this.idMap[key]) {
@@ -343,44 +368,40 @@ export default {
       });
     },
 
+    // 1초 딜레이 제거 – hover 시 바로 아이콘/X 보이게
     onControlMouseEnter(control) {
       this.hoveredControlId = control.id;
-
-      if (this.hoverTimerId) {
-        clearTimeout(this.hoverTimerId);
-      }
-
-      this.hoverTimerId = setTimeout(() => {
-        this.showCloseControlId = control.id;
-      }, 1000);
+      this.showCloseControlId = control.id;
     },
 
     onControlMouseLeave(control) {
-      this.hoveredControlId = null;
-
-      if (this.hoverTimerId) {
-        clearTimeout(this.hoverTimerId);
-        this.hoverTimerId = null;
+      if (this.hoveredControlId === control.id) {
+        this.hoveredControlId = null;
       }
-
       if (this.showCloseControlId === control.id) {
         this.showCloseControlId = null;
       }
     },
 
-    getContentHoverStyle(index, control) {
-      if (this.hoveredControlId !== control.id) {
-        return {};
+    getContentStyle(index, control) {
+      const style = {};
+
+      // max-width: 템플릿에서 지정한 maxWidth > 컴포넌트 기본값 순
+      const maxWidth = control.maxWidth != null ? control.maxWidth : this.defaultMaxWidth;
+      if (typeof maxWidth === 'number') {
+        style.maxWidth = `${maxWidth}px`;
+      } else {
+        style.maxWidth = maxWidth;
       }
 
-      const colorIndex = index % this.depthHighlightColors.length;
-      const borderColor = this.depthHighlightColors[colorIndex];
-      const backgroundColor = this.depthHighlightBgColors[colorIndex];
+      // hover 시에만 색상 하이라이트
+      if (this.hoveredControlId === control.id) {
+        const colorIndex = index % this.depthHighlightColors.length;
+        style.borderColor = this.depthHighlightColors[colorIndex];
+        style.backgroundColor = this.depthHighlightBgColors[colorIndex];
+      }
 
-      return {
-        borderColor,
-        backgroundColor
-      };
+      return style;
     },
 
     emitChain() {
@@ -412,8 +433,30 @@ export default {
 .control-chain--available-top { flex-direction: column-reverse; }
 .control-chain--available-bottom { flex-direction: column; }
 
-/* 활성 체인 쪽 */
-.control-chain__active { flex: 1; }
+/* 영역 자체를 박스로 구분 */
+.control-chain__active {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #e5e5e5;
+  background: #ffffff;
+}
+
+.control-chain__available {
+  width: 200px;
+  padding: 8px;
+  border: 1px solid #e5e5e5;
+  background: #ffffff;
+}
+
+.control-chain--available-top .control-chain__active,
+.control-chain--available-bottom .control-chain__active {
+  width: 100%;
+}
+
+.control-chain--available-top .control-chain__available,
+.control-chain--available-bottom .control-chain__available {
+  width: 100%;
+}
 
 .control-chain__draggable {
   display: flex;
@@ -429,7 +472,7 @@ export default {
   margin-right: 4px;
 }
 
-/* 기본 상태: 흰 배경, 옅은 테두리, 각진 모서리, 라벨/드롭다운 높이 통일감 */
+/* 컨트롤 박스 */
 .control-chain__content {
   border: 1px solid #e4e4e4;
   border-radius: 0;
@@ -478,7 +521,7 @@ export default {
   font-size: 12px;
 }
 
-/* 바디: 드롭다운/라벨 모두 일정한 라인 높이감 */
+/* 바디 */
 .control-chain__body {
   display: flex;
   align-items: center;
@@ -499,31 +542,7 @@ export default {
   color: #777;
 }
 
-/* 사용 가능한 컨트롤 영역: 흑백 톤 유지 */
-.control-chain__available {
-  width: 200px;
-}
-.control-chain--available-right .control-chain__available {
-  border-left: 1px solid #eee;
-  padding-left: 12px;
-}
-.control-chain--available-left .control-chain__available {
-  border-right: 1px solid #eee;
-  padding-right: 12px;
-}
-.control-chain--available-top .control-chain__available {
-  border-bottom: 1px solid #eee;
-  padding-bottom: 8px;
-  margin-bottom: 8px;
-  width: 100%;
-}
-.control-chain--available-bottom .control-chain__available {
-  border-top: 1px solid #eee;
-  padding-top: 8px;
-  margin-top: 8px;
-  width: 100%;
-}
-
+/* 사용 가능한 컨트롤 */
 .control-chain__available-title {
   margin-bottom: 8px;
   font-weight: bold;
@@ -558,15 +577,22 @@ export default {
   font-size: 12px;
 }
 </style>
-✅ 샘플 사용 코드 (컨트롤 6개로 확장)
-코드 복사
-Vue
+
+
+
+
+✅ 샘플 사용 코드 (문구 커스터마이징 + ref로 색상 변경 예시)
+
+
 <template>
   <div>
     <control-chain
+      ref="controlChain"
       v-model="chain"
       :control-templates="controlTemplates"
       available-placement="right"
+      :empty-guide-text="emptyGuideText"
+      :available-title="availableTitle"
       @control-added="logEvent"
       @control-removed="logEvent"
       @control-depth-change="logEvent"
@@ -584,6 +610,9 @@ export default {
 
   data() {
     return {
+      emptyGuideText: '조건을 왼쪽 체인에 드래그해 구성해 주세요.',
+      availableTitle: '사용 가능한 컨트롤',
+
       controlTemplates: [
         {
           key: 'AAA',
@@ -594,7 +623,8 @@ export default {
             { text: 'AAA-옵션 2', value: 'aaa2' },
             { text: 'AAA-옵션 3', value: 'aaa3' }
           ],
-          selectedValue: 'aaa1'
+          selectedValue: 'aaa1',
+          maxWidth: 240
         },
         {
           key: 'BBB',
@@ -605,45 +635,58 @@ export default {
             { text: 'BBB-옵션 2', value: 'bbb2' },
             { text: 'BBB-옵션 3', value: 'bbb3' }
           ],
-          selectedValues: []
+          selectedValues: [],
+          maxWidth: 260
         },
         {
           key: 'CCC',
           label: 'CCC (라벨)',
           type: 'label',
-          displayValue: '고정 라벨 텍스트'
+          displayValue: '고정 라벨 텍스트',
+          maxWidth: 220
         },
         {
           key: 'DDD',
-          label: 'DDD (단일 선택)',
+          label: 'DDD (단일 선택, 긴 제목 테스트용)',
           type: 'single',
           items: [
             { text: 'ON', value: 'on' },
             { text: 'OFF', value: 'off' }
           ],
-          selectedValue: 'on'
+          selectedValue: 'on',
+          maxWidth: 280
         },
         {
           key: 'EEE',
-          label: 'EEE (다중 선택)',
+          label: 'EEE (다중 선택, 긴 옵션 테스트용)',
           type: 'multi',
           items: [
-            { text: '조건 A', value: 'condA' },
+            { text: '조건 A - 매우 긴 텍스트', value: 'condA' },
             { text: '조건 B', value: 'condB' },
             { text: '조건 C', value: 'condC' }
           ],
-          selectedValues: ['condA']
+          selectedValues: ['condA'],
+          maxWidth: 300
         },
         {
           key: 'FFF',
-          label: 'FFF (라벨)',
+          label: 'FFF (라벨, 설명용)',
           type: 'label',
-          displayValue: '읽기 전용 설명 텍스트'
+          displayValue: '읽기 전용 설명 텍스트',
+          maxWidth: 260
         }
       ],
 
       chain: []
     };
+  },
+
+  mounted() {
+    // 예시: 색상 테마 변경 (원하면 사용)
+    // this.$refs.controlChain.setHighlightColors(
+    //   ['#1E5FCB', '#2DA379'],  // 테두리 색 배열
+    //   ['#E0EBFA', '#E0F0E8']   // 배경 색 배열
+    // );
   },
 
   methods: {
