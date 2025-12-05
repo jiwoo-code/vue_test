@@ -696,3 +696,627 @@ export default {
   }
 };
 </script>
+
+
+
+
+
+
+
+
+<!--
+  ---------------------------------------------------------------------------
+  필요한 라이브러리
+
+  vuedraggable (Sortable.js 기반 드래그)
+    npm install vuedraggable sortablejs
+    yarn add vuedraggable sortablejs
+
+  ---------------------------------------------------------------------------
+-->
+
+<template>
+  <div class="control-chain" :class="layoutClass">
+
+    <!-- 활성 체인 영역 (왼쪽) -->
+    <div
+      class="control-chain__active"
+      :style="activeAreaStyle"
+    >
+      <draggable
+        :list="activeControls"
+        :group="dragGroup"
+        item-key="id"
+        class="control-chain__draggable"
+        :handle="dragHandleSelector"
+        @change="onActiveChange"
+      >
+        <div
+          v-for="(element, index) in activeControls"
+          :key="element.id"
+          class="control-chain__item"
+        >
+          <span v-if="index > 0" class="control-chain__separator">>></span>
+
+          <div
+            class="control-chain__content"
+            :style="getContentStyle(index, element)"
+          >
+            <!-- 헤더: 마우스 오버 시 드래그 아이콘 + X, 색상 변경 트리거 -->
+            <div
+              class="control-chain__header"
+              @mouseenter="onControlMouseEnter(element)"
+              @mouseleave="onControlMouseLeave(element)"
+            >
+              <div class="control-chain__header-left">
+                <span
+                  v-if="hoveredControlId === element.id"
+                  class="control-chain__drag-handle"
+                >
+                  ≡
+                </span>
+                <span class="control-chain__title">
+                  {{ element.label }}
+                </span>
+              </div>
+
+              <div class="control-chain__header-right">
+                <button
+                  v-if="showCloseControlId === element.id"
+                  type="button"
+                  class="control-chain__close-button"
+                  @click.stop="removeControlById(element.id)"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <!-- 바디 (드롭다운/라벨 공통 높이감 유지) -->
+            <div class="control-chain__body">
+              <ur-dropdown
+                v-if="element.type === 'single'"
+                class="control-chain__dropdown"
+                sm
+                v-model="element.selectedValue"
+                :items="element.items"
+                @input="onSingleSelectChange(element, index, $event)"
+              />
+
+              <ur-multi-dropdown
+                v-else-if="element.type === 'multi'"
+                class="control-chain__dropdown"
+                sm
+                v-model="element.selectedValues"
+                :items="element.items"
+                @input="onMultiSelectChange(element, index, $event)"
+              />
+
+              <span
+                v-else
+                class="control-chain__label-value"
+              >
+                {{ element.displayValue || '-' }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="!activeControls.length" class="control-chain__empty">
+          {{ emptyGuideText }}
+        </div>
+      </draggable>
+    </div>
+
+    <!-- 사용 가능한 컨트롤 영역 (오른쪽) -->
+    <div class="control-chain__available">
+      <div
+        v-if="availableTitle"
+        class="control-chain__available-title"
+      >
+        {{ availableTitle }}
+      </div>
+
+      <!-- 목록 영역만 높이 제한 + 스크롤 -->
+      <div
+        class="control-chain__available-list-wrapper"
+        :style="availableListStyle"
+      >
+        <draggable
+          :list="availableControls"
+          :group="dragGroup"
+          item-key="id"
+          class="control-chain__available-list"
+          :handle="dragHandleSelector"
+        >
+          <li
+            v-for="element in availableControls"
+            :key="element.id"
+            class="control-chain__available-item"
+          >
+            <div
+              class="control-chain__available-content"
+              @mouseenter="onControlMouseEnter(element)"
+              @mouseleave="onControlMouseLeave(element)"
+            >
+              <span
+                v-if="hoveredControlId === element.id"
+                class="control-chain__drag-handle control-chain__drag-handle--small"
+              >
+                ≡
+              </span>
+              <span class="control-chain__available-label">
+                {{ element.label }}
+              </span>
+            </div>
+          </li>
+        </draggable>
+      </div>
+    </div>
+
+  </div>
+</template>
+
+<script>
+import draggable from 'vuedraggable';
+
+export default {
+  name: 'ControlChain',
+  components: { draggable },
+
+  model: {
+    prop: 'value',
+    event: 'input'
+  },
+
+  props: {
+    value: {
+      type: Array,
+      default() {
+        return [];
+      }
+    },
+    controlTemplates: {
+      type: Array,
+      required: true
+    },
+    // 이제 left/right만 지원
+    availablePlacement: {
+      type: String,
+      default: 'right',
+      validator(v) {
+        return ['right', 'left'].includes(v);
+      }
+    },
+    emptyGuideText: {
+      type: String,
+      default: '목록에서 드래그하여 추가해 주세요.'
+    },
+    availableTitle: {
+      type: String,
+      default: ''
+    },
+    // 1. 왼쪽 뎁스 영역 max-width
+    activeMaxWidth: {
+      type: [Number, String],
+      default: null
+    },
+    // 2. 오른쪽 목록 max-height (스크롤)
+    availableMaxHeight: {
+      type: [Number, String],
+      default: 260
+    }
+  },
+
+  data() {
+    return {
+      activeControls: [],
+      availableControls: [],
+      dragGroup: {
+        name: 'control-chain',
+        pull: true,
+        put: true
+      },
+      dragHandleSelector: '.control-chain__drag-handle',
+      hoveredControlId: null,
+      showCloseControlId: null,
+      idMap: {},
+
+      // ur 팔레트 원색
+      depthHighlightColors: [
+        '#D5383A',
+        '#EB702D',
+        '#FBB41A',
+        '#2DA379',
+        '#1E5FCB',
+        '#553CA5'
+      ],
+      // 은은한 배경 (물탄 느낌은 아니게)
+      depthHighlightBgColors: [
+        '#F8DDDF',
+        '#FAE2D4',
+        '#FFF0C8',
+        '#E0F0E8',
+        '#E0EBFA',
+        '#E5E0F6'
+      ],
+
+      // 컨트롤 기본 max-width(px) – 템플릿에서 maxWidth로 override 가능
+      defaultMaxWidth: 240
+    };
+  },
+
+  computed: {
+    layoutClass() {
+      // row / row-reverse만 사용
+      return `control-chain--available-${this.availablePlacement}`;
+    },
+
+    activeAreaStyle() {
+      if (this.activeMaxWidth == null) {
+        return {};
+      }
+      const value = this.activeMaxWidth;
+      const size = typeof value === 'number' ? `${value}px` : value;
+      return {
+        maxWidth: size
+      };
+    },
+
+    availableListStyle() {
+      const value = this.availableMaxHeight;
+      const size = typeof value === 'number' ? `${value}px` : value;
+      return {
+        maxHeight: size,
+        overflowY: 'auto'
+      };
+    }
+  },
+
+  watch: {
+    value: {
+      handler() {
+        this.buildControls();
+      }
+    },
+    controlTemplates: {
+      handler() {
+        this.buildControls();
+      }
+    }
+  },
+
+  created() {
+    this.buildControls();
+  },
+
+  methods: {
+    // 외부에서 색 변경: this.$refs.controlChain.setHighlightColors([...], [...])
+    setHighlightColors(borderColors, backgroundColors) {
+      if (Array.isArray(borderColors) && borderColors.length) {
+        this.depthHighlightColors = borderColors.slice();
+      }
+      if (Array.isArray(backgroundColors) && backgroundColors.length) {
+        this.depthHighlightBgColors = backgroundColors.slice();
+      }
+    },
+
+    getStableId(control) {
+      const key = control.key || control.label || 'control';
+      if (!this.idMap[key]) {
+        this.idMap[key] = `${key}-${Math.random().toString(36).slice(2, 8)}`;
+      }
+      return this.idMap[key];
+    },
+
+    buildControls() {
+      const valueArray = Array.isArray(this.value) ? this.value : [];
+      const templateArray = Array.isArray(this.controlTemplates)
+        ? this.controlTemplates
+        : [];
+
+      const usedKeys = new Set(
+        valueArray
+          .map(c => c.key)
+          .filter(key => key != null)
+      );
+
+      this.activeControls = valueArray.map(control => ({
+        ...control,
+        id: control.id || this.getStableId(control)
+      }));
+
+      this.availableControls = templateArray
+        .filter(t => !usedKeys.has(t.key))
+        .map(t => ({
+          ...t,
+          id: t.id || this.getStableId(t)
+        }));
+    },
+
+    onActiveChange(evt) {
+      this.emitChain();
+
+      if (evt.added) {
+        this.$emit('control-added', {
+          control: evt.added.element,
+          index: evt.added.newIndex
+        });
+      }
+
+      if (evt.moved) {
+        this.$emit('control-depth-change', {
+          control: evt.moved.element,
+          oldIndex: evt.moved.oldIndex,
+          newIndex: evt.moved.newIndex
+        });
+      }
+
+      if (evt.removed) {
+        this.$emit('control-removed', {
+          control: evt.removed.element,
+          index: evt.removed.oldIndex
+        });
+      }
+    },
+
+    onSingleSelectChange(control, index, value) {
+      if (control.selectedValue === value) {
+        return;
+      }
+      control.selectedValue = value;
+      this.emitChain();
+      this.$emit('control-selection-change', {
+        control,
+        index,
+        type: 'single',
+        value
+      });
+    },
+
+    onMultiSelectChange(control, index, values) {
+      const next = Array.isArray(values) ? values.slice() : [];
+      const prev = Array.isArray(control.selectedValues)
+        ? control.selectedValues
+        : [];
+
+      if (
+        prev.length === next.length &&
+        prev.every((v, i) => v === next[i])
+      ) {
+        return;
+      }
+
+      control.selectedValues = next;
+      this.emitChain();
+      this.$emit('control-selection-change', {
+        control,
+        index,
+        type: 'multi',
+        values: control.selectedValues
+      });
+    },
+
+    removeControlById(id) {
+      const idx = this.activeControls.findIndex(c => c.id === id);
+      if (idx < 0) {
+        return;
+      }
+
+      const [removed] = this.activeControls.splice(idx, 1);
+      this.availableControls.push(removed);
+
+      this.emitChain();
+      this.$emit('control-removed', {
+        control: removed,
+        index: idx
+      });
+    },
+
+    // hover 시 바로 아이콘/X 보이게
+    onControlMouseEnter(control) {
+      this.hoveredControlId = control.id;
+      this.showCloseControlId = control.id;
+    },
+
+    onControlMouseLeave(control) {
+      if (this.hoveredControlId === control.id) {
+        this.hoveredControlId = null;
+      }
+      if (this.showCloseControlId === control.id) {
+        this.showCloseControlId = null;
+      }
+    },
+
+    getContentStyle(index, control) {
+      const style = {};
+
+      // max-width: 템플릿에서 지정한 maxWidth > 컴포넌트 기본값 순
+      const maxWidth = control.maxWidth != null
+        ? control.maxWidth
+        : this.defaultMaxWidth;
+
+      if (typeof maxWidth === 'number') {
+        style.maxWidth = `${maxWidth}px`;
+      } else {
+        style.maxWidth = maxWidth;
+      }
+
+      // hover 시에만 색상 하이라이트
+      if (this.hoveredControlId === control.id) {
+        const colorIndex = index % this.depthHighlightColors.length;
+        style.borderColor = this.depthHighlightColors[colorIndex];
+        style.backgroundColor = this.depthHighlightBgColors[colorIndex];
+      }
+
+      return style;
+    },
+
+    emitChain() {
+      const cloned = this.activeControls.map(control => {
+        const clone = { ...control };
+        if (Array.isArray(clone.selectedValues)) {
+          clone.selectedValues = clone.selectedValues.slice();
+        }
+        delete clone.id;
+        return clone;
+      });
+
+      this.$emit('input', cloned);
+      this.$emit('change', cloned);
+    }
+  }
+};
+</script>
+
+<style scoped>
+.control-chain {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+/* 좌/우 배치만 사용 */
+.control-chain--available-right { flex-direction: row; }
+.control-chain--available-left { flex-direction: row-reverse; }
+
+/* 활성 체인 영역 (왼쪽) – 박스로 구분 */
+.control-chain__active {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #e5e5e5;
+  background: #ffffff;
+}
+
+/* 사용 가능한 컨트롤 영역 (오른쪽) – 박스로 구분 */
+.control-chain__available {
+  width: 200px;
+  padding: 8px;
+  border: 1px solid #e5e5e5;
+  background: #ffffff;
+}
+
+.control-chain__draggable {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.control-chain__item {
+  display: flex;
+  align-items: center;
+}
+.control-chain__separator {
+  margin-right: 4px;
+}
+
+/* 컨트롤 박스 */
+.control-chain__content {
+  border: 1px solid #e4e4e4;
+  border-radius: 0;
+  padding: 6px 8px;
+  background: #ffffff;
+  min-width: 180px;
+  min-height: 44px;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.control-chain__header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  align-items: center;
+}
+.control-chain__header-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.control-chain__title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.control-chain__header-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.control-chain__drag-handle {
+  cursor: grab;
+  font-size: 12px;
+}
+.control-chain__drag-handle--small {
+  font-size: 11px;
+}
+
+.control-chain__close-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+/* 바디 */
+.control-chain__body {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+}
+.control-chain__dropdown {
+  width: 100%;
+}
+.control-chain__label-value {
+  font-size: 12px;
+  display: inline-block;
+  padding: 3px 2px;
+}
+
+.control-chain__empty {
+  font-size: 12px;
+  color: #777;
+}
+
+/* 사용 가능한 컨트롤 목록 */
+.control-chain__available-title {
+  margin-bottom: 8px;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+/* 목록 + 스크롤 래퍼 */
+.control-chain__available-list-wrapper {
+  /* max-height / overflow-y는 computed style에서 주입 */
+}
+
+.control-chain__available-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.control-chain__available-item + .control-chain__available-item {
+  margin-top: 4px;
+}
+
+.control-chain__available-content {
+  border: 1px solid #e0e0e0;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-start;
+  background: #ffffff;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+.control-chain__available-content:hover {
+  background: #f7f7f7;
+  border-color: #d0d0d0;
+}
+
+.control-chain__available-label {
+  font-size: 12px;
+}
+</style>
