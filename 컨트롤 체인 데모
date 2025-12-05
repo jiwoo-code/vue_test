@@ -567,3 +567,536 @@ export default {
   }
 };
 </script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!--
+  ---------------------------------------------------------------------------
+  필요한 라이브러리
+
+  vuedraggable (Sortable.js 기반 드래그)
+    npm install vuedraggable sortablejs
+    yarn add vuedraggable sortablejs
+
+  ---------------------------------------------------------------------------
+-->
+
+<template>
+  <div class="control-chain" :class="layoutClass">
+
+    <!-- 활성 체인 -->
+    <div class="control-chain__active">
+      <draggable
+        :list="activeControls"
+        :group="dragGroup"
+        item-key="id"
+        class="control-chain__draggable"
+        :handle="dragHandleSelector"
+        @change="onActiveChange"
+      >
+        <div
+          v-for="(element, index) in activeControls"
+          :key="element.id"
+          class="control-chain__item"
+        >
+          <span v-if="index > 0" class="control-chain__separator">>></span>
+
+          <div
+            class="control-chain__content"
+            :style="getContentHoverStyle(index, element)"
+          >
+            <!-- 여기(헤더)에만 올렸을 때 드래그 아이콘/X 버튼, 색 변경 -->
+            <div
+              class="control-chain__header"
+              @mouseenter="onControlMouseEnter(element)"
+              @mouseleave="onControlMouseLeave(element)"
+            >
+              <div class="control-chain__header-left">
+                <span
+                  v-if="hoveredControlId === element.id"
+                  class="control-chain__drag-handle"
+                >
+                  ≡
+                </span>
+                <span class="control-chain__title">
+                  {{ element.label }}
+                </span>
+              </div>
+
+              <div class="control-chain__header-right">
+                <button
+                  v-if="showCloseControlId === element.id"
+                  type="button"
+                  class="control-chain__close-button"
+                  @click.stop="removeControlById(element.id)"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <!-- 바디는 hover해도 아이콘/X 안 뜸 -->
+            <div class="control-chain__body">
+              <ur-dropdown
+                v-if="element.type === 'single'"
+                class="control-chain__dropdown"
+                sm
+                v-model="element.selectedValue"
+                :items="element.items"
+                @input="onSingleSelectChange(element, index, $event)"
+              />
+
+              <ur-multi-dropdown
+                v-else-if="element.type === 'multi'"
+                class="control-chain__dropdown"
+                sm
+                v-model="element.selectedValues"
+                :items="element.items"
+                @input="onMultiSelectChange(element, index, $event)"
+              />
+
+              <span v-else class="control-chain__label-value">
+                {{ element.displayValue || '-' }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="!activeControls.length" class="control-chain__empty">
+          사용 가능한 컨트롤 목록에서 드래그해 추가해주세요.
+        </div>
+      </draggable>
+    </div>
+
+    <!-- 사용 가능한 컨트롤 -->
+    <div class="control-chain__available">
+      <div class="control-chain__available-title">사용 가능한 컨트롤</div>
+
+      <draggable
+        :list="availableControls"
+        :group="dragGroup"
+        item-key="id"
+        class="control-chain__available-list"
+        :handle="dragHandleSelector"
+      >
+        <li
+          v-for="element in availableControls"
+          :key="element.id"
+          class="control-chain__available-item"
+        >
+          <div
+            class="control-chain__available-content"
+            @mouseenter="onControlMouseEnter(element)"
+            @mouseleave="onControlMouseLeave(element)"
+          >
+            <span
+              v-if="hoveredControlId === element.id"
+              class="control-chain__drag-handle control-chain__drag-handle--small"
+            >
+              ≡
+            </span>
+            <span class="control-chain__available-label">
+              {{ element.label }}
+            </span>
+          </div>
+        </li>
+      </draggable>
+    </div>
+
+  </div>
+</template>
+
+<script>
+import draggable from 'vuedraggable';
+
+export default {
+  name: 'ControlChain',
+  components: { draggable },
+
+  model: {
+    prop: 'value',
+    event: 'input'
+  },
+
+  props: {
+    value: {
+      type: Array,
+      default() {
+        return [];
+      }
+    },
+    controlTemplates: {
+      type: Array,
+      required: true
+    },
+    availablePlacement: {
+      type: String,
+      default: 'right',
+      validator(v) {
+        return ['right', 'left', 'top', 'bottom'].includes(v);
+      }
+    }
+  },
+
+  data() {
+    return {
+      activeControls: [],
+      availableControls: [],
+      dragGroup: {
+        name: 'control-chain',
+        pull: true,
+        put: true
+      },
+      dragHandleSelector: '.control-chain__drag-handle',
+      hoveredControlId: null,
+      hoverTimerId: null,
+      showCloseControlId: null,
+      idMap: {},
+      depthHighlightColors: [
+        '#f7f8ff',  // depth 0
+        '#f7fbff',  // depth 1
+        '#f8fff7',  // depth 2
+        '#fff9f7'   // depth 3
+      ]
+    };
+  },
+
+  computed: {
+    layoutClass() {
+      return `control-chain--available-${this.availablePlacement}`;
+    }
+  },
+
+  watch: {
+    value: {
+      handler() {
+        this.buildControls();
+      }
+    },
+    controlTemplates: {
+      handler() {
+        this.buildControls();
+      }
+    }
+  },
+
+  created() {
+    this.buildControls();
+  },
+
+  methods: {
+    getStableId(control) {
+      const key = control.key || control.label || 'control';
+      if (!this.idMap[key]) {
+        this.idMap[key] = `${key}-${Math.random().toString(36).slice(2, 8)}`;
+      }
+      return this.idMap[key];
+    },
+
+    buildControls() {
+      const valueArray = Array.isArray(this.value) ? this.value : [];
+      const templateArray = Array.isArray(this.controlTemplates) ? this.controlTemplates : [];
+
+      const usedKeys = new Set(
+        valueArray
+          .map(c => c.key)
+          .filter(key => key != null)
+      );
+
+      this.activeControls = valueArray.map(control => ({
+        ...control,
+        id: control.id || this.getStableId(control)
+      }));
+
+      this.availableControls = templateArray
+        .filter(t => !usedKeys.has(t.key))
+        .map(t => ({
+          ...t,
+          id: t.id || this.getStableId(t)
+        }));
+    },
+
+    onActiveChange(evt) {
+      this.emitChain();
+
+      if (evt.added) {
+        this.$emit('control-added', {
+          control: evt.added.element,
+          index: evt.added.newIndex
+        });
+      }
+
+      if (evt.moved) {
+        this.$emit('control-depth-change', {
+          control: evt.moved.element,
+          oldIndex: evt.moved.oldIndex,
+          newIndex: evt.moved.newIndex
+        });
+      }
+
+      if (evt.removed) {
+        this.$emit('control-removed', {
+          control: evt.removed.element,
+          index: evt.removed.oldIndex
+        });
+      }
+    },
+
+    onSingleSelectChange(control, index, value) {
+      if (control.selectedValue === value) {
+        return;
+      }
+      control.selectedValue = value;
+      this.emitChain();
+      this.$emit('control-selection-change', {
+        control,
+        index,
+        type: 'single',
+        value
+      });
+    },
+
+    onMultiSelectChange(control, index, values) {
+      const next = Array.isArray(values) ? values.slice() : [];
+      const prev = Array.isArray(control.selectedValues)
+        ? control.selectedValues
+        : [];
+
+      if (
+        prev.length === next.length &&
+        prev.every((v, i) => v === next[i])
+      ) {
+        return;
+      }
+
+      control.selectedValues = next;
+      this.emitChain();
+      this.$emit('control-selection-change', {
+        control,
+        index,
+        type: 'multi',
+        values: control.selectedValues
+      });
+    },
+
+    removeControlById(id) {
+      const idx = this.activeControls.findIndex(c => c.id === id);
+      if (idx < 0) {
+        return;
+      }
+
+      const [removed] = this.activeControls.splice(idx, 1);
+      this.availableControls.push(removed);
+
+      this.emitChain();
+      this.$emit('control-removed', {
+        control: removed,
+        index: idx
+      });
+    },
+
+    onControlMouseEnter(control) {
+      this.hoveredControlId = control.id;
+
+      if (this.hoverTimerId) {
+        clearTimeout(this.hoverTimerId);
+      }
+
+      this.hoverTimerId = setTimeout(() => {
+        this.showCloseControlId = control.id;
+      }, 1000);
+    },
+
+    onControlMouseLeave(control) {
+      this.hoveredControlId = null;
+
+      if (this.hoverTimerId) {
+        clearTimeout(this.hoverTimerId);
+        this.hoverTimerId = null;
+      }
+
+      if (this.showCloseControlId === control.id) {
+        this.showCloseControlId = null;
+      }
+    },
+
+    getContentHoverStyle(index, control) {
+      if (this.hoveredControlId !== control.id) {
+        return {};
+      }
+      const color = this.depthHighlightColors[index % this.depthHighlightColors.length];
+      return {
+        backgroundColor: color,
+        borderColor: '#cfd4e0'
+      };
+    },
+
+    emitChain() {
+      const cloned = this.activeControls.map(control => {
+        const clone = { ...control };
+        if (Array.isArray(clone.selectedValues)) {
+          clone.selectedValues = clone.selectedValues.slice();
+        }
+        delete clone.id;
+        return clone;
+      });
+
+      this.$emit('input', cloned);
+      this.$emit('change', cloned);
+    }
+  }
+};
+</script>
+
+<style scoped>
+.control-chain {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.control-chain--available-right { flex-direction: row; }
+.control-chain--available-left { flex-direction: row-reverse; }
+.control-chain--available-top { flex-direction: column-reverse; }
+.control-chain--available-bottom { flex-direction: column; }
+
+.control-chain__active { flex: 1; }
+.control-chain__draggable {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.control-chain__item {
+  display: flex;
+  align-items: center;
+}
+.control-chain__separator {
+  margin-right: 4px;
+}
+
+.control-chain__content {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: #fafafa;
+  min-width: 160px;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.control-chain__header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  align-items: center;
+}
+.control-chain__header-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.control-chain__title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.control-chain__header-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.control-chain__drag-handle {
+  cursor: grab;
+  font-size: 12px;
+}
+.control-chain__drag-handle--small {
+  font-size: 11px;
+}
+
+.control-chain__close-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.control-chain__body {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.control-chain__dropdown {
+  width: 100%;
+}
+.control-chain__label-value {
+  font-size: 12px;
+}
+.control-chain__empty {
+  font-size: 12px;
+  color: #777;
+}
+
+/* 사용 가능한 컨트롤 영역 */
+.control-chain__available {
+  width: 180px;
+}
+.control-chain--available-right .control-chain__available {
+  border-left: 1px solid #eee;
+  padding-left: 12px;
+}
+.control-chain--available-left .control-chain__available {
+  border-right: 1px solid #eee;
+  padding-right: 12px;
+}
+.control-chain--available-top .control-chain__available {
+  border-bottom: 1px solid #eee;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  width: 100%;
+}
+.control-chain--available-bottom .control-chain__available {
+  border-top: 1px solid #eee;
+  padding-top: 8px;
+  margin-top: 8px;
+  width: 100%;
+}
+
+.control-chain__available-title {
+  margin-bottom: 8px;
+  font-weight: bold;
+}
+
+.control-chain__available-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.control-chain__available-item + .control-chain__available-item {
+  margin-top: 4px;
+}
+
+.control-chain__available-content {
+  border: 1px dashed #ccc;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-start;
+}
+.control-chain__available-label {
+  font-size: 12px;
+}
+</style>
