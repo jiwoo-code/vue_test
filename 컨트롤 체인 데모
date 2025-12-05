@@ -506,3 +506,495 @@ export default {
 ✔ ur-dropdown, ur-multi-dropdown 적용
 ✔ availablePlacement → right/left/top/bottom 지원
 ✔ 체인에 있는 항목은 목록에서 자동 제거
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!--
+  ---------------------------------------------------------------------------
+  필요한 라이브러리
+
+  vuedraggable (Sortable.js 기반 드래그)
+    npm install vuedraggable sortablejs
+    yarn add vuedraggable sortablejs
+
+  ---------------------------------------------------------------------------
+-->
+
+<template>
+  <div
+    class="control-chain"
+    :class="layoutClass"
+  >
+    <!-- 활성 체인 -->
+    <div class="control-chain__active">
+      <draggable
+        v-model="activeControls"
+        :group="dragGroup"
+        item-key="id"
+        class="control-chain__draggable"
+        :handle="dragHandleSelector"
+        @change="onActiveChange"
+      >
+        <template #item="{ element, index }">
+          <div class="control-chain__item">
+            <span
+              v-if="index > 0"
+              class="control-chain__separator"
+            >
+              >>
+            </span>
+
+            <div
+              class="control-chain__content"
+              @mouseenter="onControlMouseEnter(element)"
+              @mouseleave="onControlMouseLeave(element)"
+            >
+              <div class="control-chain__header">
+                <span class="control-chain__title">
+                  {{ element.label }}
+                </span>
+
+                <div class="control-chain__header-right">
+                  <span
+                    v-if="hoveredControlId === element.id"
+                    class="control-chain__drag-handle"
+                  >
+                    ≡
+                  </span>
+
+                  <button
+                    v-if="showCloseControlId === element.id"
+                    type="button"
+                    class="control-chain__close-button"
+                    @click.stop="removeControlById(element.id)"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <div class="control-chain__body">
+                <!-- 단일 선택 -->
+                <ur-dropdown
+                  v-if="element.type === 'single'"
+                  class="control-chain__dropdown"
+                  v-model="element.selectedValue"
+                  :item="element.options || []"
+                  @input="onSingleSelectChange(element, index, $event)"
+                />
+
+                <!-- 다중 선택 -->
+                <ur-multi-dropdown
+                  v-else-if="element.type === 'multi'"
+                  class="control-chain__dropdown control-chain__dropdown--multi"
+                  v-model="element.selectedValues"
+                  :item="element.options || []"
+                  @input="onMultiSelectChange(element, index, $event)"
+                />
+
+                <!-- 라벨 -->
+                <span
+                  v-else
+                  class="control-chain__label-value"
+                >
+                  {{ element.displayValue || '-' }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <template #footer>
+          <div
+            v-if="!activeControls.length"
+            class="control-chain__empty"
+          >
+            사용 가능한 컨트롤 목록에서 드래그해 추가해주세요.
+          </div>
+        </template>
+      </draggable>
+    </div>
+
+    <!-- 사용 가능한 컨트롤 목록 -->
+    <div class="control-chain__available">
+      <div class="control-chain__available-title">
+        사용 가능한 컨트롤
+      </div>
+
+      <draggable
+        v-model="availableControls"
+        :group="dragGroup"
+        item-key="id"
+        class="control-chain__available-list"
+        :handle="dragHandleSelector"
+      >
+        <template #item="{ element }">
+          <li class="control-chain__available-item">
+            <div
+              class="control-chain__available-content"
+              @mouseenter="onControlMouseEnter(element)"
+              @mouseleave="onControlMouseLeave(element)"
+            >
+              <span class="control-chain__available-label">
+                {{ element.label }}
+              </span>
+
+              <span
+                v-if="hoveredControlId === element.id"
+                class="control-chain__drag-handle control-chain__drag-handle--small"
+              >
+                ≡
+              </span>
+            </div>
+          </li>
+        </template>
+
+        <!-- 디버깅용: 진짜로 아무 것도 없을 때만 표시 (원하면 지워도 됨) -->
+        <template #footer>
+          <div
+            v-if="!availableControls.length && controlTemplates && controlTemplates.length"
+            class="control-chain__empty"
+          >
+            (디버그) 사용 가능한 컨트롤 배열이 비어 있습니다.
+          </div>
+        </template>
+      </draggable>
+    </div>
+  </div>
+</template>
+
+<script>
+import draggable from 'vuedraggable';
+
+export default {
+  name: 'ControlChain',
+  components: { draggable },
+  model: { prop: 'value', event: 'input' },
+
+  props: {
+    value: {
+      type: Array,
+      default() {
+        return [];
+      }
+    },
+    controlTemplates: {
+      type: Array,
+      required: true
+    },
+    availablePlacement: {
+      type: String,
+      default: 'right',
+      validator(v) {
+        return ['right', 'left', 'top', 'bottom'].includes(v);
+      }
+    }
+  },
+
+  data() {
+    return {
+      activeControls: [],
+      availableControls: [],
+      dragGroup: { name: 'control-chain', pull: true, put: true },
+      dragHandleSelector: '.control-chain__drag-handle',
+      hoveredControlId: null,
+      hoverTimerId: null,
+      showCloseControlId: null
+    };
+  },
+
+  computed: {
+    layoutClass() {
+      return `control-chain--available-${this.availablePlacement}`;
+    }
+  },
+
+  watch: {
+    value: {
+      handler() {
+        this.buildControls();
+      },
+      deep: true
+    },
+    controlTemplates: {
+      handler() {
+        this.buildControls();
+      },
+      deep: true
+    }
+  },
+
+  created() {
+    this.buildControls();
+  },
+
+  methods: {
+    buildControls() {
+      const valueArray = Array.isArray(this.value) ? this.value : [];
+      const templateArray = Array.isArray(this.controlTemplates) ? this.controlTemplates : [];
+
+      const usedKeySet = new Set(
+        valueArray
+          .map(c => c.key)
+          .filter(key => key != null)
+      );
+
+      // activeControls: value 기반으로 id 보강
+      this.activeControls = valueArray.map(c => ({
+        ...c,
+        id: c.id || this.makeId(c)
+      }));
+
+      // availableControls: 템플릿 중 아직 체인에 없는 key만
+      this.availableControls = templateArray
+        .filter(t => !usedKeySet.has(t.key))
+        .map(t => ({
+          ...t,
+          id: t.id || this.makeId(t)
+        }));
+    },
+
+    onActiveChange(e) {
+      if (e.added) {
+        this.emitChain();
+        this.$emit('control-added', {
+          control: e.added.element,
+          index: e.added.newIndex
+        });
+      }
+
+      if (e.moved) {
+        this.emitChain();
+        this.$emit('control-depth-change', {
+          control: e.moved.element,
+          oldIndex: e.moved.oldIndex,
+          newIndex: e.moved.newIndex
+        });
+      }
+
+      if (e.removed) {
+        this.emitChain();
+        this.$emit('control-removed', {
+          control: e.removed.element,
+          index: e.removed.oldIndex
+        });
+      }
+
+      if (!e.added && !e.moved && !e.removed) {
+        this.emitChain();
+      }
+    },
+
+    onSingleSelectChange(control, index, value) {
+      control.selectedValue = value;
+      this.emitChain();
+      this.$emit('control-selection-change', {
+        control,
+        index,
+        type: 'single',
+        value
+      });
+    },
+
+    onMultiSelectChange(control, index, values) {
+      control.selectedValues = Array.isArray(values) ? values.slice() : [];
+      this.emitChain();
+      this.$emit('control-selection-change', {
+        control,
+        index,
+        type: 'multi',
+        values: control.selectedValues
+      });
+    },
+
+    removeControlById(id) {
+      const index = this.activeControls.findIndex(c => c.id === id);
+      if (index === -1) {
+        return;
+      }
+
+      const [removed] = this.activeControls.splice(index, 1);
+      this.availableControls.push(removed);
+
+      this.emitChain();
+      this.$emit('control-removed', { control: removed, index });
+    },
+
+    onControlMouseEnter(control) {
+      this.hoveredControlId = control.id;
+
+      if (this.hoverTimerId) {
+        clearTimeout(this.hoverTimerId);
+      }
+
+      this.hoverTimerId = setTimeout(() => {
+        this.showCloseControlId = control.id;
+      }, 1000);
+    },
+
+    onControlMouseLeave(control) {
+      this.hoveredControlId = null;
+
+      if (this.hoverTimerId) {
+        clearTimeout(this.hoverTimerId);
+        this.hoverTimerId = null;
+      }
+
+      if (this.showCloseControlId === control.id) {
+        this.showCloseControlId = null;
+      }
+    },
+
+    emitChain() {
+      const cloned = this.activeControls.map(c => ({
+        ...c,
+        selectedValues: Array.isArray(c.selectedValues)
+          ? c.selectedValues.slice()
+          : c.selectedValues
+      }));
+
+      this.$emit('input', cloned);
+      this.$emit('change', cloned);
+    },
+
+    makeId(t) {
+      return `${t.key || t.label}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+    }
+  }
+};
+</script>
+
+<style scoped>
+.control-chain {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.control-chain--available-right {
+  flex-direction: row;
+}
+.control-chain--available-left {
+  flex-direction: row-reverse;
+}
+.control-chain--available-top {
+  flex-direction: column-reverse;
+}
+.control-chain--available-bottom {
+  flex-direction: column;
+}
+
+/* active 영역 */
+.control-chain__active {
+  flex: 1;
+}
+.control-chain__draggable {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.control-chain__item {
+  display: flex;
+  align-items: center;
+}
+.control-chain__separator {
+  margin-right: 4px;
+}
+.control-chain__content {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: #fafafa;
+  min-width: 160px;
+}
+.control-chain__header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.control-chain__drag-handle {
+  cursor: grab;
+  font-size: 12px;
+}
+.control-chain__close-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+}
+.control-chain__body {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.control-chain__dropdown {
+  width: 100%;
+}
+.control-chain__label-value {
+  font-size: 12px;
+}
+.control-chain__empty {
+  font-size: 12px;
+  color: #999;
+}
+
+/* available 영역 */
+.control-chain__available {
+  width: 180px;
+}
+.control-chain--available-right .control-chain__available {
+  border-left: 1px solid #eee;
+  padding-left: 12px;
+}
+.control-chain--available-left .control-chain__available {
+  border-right: 1px solid #eee;
+  padding-right: 12px;
+}
+.control-chain--available-top .control-chain__available {
+  border-bottom: 1px solid #eee;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  width: 100%;
+}
+.control-chain--available-bottom .control-chain__available {
+  border-top: 1px solid #eee;
+  padding-top: 8px;
+  margin-top: 8px;
+  width: 100%;
+}
+.control-chain__available-title {
+  margin-bottom: 8px;
+  font-weight: bold;
+}
+.control-chain__available-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.control-chain__available-item + .control-chain__available-item {
+  margin-top: 4px;
+}
+.control-chain__available-content {
+  border: 1px dashed #ccc;
+  padding: 4px 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.control-chain__available-label {
+  font-size: 12px;
+}
+</style>
