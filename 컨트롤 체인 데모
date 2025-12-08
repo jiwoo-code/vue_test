@@ -409,18 +409,22 @@ export default {
         style.flexWrap = 'nowrap';
         style.width = 'max-content';
         style.minWidth = '100%';
-        // 가로 스크롤 시에는 가로 정렬만 적용
-        style.justifyContent = this.horizontalAlign;
-        // 세로 정렬은 align-items로 제어 (한 줄이므로)
-        style.alignItems = this.verticalAlign;
+        // 가로 스크롤 시에는 가로 정렬 무시
+        style.justifyContent = 'flex-start';
+        // 세로 스크롤 사용 시 세로 정렬 무시, 아닐 때만 적용
+        style.alignItems = this.useVerticalScroll ? 'flex-start' : this.verticalAlign;
       } else {
         // 기본: 여러 줄 래핑, 컨테이너 폭에 맞춤
         style.flexWrap = 'wrap';
         style.width = '100%';
-        // 가로 정렬
+        // 가로 정렬 적용
         style.justifyContent = this.horizontalAlign;
-        // 세로 정렬: 여러 줄일 때는 align-content로 제어
-        style.alignContent = this.verticalAlign;
+        // 세로 스크롤 사용 시 세로 정렬 무시, 아닐 때만 적용
+        if (this.useVerticalScroll) {
+          style.alignContent = 'flex-start';
+        } else {
+          style.alignContent = this.verticalAlign;
+        }
       }
 
       return style;
@@ -511,6 +515,7 @@ export default {
     /**
      * 가로 정렬 설정 (왼쪽 뎁스 영역 컨트롤들의 가로 방향 정렬)
      * - mode: 'left' | 'center' | 'right'
+     * - 가로 스크롤 사용 시 무시됨
      */
     setHorizontalAlign(mode) {
       const mapped = horizontalMap[mode];
@@ -523,7 +528,7 @@ export default {
     /**
      * 세로 정렬 설정
      * - mode: 'top' | 'center' | 'bottom'
-     * height 유무와 상관없이 적용
+     * - 세로 스크롤 사용 시 무시됨
      */
     setVerticalAlign(mode) {
       const mapped = verticalMap[mode];
