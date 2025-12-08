@@ -892,3 +892,890 @@ export default {
   font-size: 12px;
 }
 </style>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!--
+  ---------------------------------------------------------------------------
+  필요한 라이브러리
+
+  vuedraggable (Sortable.js 기반 드래그)
+    npm install vuedraggable sortablejs
+    yarn add vuedraggable sortablejs
+
+  ---------------------------------------------------------------------------
+-->
+
+<template>
+  <div
+    class="control-chain"
+    :class="layoutClass"
+    :style="containerStyle"
+  >
+    <!-- 활성 체인 영역 (왼쪽) -->
+    <div
+      class="control-chain__active"
+      :style="activeAreaStyle"
+    >
+      <draggable
+        :list="activeControls"
+        :group="dragGroup"
+        item-key="id"
+        class="control-chain__draggable"
+        :style="activeDraggableStyle"
+        :handle="dragHandleSelector"
+        @change="onActiveChange"
+      >
+        <div
+          v-for="(element, index) in activeControls"
+          :key="element.id"
+          class="control-chain__item"
+        >
+          <span v-if="index > 0" class="control-chain__separator">>></span>
+
+          <div
+            class="control-chain__content"
+            :style="getContentStyle(index, element)"
+          >
+            <!-- 타이틀 / 드래그 핸들 / 삭제 버튼 -->
+            <div
+              class="control-chain__header"
+              @mouseenter="onControlMouseEnter(element)"
+              @mouseleave="onControlMouseLeave(element)"
+            >
+              <div class="control-chain__header-left">
+                <span class="control-chain__drag-handle">
+                  ≡
+                </span>
+                <span
+                  class="control-chain__title"
+                  :style="getTextStyle(element, true)"
+                >
+                  {{ element.label }}
+                </span>
+              </div>
+
+              <div class="control-chain__header-right">
+                <button
+                  type="button"
+                  class="control-chain__close-button"
+                  :style="{ visibility: showCloseControlId === element.id ? 'visible' : 'hidden' }"
+                  @click.stop="removeControlById(element.id)"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <!-- 컨트롤 내용 영역 -->
+            <div class="control-chain__body">
+              <ur-dropdown
+                v-if="element.type === 'single'"
+                class="control-chain__dropdown"
+                sm
+                v-model="element.selectedValue"
+                :items="element.items"
+                @input="onSingleSelectChange(element, index, $event)"
+              />
+
+              <ur-multi-dropdown
+                v-else-if="element.type === 'multi'"
+                class="control-chain__dropdown"
+                sm
+                v-model="element.selectedValues"
+                :items="element.items"
+                @input="onMultiSelectChange(element, index, $event)"
+              />
+
+              <!-- 라벨 컨트롤: 본문 텍스트는 hover 시에도 색상 고정 + 영역 박스화 -->
+              <span
+                v-else
+                class="control-chain__label-value"
+                :style="{ color: baseFontColor }"
+              >
+                {{ element.displayValue || '-' }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-if="!activeControls.length"
+          class="control-chain__empty"
+          :style="emptyGuideTextStyle"
+        >
+          {{ emptyGuideText }}
+        </div>
+      </draggable>
+    </div>
+
+    <!-- 사용 가능한 컨트롤 영역 (오른쪽) -->
+    <div
+      class="control-chain__available"
+      :style="availableAreaStyle"
+    >
+      <div
+        v-if="availableTitle"
+        class="control-chain__available-title"
+        :style="availableTitleTextStyle"
+      >
+        {{ availableTitle }}
+      </div>
+
+      <div class="control-chain__available-list-wrapper">
+        <draggable
+          :list="availableControls"
+          :group="dragGroup"
+          item-key="id"
+          class="control-chain__available-list"
+          :handle="dragHandleSelector"
+        >
+          <li
+            v-for="element in availableControls"
+            :key="element.id"
+            class="control-chain__available-item"
+          >
+            <div
+              class="control-chain__available-content"
+              @mouseenter="onControlMouseEnter(element)"
+              @mouseleave="onControlMouseLeave(element)"
+            >
+              <span class="control-chain__drag-handle control-chain__drag-handle--small">
+                ≡
+              </span>
+              <span
+                class="control-chain__available-label"
+                :style="getTextStyle(element, false)"
+              >
+                {{ element.label }}
+              </span>
+            </div>
+          </li>
+        </draggable>
+      </div>
+    </div>
+
+  </div>
+</template>
+
+<script>
+import draggable from 'vuedraggable';
+
+const DEFAULT_MIN_HEIGHT = 260;
+const DEFAULT_AVAILABLE_WIDTH = 220;
+
+const toSize = (value) => {
+  if (value == null || value === '') {
+    return undefined;
+  }
+  return typeof value === 'number' ? `${value}px` : value;
+};
+
+const toArray = (input) => {
+  if (!input) {
+    return null;
+  }
+  if (Array.isArray(input)) {
+    return input.length ? input.slice() : null;
+  }
+  return [input];
+};
+
+const horizontalMap = {
+  left: 'flex-start',
+  center: 'center',
+  right: 'flex-end'
+};
+
+const verticalMap = {
+  top: 'flex-start',
+  center: 'center',
+  bottom: 'flex-end'
+};
+
+export default {
+  name: 'ControlChain',
+  components: { draggable },
+
+  model: {
+    prop: 'value',
+    event: 'input'
+  },
+
+  props: {
+    value: {
+      type: Array,
+      default() {
+        return [];
+      }
+    },
+    controlTemplates: {
+      type: Array,
+      required: true
+    },
+    availablePlacement: {
+      type: String,
+      default: 'right',
+      validator(v) {
+        return ['right', 'left'].includes(v);
+      }
+    },
+    emptyGuideText: {
+      type: String,
+      default: '목록에서 드래그하여 추가해 주세요.'
+    },
+    availableTitle: {
+      type: String,
+      default: ''
+    },
+
+    width: {
+      type: [Number, String],
+      default: null
+    },
+    height: {
+      type: [Number, String],
+      default: null
+    },
+
+    useHorizontalScroll: {
+      type: Boolean,
+      default: false
+    },
+    useVerticalScroll: {
+      type: Boolean,
+      default: false
+    }
+  },
+
+  data() {
+    return {
+      activeControls: [],
+      availableControls: [],
+      dragGroup: {
+        name: 'control-chain',
+        pull: true,
+        put: true
+      },
+      dragHandleSelector: '.control-chain__drag-handle',
+      hoveredControlId: null,
+      showCloseControlId: null,
+      idMap: {},
+
+      depthHighlightColors: [
+        '#D5383A',
+        '#EB702D',
+        '#FBB41A',
+        '#2DA379',
+        '#1E5FCB',
+        '#553CA5'
+      ],
+      depthHighlightBgColors: [
+        '#F8DDDF',
+        '#FAE2D4',
+        '#FFF0C8',
+        '#E0F0E8',
+        '#E0EBFA',
+        '#E5E0F6'
+      ],
+
+      defaultMaxWidth: 240,
+
+      baseFontColor: '#222222',
+      highlightFontColor: '#1E5FCB',
+
+      availableWidth: null,
+
+      horizontalAlign: 'flex-start',
+      verticalAlign: 'flex-start'
+    };
+  },
+
+  computed: {
+    layoutClass() {
+      return `control-chain--available-${this.availablePlacement}`;
+    },
+
+    containerStyle() {
+      const style = {};
+      const width = toSize(this.width) || '100%';
+      const height = toSize(this.height);
+
+      style.width = width;
+      style.boxSizing = 'border-box';
+
+      if (height) {
+        style.height = height;
+        style.minHeight = height;
+      } else {
+        style.height = 'auto';
+        style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
+      }
+
+      return style;
+    },
+
+    activeAreaStyle() {
+      const style = {
+        flex: '1 1 auto',
+        padding: '8px',
+        border: '1px solid #e5e5e5',
+        background: '#ffffff',
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'stretch',
+        justifyContent: 'flex-start',
+        position: 'relative',
+        minWidth: 0
+      };
+
+      const height = toSize(this.height);
+      const hasHeight = !!height;
+
+      if (hasHeight) {
+        style.height = '100%';
+        style.minHeight = 0;
+        style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
+      } else {
+        style.height = 'auto';
+        style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
+        style.overflowY = 'visible';
+      }
+
+      style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
+
+      return style;
+    },
+
+    availableAreaStyle() {
+      const style = {
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '8px',
+        border: '1px solid #e5e5e5',
+        background: '#ffffff'
+      };
+
+      const rawWidth = this.availableWidth ?? `${DEFAULT_AVAILABLE_WIDTH}px`;
+      const width = toSize(rawWidth) ?? rawWidth;
+
+      style.width = width;
+      style.flexBasis = width;
+      style.flexShrink = 0;
+      style.flexGrow = 0;
+
+      const height = toSize(this.height);
+      const hasHeight = !!height;
+
+      if (hasHeight) {
+        style.height = '100%';
+        style.minHeight = 0;
+      } else {
+        style.height = 'auto';
+        style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
+      }
+
+      return style;
+    },
+
+    activeDraggableStyle() {
+      const style = {
+        boxSizing: 'border-box',
+        rowGap: '6px',
+        columnGap: '8px',
+        flex: '1 1 auto',
+        minHeight: 0,
+        minWidth: 0,
+        display: 'flex',
+        alignItems: 'flex-start'
+      };
+
+      if (this.useHorizontalScroll) {
+        style.flexWrap = 'nowrap';
+        style.width = 'max-content';
+        style.minWidth = '100%';
+        style.justifyContent = 'flex-start';
+        style.alignItems = this.useVerticalScroll ? 'flex-start' : this.verticalAlign;
+      } else {
+        style.flexWrap = 'wrap';
+        style.width = '100%';
+        style.justifyContent = this.horizontalAlign;
+        if (this.useVerticalScroll) {
+          style.alignContent = 'flex-start';
+        } else {
+          style.alignContent = this.verticalAlign;
+        }
+      }
+
+      return style;
+    },
+
+    emptyGuideTextStyle() {
+      return {
+        color: '#999999'
+      };
+    },
+
+    availableTitleTextStyle() {
+      return {
+        color: this.baseFontColor,
+        fontWeight: '600'
+      };
+    }
+  },
+
+  watch: {
+    value: {
+      handler() {
+        this.buildControls();
+      },
+      deep: true
+    },
+    controlTemplates: {
+      handler() {
+        this.buildControls();
+      },
+      deep: true
+    }
+  },
+
+  created() {
+    this.buildControls();
+  },
+
+  methods: {
+    // === 외부 API ===
+
+    setHighlightColors(borderColors, backgroundColors) {
+      if (borderColors) {
+        this.setHighlightBorderColors(borderColors);
+      }
+      if (backgroundColors) {
+        this.setHighlightBackgroundColors(backgroundColors);
+      }
+    },
+
+    setHighlightBorderColors(colors) {
+      const array = toArray(colors);
+      if (array && array.length) {
+        this.depthHighlightColors = array;
+      }
+    },
+
+    setHighlightBackgroundColors(colors) {
+      const array = toArray(colors);
+      if (array && array.length) {
+        this.depthHighlightBgColors = array;
+      }
+    },
+
+    setBaseFontColor(color) {
+      if (color) {
+        this.baseFontColor = color;
+      }
+    },
+
+    setHighlightFontColor(color) {
+      if (color) {
+        this.highlightFontColor = color;
+      }
+    },
+
+    setAvailableWidth(width) {
+      if (width == null || width === '') {
+        return;
+      }
+      if (typeof width === 'number') {
+        this.availableWidth = `${width}px`;
+      } else {
+        this.availableWidth = width;
+      }
+    },
+
+    setHorizontalAlign(mode) {
+      const mapped = horizontalMap[mode];
+      if (!mapped) {
+        return;
+      }
+      this.horizontalAlign = mapped;
+    },
+
+    setVerticalAlign(mode) {
+      const mapped = verticalMap[mode];
+      if (!mapped) {
+        return;
+      }
+      this.verticalAlign = mapped;
+    },
+
+    // === 내부 빌드/동기화 ===
+
+    getStableId(control) {
+      const key = control.key || control.label || 'control';
+      if (!this.idMap[key]) {
+        this.idMap[key] = `${key}-${Math.random().toString(36).slice(2, 8)}`;
+      }
+      return this.idMap[key];
+    },
+
+    buildControls() {
+      const valueArray = Array.isArray(this.value) ? this.value : [];
+      const templateArray = Array.isArray(this.controlTemplates)
+        ? this.controlTemplates
+        : [];
+
+      const usedKeys = new Set(
+        valueArray
+          .map(control => control.key)
+          .filter(key => key != null)
+      );
+
+      this.activeControls = valueArray.map(control => ({
+        ...control,
+        id: control.id || this.getStableId(control)
+      }));
+
+      this.availableControls = templateArray
+        .filter(template => !usedKeys.has(template.key))
+        .map(template => ({
+          ...template,
+          id: template.id || this.getStableId(template)
+        }));
+    },
+
+    emitChain() {
+      const cloned = this.activeControls.map(control => {
+        const clone = { ...control };
+        if (Array.isArray(clone.selectedValues)) {
+          clone.selectedValues = clone.selectedValues.slice();
+        }
+        delete clone.id;
+        return clone;
+      });
+
+      this.$emit('input', cloned);
+      this.$emit('change', cloned);
+    },
+
+    // === 드래그/드랍 ===
+
+    onActiveChange(event) {
+      this.emitChain();
+
+      if (event.added) {
+        this.$emit('control-added', {
+          control: event.added.element,
+          index: event.added.newIndex
+        });
+      }
+
+      if (event.moved) {
+        this.$emit('control-depth-change', {
+          control: event.moved.element,
+          oldIndex: event.moved.oldIndex,
+          newIndex: event.moved.newIndex
+        });
+      }
+
+      if (event.removed) {
+        this.$emit('control-removed', {
+          control: event.removed.element,
+          index: event.removed.oldIndex
+        });
+      }
+    },
+
+    removeControlById(id) {
+      const index = this.activeControls.findIndex(control => control.id === id);
+      if (index < 0) {
+        return;
+      }
+
+      const removedList = this.activeControls.splice(index, 1);
+      const removed = removedList[0];
+
+      if (this.hoveredControlId === id) {
+        this.hoveredControlId = null;
+      }
+      if (this.showCloseControlId === id) {
+        this.showCloseControlId = null;
+      }
+
+      this.availableControls.push(removed);
+
+      this.emitChain();
+      this.$emit('control-removed', {
+        control: removed,
+        index
+      });
+    },
+
+    onControlMouseEnter(element) {
+      this.hoveredControlId = element.id;
+      this.showCloseControlId = element.id;
+    },
+
+    onControlMouseLeave(element) {
+      if (this.hoveredControlId === element.id) {
+        this.hoveredControlId = null;
+      }
+      if (this.showCloseControlId === element.id) {
+        this.showCloseControlId = null;
+      }
+    },
+
+    // === 선택 변경 ===
+
+    onSingleSelectChange(element, index, value) {
+      if (element.selectedValue === value) {
+        return;
+      }
+      element.selectedValue = value;
+      this.emitChain();
+      this.$emit('control-selection-change', {
+        control: element,
+        index,
+        type: 'single',
+        value
+      });
+    },
+
+    onMultiSelectChange(element, index, values) {
+      const next = Array.isArray(values) ? values.slice() : [];
+      const previous = Array.isArray(element.selectedValues)
+        ? element.selectedValues
+        : [];
+
+      if (
+        previous.length === next.length &&
+        previous.every((item, position) => item === next[position])
+      ) {
+        return;
+      }
+
+      element.selectedValues = next;
+      this.emitChain();
+      this.$emit('control-selection-change', {
+        control: element,
+        index,
+        type: 'multi',
+        values: element.selectedValues
+      });
+    },
+
+    // === 스타일 헬퍼 ===
+
+    getTextStyle(element, isActiveArea) {
+      const isHovered = this.hoveredControlId === element.id;
+      const color =
+        isActiveArea && isHovered ? this.highlightFontColor : this.baseFontColor;
+
+      return { color };
+    },
+
+    getContentStyle(index, element) {
+      const style = {};
+
+      const maxWidth =
+        element.maxWidth != null ? element.maxWidth : this.defaultMaxWidth;
+
+      if (typeof maxWidth === 'number') {
+        style.maxWidth = `${maxWidth}px`;
+      } else {
+        style.maxWidth = maxWidth;
+      }
+
+      if (this.hoveredControlId === element.id) {
+        const borderIndex = index % this.depthHighlightColors.length;
+        const backgroundIndex = index % this.depthHighlightBgColors.length;
+        style.borderColor = this.depthHighlightColors[borderIndex];
+        style.backgroundColor = this.depthHighlightBgColors[backgroundIndex];
+      }
+
+      return style;
+    }
+  }
+};
+</script>
+
+<style scoped>
+.control-chain {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  background: #fafafa;
+  border: 1px solid #e5e5e5;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.control-chain--available-right {
+  flex-direction: row;
+}
+.control-chain--available-left {
+  flex-direction: row-reverse;
+}
+
+.control-chain__active {
+  position: relative;
+  box-sizing: border-box;
+}
+
+.control-chain__draggable {
+  width: 100%;
+  height: 100%;
+}
+
+.control-chain__available {
+  box-sizing: border-box;
+}
+
+.control-chain__available-title {
+  margin-bottom: 8px;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.control-chain__available-list-wrapper {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.control-chain__available-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  height: 100%;
+}
+
+.control-chain__available-item + .control-chain__available-item {
+  margin-top: 4px;
+}
+
+.control-chain__item {
+  display: flex;
+  align-items: center;
+}
+
+.control-chain__separator {
+  margin-right: 4px;
+}
+
+.control-chain__content {
+  border: 1px solid #e4e4e4;
+  border-radius: 0;
+  padding: 6px 8px;
+  background: #ffffff;
+  min-width: 180px;
+  min-height: 44px;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.control-chain__header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  align-items: center;
+}
+.control-chain__header-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.control-chain__title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.control-chain__header-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.control-chain__drag-handle {
+  cursor: grab;
+  font-size: 12px;
+  width: 12px;
+  flex-shrink: 0;
+}
+.control-chain__drag-handle--small {
+  font-size: 11px;
+  width: 11px;
+}
+
+.control-chain__close-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.control-chain__body {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  min-height: 24px;
+}
+
+.control-chain__dropdown {
+  width: 100%;
+}
+
+/* 라벨 본문: 드롭다운과 비슷한 영역감을 주는 박스 */
+.control-chain__label-value {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 6px;
+  background: #f7f7f7;
+}
+
+.control-chain__empty {
+  font-size: 12px;
+}
+
+.control-chain__available-content {
+  border: 1px solid #e0e0e0;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-start;
+  background: #ffffff;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+.control-chain__available-content:hover {
+  background: #f7f7f7;
+  border-color: #d0d0d0;
+}
+
+.control-chain__available-label {
+  font-size: 12px;
+}
+</style>
