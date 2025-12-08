@@ -40,7 +40,7 @@
             class="control-chain__content"
             :style="getContentStyle(index, element)"
           >
-            <!-- 헤더: 마우스 오버 시 드래그 아이콘 + X, 색상/폰트 하이라이트 트리거 -->
+            <!-- 헤더: 마우스 오버 시 드래그 아이콘 + X -->
             <div
               class="control-chain__header"
               @mouseenter="onControlMouseEnter(element)"
@@ -73,7 +73,7 @@
               </div>
             </div>
 
-            <!-- 바디 (드롭다운/라벨 공통 높이감 유지) -->
+            <!-- 바디 (드롭다운/라벨 공통 높이 유지) -->
             <div class="control-chain__body">
               <ur-dropdown
                 v-if="element.type === 'single'"
@@ -296,7 +296,7 @@ export default {
 
       availableWidth: null,
 
-      // 정렬 상태 (flex 값 그대로 보관)
+      // 정렬 상태 (flex 값)
       horizontalAlign: 'flex-start',
       verticalAlign: 'flex-start'
     };
@@ -331,7 +331,9 @@ export default {
         padding: '8px',
         border: '1px solid #e5e5e5',
         background: '#ffffff',
-        boxSizing: 'border-box'
+        boxSizing: 'border-box',
+        display: 'flex',
+        alignItems: 'stretch'
       };
 
       const h = toSize(this.height);
@@ -384,6 +386,7 @@ export default {
         boxSizing: 'border-box',
         minHeight: '100%',
         height: '100%',
+        flex: 1,
         rowGap: '6px',
         columnGap: '8px'
       };
@@ -397,6 +400,9 @@ export default {
         style.flexWrap = 'wrap';
         style.width = '100%';
       }
+
+      // 줄 간격이 height에 따라 이상하게 늘어나지 않도록 고정
+      style.alignContent = 'flex-start';
 
       // 가로/세로 정렬
       style.justifyContent = this.horizontalAlign;
@@ -486,7 +492,7 @@ export default {
     },
 
     /**
-     * 가로 정렬 설정 (왼쪽 뎁스 영역에 배치된 컨트롤들의 가로 방향 정렬)
+     * 가로 정렬 설정 (왼쪽 뎁스 영역 컨트롤들의 가로 방향 정렬)
      * - mode: 'left' | 'center' | 'right'
      */
     setHorizontalAlign(mode) {
@@ -498,11 +504,8 @@ export default {
     },
 
     /**
-     * 세로 정렬 설정 (왼쪽 뎁스 영역에 배치된 컨트롤들의 세로 방향 정렬)
+     * 세로 정렬 설정 (왼쪽 뎁스 영역 컨트롤들의 세로 방향 정렬)
      * - mode: 'top' | 'center' | 'bottom'
-     *
-     * 주로 height가 고정된 경우(예: height=320px) 안에서
-     * 컨트롤 덩어리를 위/가운데/아래로 맞추고 싶을 때 사용.
      */
     setVerticalAlign(mode) {
       const mapped = verticalMap[mode];
@@ -860,5 +863,574 @@ export default {
 
 .control-chain__available-label {
   font-size: 12px;
+}
+</style>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<template>
+  <div class="playground">
+    <!-- 왼쪽: 실제 ControlChain -->
+    <div class="playground__left">
+      <control-chain
+        ref="controlChain"
+        v-model="chain"
+        :control-templates="controlTemplates"
+        :available-placement="availablePlacement"
+        :width="demoWidth"
+        :height="demoHeight"
+        :use-horizontal-scroll="useHorizontalScroll"
+        :use-vertical-scroll="useVerticalScroll"
+        :empty-guide-text="emptyGuideText"
+        :available-title="availableTitle"
+        @control-added="logEvent('control-added', $event)"
+        @control-removed="logEvent('control-removed', $event)"
+        @control-depth-change="logEvent('control-depth-change', $event)"
+        @control-selection-change="logEvent('control-selection-change', $event)"
+      />
+    </div>
+
+    <!-- 오른쪽: 설정 패널 -->
+    <div class="playground__right">
+      <h3 class="playground__title">ControlChain Playground</h3>
+
+      <!-- 크기 설정 -->
+      <section class="playground__section">
+        <h4>크기 설정 (전체 영역)</h4>
+        <div class="playground__field">
+          <label>width</label>
+          <input
+            v-model="widthInput"
+            type="text"
+            placeholder="예: 800px, 100%"
+          />
+        </div>
+        <div class="playground__field">
+          <label>height</label>
+          <input
+            v-model="heightInput"
+            type="text"
+            placeholder="예: 320px (비우면 auto)"
+          />
+        </div>
+        <div class="playground__field playground__field--inline">
+          <label>
+            <input
+              v-model="useHorizontalScroll"
+              type="checkbox"
+            />
+            가로 스크롤 사용 (뎁스 영역)
+          </label>
+        </div>
+        <div class="playground__field playground__field--inline">
+          <label>
+            <input
+              v-model="useVerticalScroll"
+              type="checkbox"
+            />
+            세로 스크롤 사용 (뎁스 영역)
+          </label>
+        </div>
+        <button
+          type="button"
+          class="playground__button"
+          @click="applySize"
+        >
+          크기 적용
+        </button>
+      </section>
+
+      <!-- 정렬 설정 -->
+      <section class="playground__section">
+        <h4>정렬 설정 (왼쪽 뎁스 영역)</h4>
+        <div class="playground__field">
+          <label>가로 정렬</label>
+          <select v-model="horizontalAlignInput" @change="applyHorizontalAlign">
+            <option value="left">left</option>
+            <option value="center">center</option>
+            <option value="right">right</option>
+          </select>
+        </div>
+        <div class="playground__field">
+          <label>세로 정렬</label>
+          <select v-model="verticalAlignInput" @change="applyVerticalAlign">
+            <option value="top">top</option>
+            <option value="center">center</option>
+            <option value="bottom">bottom</option>
+          </select>
+        </div>
+      </section>
+
+      <!-- 오른쪽 목록 설정 -->
+      <section class="playground__section">
+        <h4>사용 가능한 컨트롤 영역</h4>
+        <div class="playground__field">
+          <label>목록 영역 width</label>
+          <input
+            v-model="availableWidthInput"
+            type="text"
+            placeholder="예: 220px, 260px"
+          />
+        </div>
+        <button
+          type="button"
+          class="playground__button"
+          @click="applyAvailableWidth"
+        >
+          목록 width 적용
+        </button>
+
+        <div class="playground__field">
+          <label>목록 위치</label>
+          <select v-model="availablePlacement">
+            <option value="right">오른쪽</option>
+            <option value="left">왼쪽</option>
+          </select>
+        </div>
+
+        <div class="playground__field">
+          <label>빈 뎁스 안내 문구</label>
+          <input
+            v-model="emptyGuideText"
+            type="text"
+          />
+        </div>
+
+        <div class="playground__field">
+          <label>목록 제목 (availableTitle)</label>
+          <input
+            v-model="availableTitle"
+            type="text"
+            placeholder="예: 사용 가능한 컨트롤"
+          />
+        </div>
+      </section>
+
+      <!-- 색상 설정 -->
+      <section class="playground__section">
+        <h4>색상 설정</h4>
+
+        <div class="playground__field">
+          <label>기본 폰트 색 (base)</label>
+          <input
+            v-model="baseFontInput"
+            type="text"
+            placeholder="예: #222222"
+          />
+        </div>
+        <button
+          type="button"
+          class="playground__button playground__button--small"
+          @click="applyBaseFontColor"
+        >
+          기본 폰트 색 적용
+        </button>
+
+        <div class="playground__field">
+          <label>하이라이트 폰트 색 (왼쪽 뎁스)</label>
+          <input
+            v-model="highlightFontInput"
+            type="text"
+            placeholder="예: #1E5FCB"
+          />
+        </div>
+        <button
+          type="button"
+          class="playground__button playground__button--small"
+          @click="applyHighlightFontColor"
+        >
+          하이라이트 폰트 색 적용
+        </button>
+
+        <div class="playground__field">
+          <label>하이라이트 테두리 색 배열 (쉼표 구분)</label>
+          <input
+            v-model="highlightBorderInput"
+            type="text"
+            placeholder="#D5383A,#EB702D,#FBB41A"
+          />
+        </div>
+        <button
+          type="button"
+          class="playground__button playground__button--small"
+          @click="applyHighlightBorderColors"
+        >
+          테두리 색 적용
+        </button>
+
+        <div class="playground__field">
+          <label>하이라이트 배경 색 배열 (쉼표 구분)</label>
+          <input
+            v-model="highlightBackgroundInput"
+            type="text"
+            placeholder="#F8DDDF,#FAE2D4,#FFF0C8"
+          />
+        </div>
+        <button
+          type="button"
+          class="playground__button playground__button--small"
+          @click="applyHighlightBackgroundColors"
+        >
+          배경 색 적용
+        </button>
+      </section>
+
+      <!-- 이벤트 로그 -->
+      <section class="playground__section">
+        <h4>이벤트 로그 (최근 5개)</h4>
+        <pre class="playground__log">
+{{ recentLogs }}
+        </pre>
+      </section>
+    </div>
+  </div>
+</template>
+
+<script>
+/*
+  ---------------------------------------------------------------------------
+  필요한 라이브러리 및 컴포넌트
+
+  vuedraggable (Sortable.js 기반 드래그)
+    npm install vuedraggable sortablejs
+    yarn add vuedraggable sortablejs
+
+  ControlChain 컴포넌트
+    import ControlChain from '@/components/ControlChain.vue';
+
+  ur 컴포넌트
+    ur-dropdown, ur-multi-dropdown 은 전역 등록되어 있다고 가정.
+
+  ---------------------------------------------------------------------------
+*/
+
+import ControlChain from '@/components/ControlChain.vue';
+
+export default {
+  name: 'ControlChainPlayground',
+  components: { ControlChain },
+
+  data() {
+    return {
+      // 체인 데이터
+      chain: [],
+
+      // 템플릿
+      controlTemplates: [
+        {
+          key: 'AAA',
+          label: 'AAA (Single)',
+          type: 'single',
+          items: [
+            { text: 'AAA-옵션 1', value: 'aaa1' },
+            { text: 'AAA-옵션 2', value: 'aaa2' },
+            { text: 'AAA-옵션 3', value: 'aaa3' }
+          ],
+          selectedValue: 'aaa1',
+          maxWidth: 260
+        },
+        {
+          key: 'BBB',
+          label: 'BBB (Multi)',
+          type: 'multi',
+          items: [
+            { text: 'BBB-옵션 1', value: 'bbb1' },
+            { text: 'BBB-옵션 2', value: 'bbb2' },
+            { text: 'BBB-옵션 3', value: 'bbb3' },
+            { text: 'BBB-옵션 4', value: 'bbb4' }
+          ],
+          selectedValues: [],
+          maxWidth: 260
+        },
+        {
+          key: 'CCC',
+          label: 'CCC (Label)',
+          type: 'label',
+          displayValue: '고정 라벨 컨트롤',
+          maxWidth: 260
+        },
+        {
+          key: 'DDD',
+          label: 'DDD (Single)',
+          type: 'single',
+          items: [
+            { text: 'DDD-옵션 1', value: 'ddd1' },
+            { text: 'DDD-옵션 2', value: 'ddd2' }
+          ],
+          selectedValue: 'ddd1',
+          maxWidth: 260
+        },
+        {
+          key: 'EEE',
+          label: 'EEE (Multi)',
+          type: 'multi',
+          items: [
+            { text: 'EEE-옵션 1', value: 'eee1' },
+            { text: 'EEE-옵션 2', value: 'eee2' },
+            { text: 'EEE-옵션 3', value: 'eee3' }
+          ],
+          selectedValues: [],
+          maxWidth: 260
+        },
+        {
+          key: 'FFF',
+          label: 'FFF (Label)',
+          type: 'label',
+          displayValue: '설명용 라벨 컨트롤',
+          maxWidth: 260
+        }
+      ],
+
+      // ControlChain props
+      availablePlacement: 'right',
+      demoWidth: '100%',
+      demoHeight: null,
+      useHorizontalScroll: false,
+      useVerticalScroll: false,
+      emptyGuideText: '목록에서 드래그하여 추가해 주세요.',
+      availableTitle: '사용 가능한 컨트롤',
+
+      // UI 입력값
+      widthInput: '100%',
+      heightInput: '',
+      availableWidthInput: '220px',
+      baseFontInput: '#222222',
+      highlightFontInput: '#1E5FCB',
+      highlightBorderInput: '#D5383A,#EB702D,#FBB41A,#2DA379,#1E5FCB,#553CA5',
+      highlightBackgroundInput: '#F8DDDF,#FAE2D4,#FFF0C8,#E0F0E8,#E0EBFA,#E5E0F6',
+
+      horizontalAlignInput: 'left',
+      verticalAlignInput: 'top',
+
+      logs: []
+    };
+  },
+
+  computed: {
+    recentLogs() {
+      if (!this.logs.length) {
+        return '(로그 없음)';
+      }
+      return this.logs.slice(-5).join('\n');
+    }
+  },
+
+  mounted() {
+    const ref = this.$refs.controlChain;
+    if (ref) {
+      ref.setHorizontalAlign(this.horizontalAlignInput);
+      ref.setVerticalAlign(this.verticalAlignInput);
+    }
+  },
+
+  methods: {
+    applySize() {
+      this.demoWidth = this.widthInput && this.widthInput.trim()
+        ? this.widthInput.trim()
+        : '100%';
+
+      this.demoHeight = this.heightInput && this.heightInput.trim()
+        ? this.heightInput.trim()
+        : null;
+    },
+
+    applyAvailableWidth() {
+      const ref = this.$refs.controlChain;
+      if (!ref) {
+        return;
+      }
+      const width = this.availableWidthInput && this.availableWidthInput.trim()
+        ? this.availableWidthInput.trim()
+        : '220px';
+
+      ref.setAvailableWidth(width);
+    },
+
+    applyBaseFontColor() {
+      const ref = this.$refs.controlChain;
+      if (!ref || !this.baseFontInput) {
+        return;
+      }
+      ref.setBaseFontColor(this.baseFontInput.trim());
+    },
+
+    applyHighlightFontColor() {
+      const ref = this.$refs.controlChain;
+      if (!ref || !this.highlightFontInput) {
+        return;
+      }
+      ref.setHighlightFontColor(this.highlightFontInput.trim());
+    },
+
+    applyHighlightBorderColors() {
+      const ref = this.$refs.controlChain;
+      if (!ref || !this.highlightBorderInput) {
+        return;
+      }
+      const arr = this.highlightBorderInput
+        .split(',')
+        .map(item => item.trim())
+        .filter(item => item);
+
+      if (!arr.length) {
+        return;
+      }
+      ref.setHighlightBorderColors(arr);
+    },
+
+    applyHighlightBackgroundColors() {
+      const ref = this.$refs.controlChain;
+      if (!ref || !this.highlightBackgroundInput) {
+        return;
+      }
+      const arr = this.highlightBackgroundInput
+        .split(',')
+        .map(item => item.trim())
+        .filter(item => item);
+
+      if (!arr.length) {
+        return;
+      }
+      ref.setHighlightBackgroundColors(arr);
+    },
+
+    applyHorizontalAlign() {
+      const ref = this.$refs.controlChain;
+      if (!ref) {
+        return;
+      }
+      ref.setHorizontalAlign(this.horizontalAlignInput);
+    },
+
+    applyVerticalAlign() {
+      const ref = this.$refs.controlChain;
+      if (!ref) {
+        return;
+      }
+      ref.setVerticalAlign(this.verticalAlignInput);
+    },
+
+    logEvent(type, payload) {
+      const time = new Date().toLocaleTimeString();
+      const summary = `[${time}] ${type} : ${JSON.stringify(payload)}`;
+      this.logs.push(summary);
+    }
+  }
+};
+</script>
+
+<style scoped>
+.playground {
+  display: flex;
+  gap: 24px;
+  align-items: stretch;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+/* 왼쪽: ControlChain */
+.playground__left {
+  flex: 1 1 auto;
+}
+
+/* 오른쪽: 설정 패널 */
+.playground__right {
+  flex: 0 0 340px;
+  border: 1px solid #e5e5e5;
+  background: #ffffff;
+  padding: 12px;
+  box-sizing: border-box;
+  font-size: 12px;
+}
+
+.playground__title {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.playground__section {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.playground__section:last-child {
+  border-bottom: none;
+}
+
+.playground__section h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.playground__field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+  gap: 4px;
+}
+
+.playground__field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.playground__field label {
+  font-size: 12px;
+}
+
+.playground__field input,
+.playground__field select {
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid #d0d0d0;
+  border-radius: 0;
+  box-sizing: border-box;
+}
+
+.playground__button {
+  margin-top: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid #222222;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.playground__button--small {
+  margin-top: 4px;
+  padding: 3px 6px;
+  font-size: 11px;
+}
+
+.playground__button:hover {
+  background: #f5f5f5;
+}
+
+.playground__log {
+  margin: 0;
+  padding: 4px;
+  border: 1px solid #e0e0e0;
+  background: #fafafa;
+  font-size: 11px;
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
 }
 </style>
