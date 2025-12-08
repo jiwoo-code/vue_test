@@ -177,7 +177,7 @@ const toSize = (value) => {
   return typeof value === 'number' ? `${value}px` : value;
 };
 
-const toColorArray = (input) => {
+const toArray = (input) => {
   if (!input) {
     return null;
   }
@@ -297,7 +297,10 @@ export default {
 
       // 폰트 컬러: 기본 / 하이라이트(왼쪽 뎁스 영역 전용)
       baseFontColor: '#222222',
-      highlightFontColor: '#1E5FCB'
+      highlightFontColor: '#1E5FCB',
+
+      // 오른쪽 목록 영역 width (flex-basis와 width 모두에 사용)
+      availableWidth: null
     };
   },
 
@@ -379,8 +382,19 @@ export default {
 
     availableAreaStyle() {
       const style = {
-        boxSizing: 'border-box'
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column'
       };
+
+      // width / flex-basis 결정 (기본 220px)
+      const rawWidth = this.availableWidth ?? '220px';
+      const width = toSize(rawWidth) ?? rawWidth;
+
+      style.width = width;
+      style.flexBasis = width;
+      style.flexShrink = 0;
+      style.flexGrow = 0;
 
       const h = toSize(this.height);
       if (h) {
@@ -473,7 +487,7 @@ export default {
      * @param {string|string[]} colors - 단일 색 또는 색상 배열
      */
     setHighlightBorderColors(colors) {
-      const arr = toColorArray(colors);
+      const arr = toArray(colors);
       if (arr && arr.length) {
         this.depthHighlightColors = arr;
       }
@@ -486,7 +500,7 @@ export default {
      * @param {string|string[]} colors - 단일 색 또는 색상 배열
      */
     setHighlightBackgroundColors(colors) {
-      const arr = toColorArray(colors);
+      const arr = toArray(colors);
       if (arr && arr.length) {
         this.depthHighlightBgColors = arr;
       }
@@ -514,6 +528,23 @@ export default {
     setHighlightFontColor(color) {
       if (color) {
         this.highlightFontColor = color;
+      }
+    },
+
+    /**
+     * 오른쪽 "사용 가능한 컨트롤" 목록 영역의 width를 변경할 때 사용.
+     * - 예: setAvailableWidth(260) 또는 setAvailableWidth('260px')
+     *
+     * @param {number|string} width - px 숫자 또는 CSS width 문자열
+     */
+    setAvailableWidth(width) {
+      if (width == null || width === '') {
+        return;
+      }
+      if (typeof width === 'number') {
+        this.availableWidth = `${width}px`;
+      } else {
+        this.availableWidth = width;
       }
     },
 
@@ -606,6 +637,15 @@ export default {
 
       const removedList = this.activeControls.splice(idx, 1);
       const removed = removedList[0];
+
+      // hover 상태 초기화 (오른쪽으로 이동 후 드래그 아이콘 남지 않도록)
+      if (this.hoveredControlId === id) {
+        this.hoveredControlId = null;
+      }
+      if (this.showCloseControlId === id) {
+        this.showCloseControlId = null;
+      }
+
       this.availableControls.push(removed);
 
       this.emitChain();
@@ -746,14 +786,10 @@ export default {
 
 /* 사용 가능한 컨트롤 영역 (오른쪽) */
 .control-chain__available {
-  flex: 0 0 220px;
-  width: 220px;
   padding: 8px;
   border: 1px solid #e5e5e5;
   background: #ffffff;
   box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
 }
 
 .control-chain__available-title {
