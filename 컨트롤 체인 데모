@@ -1779,3 +1779,18 @@ export default {
   font-size: 12px;
 }
 </style>
+
+
+
+
+.control-chain__label-value {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 6px;
+  background: #ffffff;
+  border: 1px solid #d9d9d9;
+  box-sizing: border-box;
+}
