@@ -225,14 +225,14 @@ export default {
       default: ''
     },
 
-    // 전체 컨트롤 체인 크기 (가장 많이 쓰는 패턴만 남김)
+    // 전체 컨트롤 체인 크기
     width: {
       type: [Number, String],
-      default: null    // null이면 부모 width 기준 100%
+      default: null
     },
     height: {
       type: [Number, String],
-      default: null    // null이면 내용에 따라 늘어나되, 내부 minHeight는 기본값 사용
+      default: null
     },
 
     // 뎁스 영역 스크롤
@@ -260,7 +260,6 @@ export default {
       showCloseControlId: null,
       idMap: {},
 
-      // 뎁스별 하이라이트 색상 (테두리/배경) - 왼쪽 뎁스 영역에만 사용
       depthHighlightColors: [
         '#D5383A',
         '#EB702D',
@@ -278,14 +277,11 @@ export default {
         '#E5E0F6'
       ],
 
-      // 컨트롤 기본 max-width(px)
       defaultMaxWidth: 240,
 
-      // 폰트 컬러: 기본 / 하이라이트(왼쪽 뎁스 영역 전용)
       baseFontColor: '#222222',
       highlightFontColor: '#1E5FCB',
 
-      // 오른쪽 목록 영역 width (flex-basis와 width 모두에 사용)
       availableWidth: null
     };
   },
@@ -297,7 +293,6 @@ export default {
 
     containerStyle() {
       const style = {};
-
       const w = toSize(this.width) || '100%';
       const h = toSize(this.height);
 
@@ -320,7 +315,8 @@ export default {
         padding: '8px',
         border: '1px solid #e5e5e5',
         background: '#ffffff',
-        boxSizing: 'border-box'
+        boxSizing: 'border-box',
+        display: 'flex'
       };
 
       const h = toSize(this.height);
@@ -332,7 +328,6 @@ export default {
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
       }
 
-      // 가로 스크롤: 뎁스 영역 전체에 적용
       style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
       style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
 
@@ -372,12 +367,11 @@ export default {
     activeDraggableStyle() {
       const style = {
         boxSizing: 'border-box',
-        minHeight: '100%'
+        minHeight: '100%',
+        height: '100%'
       };
 
       if (this.useHorizontalScroll) {
-        // 내용 크기만큼 가로로 늘어나고,
-        // 실제 스크롤은 부모(activeArea)에 걸린다.
         style.display = 'inline-flex';
         style.flexWrap = 'nowrap';
         style.width = 'max-content';
@@ -422,9 +416,7 @@ export default {
   },
 
   methods: {
-    // =====================================================================
-    // Public API: 외부에서 속성/스타일 변경할 때 사용하는 함수들
-    // =====================================================================
+    // ===================== Public API =====================
 
     setHighlightColors(borderColors, backgroundColors) {
       if (borderColors) {
@@ -435,9 +427,6 @@ export default {
       }
     },
 
-    /**
-     * 왼쪽 뎁스 영역 hover 시 테두리 색(뎁스별)을 변경.
-     */
     setHighlightBorderColors(colors) {
       const arr = toArray(colors);
       if (arr && arr.length) {
@@ -445,9 +434,6 @@ export default {
       }
     },
 
-    /**
-     * 왼쪽 뎁스 영역 hover 시 배경 색(뎁스별)을 변경.
-     */
     setHighlightBackgroundColors(colors) {
       const arr = toArray(colors);
       if (arr && arr.length) {
@@ -455,29 +441,18 @@ export default {
       }
     },
 
-    /**
-     * 기본 텍스트(라벨, 타이틀, 오른쪽 목록 등)에 사용하는 폰트 색 변경.
-     */
     setBaseFontColor(color) {
       if (color) {
         this.baseFontColor = color;
       }
     },
 
-    /**
-     * 왼쪽 뎁스 영역 hover 시 사용되는 폰트 색 변경.
-     * 오른쪽 목록에는 적용되지 않음.
-     */
     setHighlightFontColor(color) {
       if (color) {
         this.highlightFontColor = color;
       }
     },
 
-    /**
-     * 오른쪽 "사용 가능한 컨트롤" 목록 영역의 width 변경.
-     * 예: setAvailableWidth(260) 또는 setAvailableWidth('260px')
-     */
     setAvailableWidth(width) {
       if (width == null || width === '') {
         return;
@@ -489,9 +464,7 @@ export default {
       }
     },
 
-    // =====================================================================
-    // Internal: 데이터 빌드 / 공통 유틸
-    // =====================================================================
+    // ===================== Internal / 데이터 빌드 =====================
 
     getStableId(control) {
       const key = control.key || control.label || 'control';
@@ -540,9 +513,7 @@ export default {
       this.$emit('change', cloned);
     },
 
-    // =====================================================================
-    // Internal: 드래그/드롭 관련 핸들러
-    // =====================================================================
+    // ===================== 드래그/드랍 핸들러 =====================
 
     onActiveChange(evt) {
       this.emitChain();
@@ -579,7 +550,6 @@ export default {
       const removedList = this.activeControls.splice(idx, 1);
       const removed = removedList[0];
 
-      // hover 상태 초기화 (오른쪽으로 이동 후 드래그 아이콘 남지 않도록)
       if (this.hoveredControlId === id) {
         this.hoveredControlId = null;
       }
@@ -610,9 +580,7 @@ export default {
       }
     },
 
-    // =====================================================================
-    // Internal: 선택 변경 핸들러
-    // =====================================================================
+    // ===================== 선택 변경 핸들러 =====================
 
     onSingleSelectChange(control, index, value) {
       if (control.selectedValue === value) {
@@ -651,31 +619,16 @@ export default {
       });
     },
 
-    // =====================================================================
-    // Internal: 스타일 관련 헬퍼
-    // =====================================================================
+    // ===================== 스타일 헬퍼 =====================
 
-    /**
-     * 컨트롤별로 상태/영역에 따라 텍스트 색을 결정.
-     * - isActiveArea === true (왼쪽 뎁스 영역):
-     *     hover 중이면 highlightFontColor, 아니면 baseFontColor
-     * - isActiveArea === false (오른쪽 목록 영역):
-     *     항상 baseFontColor
-     */
     getTextStyle(control, isActiveArea) {
       const isHovered = this.hoveredControlId === control.id;
       const color =
         isActiveArea && isHovered ? this.highlightFontColor : this.baseFontColor;
 
-      return {
-        color
-      };
+      return { color };
     },
 
-    /**
-     * 컨트롤 박스(왼쪽 뎁스 영역) 스타일.
-     * 마우스 오버 시에만 depthHighlightColors / depthHighlightBgColors 적용.
-     */
     getContentStyle(index, control) {
       const style = {};
 
@@ -725,6 +678,13 @@ export default {
   box-sizing: border-box;
 }
 
+/* 드랍 영역 전체를 채우도록 */
+.control-chain__draggable {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+}
+
 /* 사용 가능한 컨트롤 영역 (오른쪽) */
 .control-chain__available {
   box-sizing: border-box;
@@ -739,6 +699,8 @@ export default {
 .control-chain__available-list-wrapper {
   flex: 1;
   overflow-y: auto;
+  height: 100%;
+  min-height: 100%;
 }
 
 .control-chain__available-list {
@@ -746,6 +708,7 @@ export default {
   padding: 0;
   margin: 0;
   min-height: 100%;
+  height: 100%;
 }
 
 .control-chain__available-item + .control-chain__available-item {
@@ -848,513 +811,5 @@ export default {
 
 .control-chain__available-label {
   font-size: 12px;
-}
-</style>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-<template>
-  <div class="playground">
-    <!-- 왼쪽: 실제 ControlChain -->
-    <div class="playground__left">
-      <control-chain
-        ref="controlChain"
-        v-model="chain"
-        :control-templates="controlTemplates"
-        :available-placement="availablePlacement"
-        :width="demoWidth"
-        :height="demoHeight"
-        :use-horizontal-scroll="useHorizontalScroll"
-        :use-vertical-scroll="useVerticalScroll"
-        :empty-guide-text="emptyGuideText"
-        :available-title="availableTitle"
-        @control-added="logEvent('control-added', $event)"
-        @control-removed="logEvent('control-removed', $event)"
-        @control-depth-change="logEvent('control-depth-change', $event)"
-        @control-selection-change="logEvent('control-selection-change', $event)"
-      />
-    </div>
-
-    <!-- 오른쪽: 데모용 설정 패널 -->
-    <div class="playground__right">
-      <h3 class="playground__title">ControlChain Playground</h3>
-
-      <!-- 사이즈 설정 -->
-      <section class="playground__section">
-        <h4>크기 설정 (전체 영역)</h4>
-        <div class="playground__field">
-          <label>width</label>
-          <input
-            v-model="widthInput"
-            type="text"
-            placeholder="예: 800px, 100%"
-          />
-        </div>
-        <div class="playground__field">
-          <label>height</label>
-          <input
-            v-model="heightInput"
-            type="text"
-            placeholder="예: 320px (비워두면 auto)"
-          />
-        </div>
-        <div class="playground__field playground__field--inline">
-          <label>
-            <input
-              v-model="useHorizontalScroll"
-              type="checkbox"
-            />
-            가로 스크롤 사용 (뎁스 영역)
-          </label>
-        </div>
-        <div class="playground__field playground__field--inline">
-          <label>
-            <input
-              v-model="useVerticalScroll"
-              type="checkbox"
-            />
-            세로 스크롤 사용 (뎁스 영역)
-          </label>
-        </div>
-        <button
-          type="button"
-          class="playground__button"
-          @click="applySize"
-        >
-          크기 적용
-        </button>
-      </section>
-
-      <!-- 오른쪽 목록 영역 설정 -->
-      <section class="playground__section">
-        <h4>사용 가능한 컨트롤 영역</h4>
-        <div class="playground__field">
-          <label>목록 영역 width</label>
-          <input
-            v-model="availableWidthInput"
-            type="text"
-            placeholder="예: 220px, 260px"
-          />
-        </div>
-        <button
-          type="button"
-          class="playground__button"
-          @click="applyAvailableWidth"
-        >
-          목록 width 적용
-        </button>
-
-        <div class="playground__field">
-          <label>목록 위치</label>
-          <select v-model="availablePlacement">
-            <option value="right">오른쪽</option>
-            <option value="left">왼쪽</option>
-          </select>
-        </div>
-
-        <div class="playground__field">
-          <label>빈 뎁스 안내 문구</label>
-          <input
-            v-model="emptyGuideText"
-            type="text"
-          />
-        </div>
-
-        <div class="playground__field">
-          <label>목록 제목 (availableTitle)</label>
-          <input
-            v-model="availableTitle"
-            type="text"
-            placeholder="예: 사용 가능한 컨트롤"
-          />
-        </div>
-      </section>
-
-      <!-- 색상 설정 -->
-      <section class="playground__section">
-        <h4>색상 설정</h4>
-
-        <div class="playground__field">
-          <label>기본 폰트 색 (base)</label>
-          <input
-            v-model="baseFontInput"
-            type="text"
-            placeholder="예: #222222"
-          />
-        </div>
-        <button
-          type="button"
-          class="playground__button playground__button--small"
-          @click="applyBaseFontColor"
-        >
-          기본 폰트 색 적용
-        </button>
-
-        <div class="playground__field">
-          <label>하이라이트 폰트 색 (왼쪽 뎁스)</label>
-          <input
-            v-model="highlightFontInput"
-            type="text"
-            placeholder="예: #1E5FCB"
-          />
-        </div>
-        <button
-          type="button"
-          class="playground__button playground__button--small"
-          @click="applyHighlightFontColor"
-        >
-          하이라이트 폰트 색 적용
-        </button>
-
-        <div class="playground__field">
-          <label>하이라이트 테두리 색 배열 (쉼표 구분)</label>
-          <input
-            v-model="highlightBorderInput"
-            type="text"
-            placeholder="#D5383A,#EB702D,#FBB41A"
-          />
-        </div>
-        <button
-          type="button"
-          class="playground__button playground__button--small"
-          @click="applyHighlightBorderColors"
-        >
-          테두리 색 적용
-        </button>
-
-        <div class="playground__field">
-          <label>하이라이트 배경 색 배열 (쉼표 구분)</label>
-          <input
-            v-model="highlightBackgroundInput"
-            type="text"
-            placeholder="#F8DDDF,#FAE2D4,#FFF0C8"
-          />
-        </div>
-        <button
-          type="button"
-          class="playground__button playground__button--small"
-          @click="applyHighlightBackgroundColors"
-        >
-          배경 색 적용
-        </button>
-      </section>
-
-      <!-- 디버그 -->
-      <section class="playground__section">
-        <h4>이벤트 로그 (최근 5개)</h4>
-        <pre class="playground__log">
-{{ recentLogs }}
-        </pre>
-      </section>
-    </div>
-  </div>
-</template>
-
-<script>
-
-import ControlChain from '@/components/ControlChain.vue';
-
-export default {
-  name: 'ControlChainPlayground',
-  components: { ControlChain },
-
-  data() {
-    return {
-      // 체인 데이터 (AAA >> BBB >> ...)
-      chain: [],
-
-      // 전체 컨트롤 템플릿
-      controlTemplates: [
-        {
-          key: 'AAA',
-          label: 'AAA (Single)',
-          type: 'single',
-          items: [
-            { text: 'AAA-옵션 1', value: 'aaa1' },
-            { text: 'AAA-옵션 2', value: 'aaa2' },
-            { text: 'AAA-옵션 3', value: 'aaa3' }
-          ],
-          selectedValue: 'aaa1',
-          maxWidth: 260
-        },
-        {
-          key: 'BBB',
-          label: 'BBB (Multi)',
-          type: 'multi',
-          items: [
-            { text: 'BBB-옵션 1', value: 'bbb1' },
-            { text: 'BBB-옵션 2', value: 'bbb2' },
-            { text: 'BBB-옵션 3', value: 'bbb3' },
-            { text: 'BBB-옵션 4', value: 'bbb4' }
-          ],
-          selectedValues: [],
-          maxWidth: 260
-        },
-        {
-          key: 'CCC',
-          label: 'CCC (Label)',
-          type: 'label',
-          displayValue: '고정 라벨 컨트롤',
-          maxWidth: 260
-        },
-        {
-          key: 'DDD',
-          label: 'DDD (Single)',
-          type: 'single',
-          items: [
-            { text: 'DDD-옵션 1', value: 'ddd1' },
-            { text: 'DDD-옵션 2', value: 'ddd2' }
-          ],
-          selectedValue: 'ddd1',
-          maxWidth: 260
-        },
-        {
-          key: 'EEE',
-          label: 'EEE (Multi)',
-          type: 'multi',
-          items: [
-            { text: 'EEE-옵션 1', value: 'eee1' },
-            { text: 'EEE-옵션 2', value: 'eee2' },
-            { text: 'EEE-옵션 3', value: 'eee3' }
-          ],
-          selectedValues: [],
-          maxWidth: 260
-        },
-        {
-          key: 'FFF',
-          label: 'FFF (Label)',
-          type: 'label',
-          displayValue: '설명용 라벨 컨트롤',
-          maxWidth: 260
-        }
-      ],
-
-      // ControlChain props
-      availablePlacement: 'right',
-      demoWidth: '100%',
-      demoHeight: null,
-      useHorizontalScroll: false,
-      useVerticalScroll: false,
-      emptyGuideText: '목록에서 드래그하여 추가해 주세요.',
-      availableTitle: '사용 가능한 컨트롤',
-
-      // UI 입력값 (바인딩용)
-      widthInput: '100%',
-      heightInput: '',
-      availableWidthInput: '220px',
-      baseFontInput: '#222222',
-      highlightFontInput: '#1E5FCB',
-      highlightBorderInput: '#D5383A,#EB702D,#FBB41A,#2DA379,#1E5FCB,#553CA5',
-      highlightBackgroundInput: '#F8DDDF,#FAE2D4,#FFF0C8,#E0F0E8,#E0EBFA,#E5E0F6',
-
-      logs: []
-    };
-  },
-
-  computed: {
-    recentLogs() {
-      if (!this.logs.length) {
-        return '(로그 없음)';
-      }
-      return this.logs.slice(-5).join('\n');
-    }
-  },
-
-  methods: {
-    // 크기 적용
-    applySize() {
-      this.demoWidth = this.widthInput && this.widthInput.trim()
-        ? this.widthInput.trim()
-        : '100%';
-
-      this.demoHeight = this.heightInput && this.heightInput.trim()
-        ? this.heightInput.trim()
-        : null;
-    },
-
-    // 오른쪽 목록 width 적용
-    applyAvailableWidth() {
-      const ref = this.$refs.controlChain;
-      if (!ref) {
-        return;
-      }
-      const width = this.availableWidthInput && this.availableWidthInput.trim()
-        ? this.availableWidthInput.trim()
-        : '220px';
-
-      ref.setAvailableWidth(width);
-    },
-
-    // 색상 관련
-    applyBaseFontColor() {
-      const ref = this.$refs.controlChain;
-      if (!ref || !this.baseFontInput) {
-        return;
-      }
-      ref.setBaseFontColor(this.baseFontInput.trim());
-    },
-
-    applyHighlightFontColor() {
-      const ref = this.$refs.controlChain;
-      if (!ref || !this.highlightFontInput) {
-        return;
-      }
-      ref.setHighlightFontColor(this.highlightFontInput.trim());
-    },
-
-    applyHighlightBorderColors() {
-      const ref = this.$refs.controlChain;
-      if (!ref || !this.highlightBorderInput) {
-        return;
-      }
-      const arr = this.highlightBorderInput
-        .split(',')
-        .map(item => item.trim())
-        .filter(item => item);
-
-      if (!arr.length) {
-        return;
-      }
-      ref.setHighlightBorderColors(arr);
-    },
-
-    applyHighlightBackgroundColors() {
-      const ref = this.$refs.controlChain;
-      if (!ref || !this.highlightBackgroundInput) {
-        return;
-      }
-      const arr = this.highlightBackgroundInput
-        .split(',')
-        .map(item => item.trim())
-        .filter(item => item);
-
-      if (!arr.length) {
-        return;
-      }
-      ref.setHighlightBackgroundColors(arr);
-    },
-
-    // 이벤트 로그 출력
-    logEvent(type, payload) {
-      const time = new Date().toLocaleTimeString();
-      const summary = `[${time}] ${type} : ${JSON.stringify(payload)}`;
-      this.logs.push(summary);
-    }
-  }
-};
-</script>
-
-<style scoped>
-.playground {
-  display: flex;
-  gap: 24px;
-  align-items: stretch;
-  padding: 16px;
-  box-sizing: border-box;
-}
-
-/* 왼쪽: ControlChain */
-.playground__left {
-  flex: 1 1 auto;
-}
-
-/* 오른쪽: 설정 패널 */
-.playground__right {
-  flex: 0 0 320px;
-  border: 1px solid #e5e5e5;
-  background: #ffffff;
-  padding: 12px;
-  box-sizing: border-box;
-  font-size: 12px;
-}
-
-.playground__title {
-  margin: 0 0 12px;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.playground__section {
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.playground__section:last-child {
-  border-bottom: none;
-}
-
-.playground__section h4 {
-  margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.playground__field {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 8px;
-  gap: 4px;
-}
-
-.playground__field--inline {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-}
-
-.playground__field label {
-  font-size: 12px;
-}
-
-.playground__field input,
-.playground__field select {
-  font-size: 12px;
-  padding: 4px 6px;
-  border: 1px solid #d0d0d0;
-  border-radius: 0;
-  box-sizing: border-box;
-}
-
-.playground__button {
-  margin-top: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-  border: 1px solid #222222;
-  background: #ffffff;
-  cursor: pointer;
-}
-
-.playground__button--small {
-  margin-top: 4px;
-  padding: 3px 6px;
-  font-size: 11px;
-}
-
-.playground__button:hover {
-  background: #f5f5f5;
-}
-
-.playground__log {
-  margin: 0;
-  padding: 4px;
-  border: 1px solid #e0e0e0;
-  background: #fafafa;
-  font-size: 11px;
-  max-height: 120px;
-  overflow: auto;
-  white-space: pre-wrap;
 }
 </style>
