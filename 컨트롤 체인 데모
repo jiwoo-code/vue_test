@@ -47,10 +47,7 @@
               @mouseleave="onControlMouseLeave(element)"
             >
               <div class="control-chain__header-left">
-                <span
-                  class="control-chain__drag-handle"
-                  :style="{ visibility: hoveredControlId === element.id ? 'visible' : 'hidden' }"
-                >
+                <span class="control-chain__drag-handle">
                   ≡
                 </span>
                 <span
@@ -247,7 +244,7 @@ export default {
       default: null
     },
 
-    // 이전 버전 호환용 (실제 동작은 대부분 무시)
+    // 스크롤 옵션
     useHorizontalScroll: {
       type: Boolean,
       default: false
@@ -401,31 +398,30 @@ export default {
         columnGap: '8px',
         flex: '1 1 auto',
         minHeight: 0,
-        minWidth: 0
+        minWidth: 0,
+        display: 'flex',
+        alignItems: 'flex-start'
       };
 
       // 가로 스크롤 여부에 따라 flex 설정
       if (this.useHorizontalScroll) {
-        // 수평 한 줄 + 내용 폭만큼 확장 (배경 전체는 높이 100% 유지)
-        style.display = 'flex';
+        // 수평 한 줄 + 내용 폭만큼 확장
         style.flexWrap = 'nowrap';
         style.width = 'max-content';
         style.minWidth = '100%';
+        // 가로 스크롤 시에는 가로 정렬만 적용
+        style.justifyContent = this.horizontalAlign;
+        // 세로 정렬은 align-items로 제어 (한 줄이므로)
+        style.alignItems = this.verticalAlign;
       } else {
         // 기본: 여러 줄 래핑, 컨테이너 폭에 맞춤
-        style.display = 'flex';
         style.flexWrap = 'wrap';
         style.width = '100%';
+        // 가로 정렬
+        style.justifyContent = this.horizontalAlign;
+        // 세로 정렬: 여러 줄일 때는 align-content로 제어
+        style.alignContent = this.verticalAlign;
       }
-
-      // 가로 정렬 (좌/중/우)
-      style.justifyContent = this.horizontalAlign;
-
-      // 세로 정렬: flex-wrap 사용 시 align-content로 제어 (height 유무와 상관없이 사용)
-      style.alignContent = this.verticalAlign;
-
-      // 각 아이템의 세로 정렬은 상단 기준
-      style.alignItems = 'flex-start';
 
       return style;
     },
@@ -527,7 +523,7 @@ export default {
     /**
      * 세로 정렬 설정
      * - mode: 'top' | 'center' | 'bottom'
-     * height 유무와 상관없이 align-content로 적용
+     * height 유무와 상관없이 적용
      */
     setVerticalAlign(mode) {
       const mapped = verticalMap[mode];
@@ -891,7 +887,3 @@ export default {
   font-size: 12px;
 }
 </style>
-수정 사항:
-드래그 좌표 문제 해결: force-fallback과 fallback-tolerance 옵션 제거 (이 옵션들이 좌표 불일치 원인)
-크기 변화 방지: v-if 대신 visibility: hidden/visible 사용으로 요소 공간 유지 → 레이아웃 변화 없음
-드래그 핸들 고정 너비: width: 12px 추가로 보이지 않을 때도 공간 차지
