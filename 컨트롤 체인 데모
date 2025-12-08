@@ -15,7 +15,6 @@
     :class="layoutClass"
     :style="containerStyle"
   >
-
     <!-- 활성 체인 영역 (왼쪽) -->
     <div
       class="control-chain__active"
@@ -56,7 +55,7 @@
                 </span>
                 <span
                   class="control-chain__title"
-                  :style="getTextStyle(element)"
+                  :style="getTextStyle(element, true)"
                 >
                   {{ element.label }}
                 </span>
@@ -97,7 +96,7 @@
               <span
                 v-else
                 class="control-chain__label-value"
-                :style="getTextStyle(element)"
+                :style="getTextStyle(element, true)"
               >
                 {{ element.displayValue || '-' }}
               </span>
@@ -155,7 +154,7 @@
               </span>
               <span
                 class="control-chain__available-label"
-                :style="getTextStyle(element)"
+                :style="getTextStyle(element, false)"
               >
                 {{ element.label }}
               </span>
@@ -275,7 +274,7 @@ export default {
       showCloseControlId: null,
       idMap: {},
 
-      // 뎁스별 하이라이트 색상 (테두리/배경)
+      // 뎁스별 하이라이트 색상 (테두리/배경) - 왼쪽 뎁스 영역에만 사용
       depthHighlightColors: [
         '#D5383A',
         '#EB702D',
@@ -296,7 +295,7 @@ export default {
       // 컨트롤 기본 max-width(px)
       defaultMaxWidth: 240,
 
-      // 폰트 컬러: 기본 / 하이라이트
+      // 폰트 컬러: 기본 / 하이라이트(왼쪽 뎁스 영역 전용)
       baseFontColor: '#222222',
       highlightFontColor: '#1E5FCB'
     };
@@ -307,13 +306,9 @@ export default {
       return `control-chain--available-${this.availablePlacement}`;
     },
 
-    // 컨테이너 높이 기준 (내부 양쪽 영역이 공유)
+    // height가 없으면 minHeight 또는 기본값(260px)
     sectionMinHeight() {
-      const h = toSize(this.height);
       const mh = toSize(this.minHeight);
-      if (h) {
-        return h;
-      }
       if (mh) {
         return mh;
       }
@@ -327,7 +322,6 @@ export default {
       const mw = toSize(this.minWidth);
       const xw = toSize(this.maxWidth);
       const h = toSize(this.height);
-      const mh = toSize(this.minHeight);
       const xh = toSize(this.maxHeight);
 
       if (w) {
@@ -341,9 +335,10 @@ export default {
       }
 
       if (h) {
-        // height를 명시하면 그대로 고정, 내부는 height:100%로 맞춰짐
+        // 고정 높이: 내부 영역은 height: 100%로 맞추고, padding 포함해도 넘치지 않도록
         style.height = h;
         style.minHeight = h;
+        style.boxSizing = 'border-box';
       } else {
         style.minHeight = this.sectionMinHeight;
         if (xh) {
@@ -360,10 +355,18 @@ export default {
         padding: '8px',
         border: '1px solid #e5e5e5',
         background: '#ffffff',
-        boxSizing: 'border-box',
-        minHeight: this.sectionMinHeight,
-        height: '100%'
+        boxSizing: 'border-box'
       };
+
+      const h = toSize(this.height);
+      if (h) {
+        // 부모의 height 안에서만 꽉 차도록
+        style.height = '100%';
+        style.minHeight = '0';
+      } else {
+        style.minHeight = this.sectionMinHeight;
+        style.height = '100%';
+      }
 
       if (this.useVerticalScroll) {
         style.overflowY = 'auto';
@@ -375,10 +378,20 @@ export default {
     },
 
     availableAreaStyle() {
-      return {
-        minHeight: this.sectionMinHeight,
-        height: '100%'
+      const style = {
+        boxSizing: 'border-box'
       };
+
+      const h = toSize(this.height);
+      if (h) {
+        style.height = '100%';
+        style.minHeight = '0';
+      } else {
+        style.minHeight = this.sectionMinHeight;
+        style.height = '100%';
+      }
+
+      return style;
     },
 
     activeDraggableStyle() {
@@ -442,6 +455,7 @@ export default {
     /**
      * 하이라이트 색(테두리/배경)을 한 번에 세팅하고 싶을 때 사용하는 헬퍼.
      * 내부적으로 setHighlightBorderColors / setHighlightBackgroundColors 를 호출한다.
+     * (왼쪽 뎁스 영역 hover 시에만 적용)
      */
     setHighlightColors(borderColors, backgroundColors) {
       if (borderColors) {
@@ -454,7 +468,7 @@ export default {
 
     /**
      * 컨트롤에 마우스를 올렸을 때 표시되는
-     * 테두리 색(뎁스별)을 변경할 때 사용.
+     * 테두리 색(뎁스별)을 변경할 때 사용. (왼쪽 뎁스 영역 전용)
      *
      * @param {string|string[]} colors - 단일 색 또는 색상 배열
      */
@@ -467,7 +481,7 @@ export default {
 
     /**
      * 컨트롤에 마우스를 올렸을 때 표시되는
-     * 배경 색(뎁스별)을 변경할 때 사용.
+     * 배경 색(뎁스별)을 변경할 때 사용. (왼쪽 뎁스 영역 전용)
      *
      * @param {string|string[]} colors - 단일 색 또는 색상 배열
      */
@@ -479,7 +493,7 @@ export default {
     },
 
     /**
-     * 기본 텍스트(라벨, 타이틀, 목록 등)에 사용하는
+     * 기본 텍스트(라벨, 타이틀, 오른쪽 목록 등)에 사용하는
      * 폰트 색을 변경할 때 사용.
      *
      * @param {string} color - CSS color 값
@@ -492,7 +506,8 @@ export default {
 
     /**
      * 컨트롤에 마우스를 올렸을 때 등
-     * 하이라이트 상태에서 사용할 폰트 색을 변경할 때 사용.
+     * 하이라이트 상태(왼쪽 뎁스 영역)에 사용할 폰트 색을 변경할 때 사용.
+     * 오른쪽 목록에는 적용되지 않는다.
      *
      * @param {string} color - CSS color 값
      */
@@ -660,17 +675,26 @@ export default {
     // =====================================================================
 
     /**
-     * 컨트롤별로 상태에 따라 텍스트 색을 결정.
-     * - hover 중인 컨트롤: highlightFontColor
-     * - 그 외: baseFontColor
+     * 컨트롤별로 상태/영역에 따라 텍스트 색을 결정.
+     * - isActiveArea === true (왼쪽 뎁스 영역):
+     *     hover 중이면 highlightFontColor, 아니면 baseFontColor
+     * - isActiveArea === false (오른쪽 목록 영역):
+     *     항상 baseFontColor
      */
-    getTextStyle(control) {
+    getTextStyle(control, isActiveArea) {
       const isHovered = this.hoveredControlId === control.id;
+      const color =
+        isActiveArea && isHovered ? this.highlightFontColor : this.baseFontColor;
+
       return {
-        color: isHovered ? this.highlightFontColor : this.baseFontColor
+        color
       };
     },
 
+    /**
+     * 컨트롤 박스(왼쪽 뎁스 영역) 스타일.
+     * 마우스 오버 시에만 depthHighlightColors / depthHighlightBgColors 적용.
+     */
     getContentStyle(index, control) {
       const style = {};
 
