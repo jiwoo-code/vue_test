@@ -319,6 +319,7 @@ export default {
         style.height = h;
         style.minHeight = h;
       } else {
+        style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
       }
 
@@ -341,7 +342,7 @@ export default {
         style.height = '100%';
         style.minHeight = 0;
       } else {
-        style.height = '100%';
+        style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
       }
 
@@ -374,7 +375,7 @@ export default {
         style.height = '100%';
         style.minHeight = 0;
       } else {
-        style.height = '100%';
+        style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
       }
 
@@ -384,12 +385,15 @@ export default {
     activeDraggableStyle() {
       const style = {
         boxSizing: 'border-box',
-        minHeight: '100%',
-        height: '100%',
         flex: 1,
         rowGap: '6px',
         columnGap: '8px'
       };
+
+      const hasHeight =
+        this.height !== null &&
+        this.height !== undefined &&
+        this.height !== '';
 
       if (this.useHorizontalScroll) {
         style.display = 'inline-flex';
@@ -399,6 +403,15 @@ export default {
         style.display = 'flex';
         style.flexWrap = 'wrap';
         style.width = '100%';
+      }
+
+      if (hasHeight) {
+        style.height = '100%';
+        style.minHeight = '100%';
+      } else {
+        style.height = 'auto';
+        // height 미설정일 때도 뎁스 영역 전체에 충분한 드랍존 확보
+        style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
       }
 
       // 줄 간격이 height에 따라 이상하게 늘어나지 않도록 고정
@@ -732,8 +745,6 @@ export default {
 /* 드랍 영역 전체를 채우도록 */
 .control-chain__draggable {
   width: 100%;
-  height: 100%;
-  min-height: 100%;
 }
 
 /* 사용 가능한 컨트롤 영역 (오른쪽) */
@@ -750,16 +761,15 @@ export default {
 .control-chain__available-list-wrapper {
   flex: 1;
   overflow-y: auto;
-  height: 100%;
-  min-height: 100%;
+  height: auto;
 }
 
+/* 배경 드랍을 위해 최소 높이를 픽셀로 고정 */
 .control-chain__available-list {
   list-style: none;
   padding: 0;
   margin: 0;
-  min-height: 100%;
-  height: 100%;
+  min-height: 260px;
 }
 
 .control-chain__available-item + .control-chain__available-item {
@@ -865,10 +875,6 @@ export default {
   font-size: 12px;
 }
 </style>
-
-
-
-
 
 
 
@@ -1100,23 +1106,6 @@ export default {
 </template>
 
 <script>
-/*
-  ---------------------------------------------------------------------------
-  필요한 라이브러리 및 컴포넌트
-
-  vuedraggable (Sortable.js 기반 드래그)
-    npm install vuedraggable sortablejs
-    yarn add vuedraggable sortablejs
-
-  ControlChain 컴포넌트
-    import ControlChain from '@/components/ControlChain.vue';
-
-  ur 컴포넌트
-    ur-dropdown, ur-multi-dropdown 은 전역 등록되어 있다고 가정.
-
-  ---------------------------------------------------------------------------
-*/
-
 import ControlChain from '@/components/ControlChain.vue';
 
 export default {
@@ -1125,10 +1114,8 @@ export default {
 
   data() {
     return {
-      // 체인 데이터
       chain: [],
 
-      // 템플릿
       controlTemplates: [
         {
           key: 'AAA',
@@ -1194,7 +1181,6 @@ export default {
         }
       ],
 
-      // ControlChain props
       availablePlacement: 'right',
       demoWidth: '100%',
       demoHeight: null,
@@ -1203,7 +1189,6 @@ export default {
       emptyGuideText: '목록에서 드래그하여 추가해 주세요.',
       availableTitle: '사용 가능한 컨트롤',
 
-      // UI 입력값
       widthInput: '100%',
       heightInput: '',
       availableWidthInput: '220px',
