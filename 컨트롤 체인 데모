@@ -189,6 +189,18 @@ const toArray = (input) => {
   return [input];
 };
 
+const horizontalMap = {
+  left: 'flex-start',
+  center: 'center',
+  right: 'flex-end'
+};
+
+const verticalMap = {
+  top: 'flex-start',
+  center: 'center',
+  bottom: 'flex-end'
+};
+
 export default {
   name: 'ControlChain',
   components: { draggable },
@@ -282,7 +294,11 @@ export default {
       baseFontColor: '#222222',
       highlightFontColor: '#1E5FCB',
 
-      availableWidth: null
+      availableWidth: null,
+
+      // 정렬 상태 (flex 값 그대로 보관)
+      horizontalAlign: 'flex-start',
+      verticalAlign: 'flex-start'
     };
   },
 
@@ -315,8 +331,7 @@ export default {
         padding: '8px',
         border: '1px solid #e5e5e5',
         background: '#ffffff',
-        boxSizing: 'border-box',
-        display: 'flex'
+        boxSizing: 'border-box'
       };
 
       const h = toSize(this.height);
@@ -368,7 +383,9 @@ export default {
       const style = {
         boxSizing: 'border-box',
         minHeight: '100%',
-        height: '100%'
+        height: '100%',
+        rowGap: '6px',
+        columnGap: '8px'
       };
 
       if (this.useHorizontalScroll) {
@@ -380,6 +397,10 @@ export default {
         style.flexWrap = 'wrap';
         style.width = '100%';
       }
+
+      // 가로/세로 정렬
+      style.justifyContent = this.horizontalAlign;
+      style.alignItems = this.verticalAlign;
 
       return style;
     },
@@ -462,6 +483,33 @@ export default {
       } else {
         this.availableWidth = width;
       }
+    },
+
+    /**
+     * 가로 정렬 설정 (왼쪽 뎁스 영역에 배치된 컨트롤들의 가로 방향 정렬)
+     * - mode: 'left' | 'center' | 'right'
+     */
+    setHorizontalAlign(mode) {
+      const mapped = horizontalMap[mode];
+      if (!mapped) {
+        return;
+      }
+      this.horizontalAlign = mapped;
+    },
+
+    /**
+     * 세로 정렬 설정 (왼쪽 뎁스 영역에 배치된 컨트롤들의 세로 방향 정렬)
+     * - mode: 'top' | 'center' | 'bottom'
+     *
+     * 주로 height가 고정된 경우(예: height=320px) 안에서
+     * 컨트롤 덩어리를 위/가운데/아래로 맞추고 싶을 때 사용.
+     */
+    setVerticalAlign(mode) {
+      const mapped = verticalMap[mode];
+      if (!mapped) {
+        return;
+      }
+      this.verticalAlign = mapped;
     },
 
     // ===================== Internal / 데이터 빌드 =====================
@@ -720,6 +768,7 @@ export default {
   display: flex;
   align-items: center;
 }
+
 .control-chain__separator {
   margin-right: 4px;
 }
