@@ -247,7 +247,7 @@ export default {
       default: null
     },
 
-    // 이전 버전 호환용 (이제는 무시)
+    // 이전 버전 호환용 (이제는 사실상 무시)
     useHorizontalScroll: {
       type: Boolean,
       default: false
@@ -335,7 +335,8 @@ export default {
         boxSizing: 'border-box',
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'stretch'
+        alignItems: 'stretch',
+        justifyContent: 'flex-start'
       };
 
       const height = toSize(this.height);
@@ -345,13 +346,11 @@ export default {
         // height가 지정된 경우: 고정 높이 + 세로 스크롤
         style.height = '100%';
         style.minHeight = 0;
-        style.justifyContent = 'flex-start';
         style.overflowY = 'auto';
       } else {
-        // height 미지정: min-height 안에서 세로 정렬
+        // height 미지정: min-height 안에서 세로 정렬 (draggable 내에서 align-content로 처리)
         style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
-        style.justifyContent = this.verticalAlign;
         style.overflowY = 'visible';
       }
 
@@ -397,7 +396,8 @@ export default {
       const style = {
         boxSizing: 'border-box',
         rowGap: '6px',
-        columnGap: '8px'
+        columnGap: '8px',
+        flex: 1
       };
 
       const height = toSize(this.height);
@@ -413,17 +413,17 @@ export default {
         style.width = '100%';
       }
 
+      // 드랍 존이 항상 뎁스 영역 전체를 덮도록 100% 고정
+      style.height = '100%';
+      style.minHeight = '100%';
+
+      // 세로 정렬: height 미지정일 때 align-content로 처리
       if (hasHeight) {
-        // 고정 높이인 경우: 영역을 꽉 채우되 세로 스크롤에 맡김
-        style.height = '100%';
-        style.minHeight = '100%';
+        style.alignContent = 'flex-start';
       } else {
-        // height 미지정: 컨텐츠 높이만큼만, 부모가 min-height를 보장
-        style.height = 'auto';
-        style.minHeight = 0;
+        style.alignContent = this.verticalAlign;
       }
 
-      style.alignContent = 'flex-start';
       style.justifyContent = this.horizontalAlign;
       style.alignItems = 'flex-start';
 
