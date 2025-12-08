@@ -309,15 +309,15 @@ export default {
 
     containerStyle() {
       const style = {};
-      const w = toSize(this.width) || '100%';
-      const h = toSize(this.height);
+      const width = toSize(this.width) || '100%';
+      const height = toSize(this.height);
 
-      style.width = w;
+      style.width = width;
       style.boxSizing = 'border-box';
 
-      if (h) {
-        style.height = h;
-        style.minHeight = h;
+      if (height) {
+        style.height = height;
+        style.minHeight = height;
       } else {
         style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
@@ -334,11 +334,13 @@ export default {
         background: '#ffffff',
         boxSizing: 'border-box',
         display: 'flex',
+        flexDirection: 'column',
+        justifyContent: this.verticalAlign,
         alignItems: 'stretch'
       };
 
-      const h = toSize(this.height);
-      if (h) {
+      const height = toSize(this.height);
+      if (height) {
         style.height = '100%';
         style.minHeight = 0;
       } else {
@@ -370,8 +372,8 @@ export default {
       style.flexShrink = 0;
       style.flexGrow = 0;
 
-      const h = toSize(this.height);
-      if (h) {
+      const height = toSize(this.height);
+      if (height) {
         style.height = '100%';
         style.minHeight = 0;
       } else {
@@ -385,7 +387,6 @@ export default {
     activeDraggableStyle() {
       const style = {
         boxSizing: 'border-box',
-        flex: 1,
         rowGap: '6px',
         columnGap: '8px'
       };
@@ -410,16 +411,12 @@ export default {
         style.minHeight = '100%';
       } else {
         style.height = 'auto';
-        // height 미설정일 때도 뎁스 영역 전체에 충분한 드랍존 확보
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
       }
 
-      // 줄 간격이 height에 따라 이상하게 늘어나지 않도록 고정
       style.alignContent = 'flex-start';
-
-      // 가로/세로 정렬
       style.justifyContent = this.horizontalAlign;
-      style.alignItems = this.verticalAlign;
+      style.alignItems = 'flex-start';
 
       return style;
     },
@@ -468,16 +465,16 @@ export default {
     },
 
     setHighlightBorderColors(colors) {
-      const arr = toArray(colors);
-      if (arr && arr.length) {
-        this.depthHighlightColors = arr;
+      const array = toArray(colors);
+      if (array && array.length) {
+        this.depthHighlightColors = array;
       }
     },
 
     setHighlightBackgroundColors(colors) {
-      const arr = toArray(colors);
-      if (arr && arr.length) {
-        this.depthHighlightBgColors = arr;
+      const array = toArray(colors);
+      if (array && array.length) {
+        this.depthHighlightBgColors = array;
       }
     },
 
@@ -579,39 +576,39 @@ export default {
 
     // ===================== 드래그/드랍 핸들러 =====================
 
-    onActiveChange(evt) {
+    onActiveChange(event) {
       this.emitChain();
 
-      if (evt.added) {
+      if (event.added) {
         this.$emit('control-added', {
-          control: evt.added.element,
-          index: evt.added.newIndex
+          control: event.added.element,
+          index: event.added.newIndex
         });
       }
 
-      if (evt.moved) {
+      if (event.moved) {
         this.$emit('control-depth-change', {
-          control: evt.moved.element,
-          oldIndex: evt.moved.oldIndex,
-          newIndex: evt.moved.newIndex
+          control: event.moved.element,
+          oldIndex: event.moved.oldIndex,
+          newIndex: event.moved.newIndex
         });
       }
 
-      if (evt.removed) {
+      if (event.removed) {
         this.$emit('control-removed', {
-          control: evt.removed.element,
-          index: evt.removed.oldIndex
+          control: event.removed.element,
+          index: event.removed.oldIndex
         });
       }
     },
 
     removeControlById(id) {
-      const idx = this.activeControls.findIndex(control => control.id === id);
-      if (idx < 0) {
+      const index = this.activeControls.findIndex(control => control.id === id);
+      if (index < 0) {
         return;
       }
 
-      const removedList = this.activeControls.splice(idx, 1);
+      const removedList = this.activeControls.splice(index, 1);
       const removed = removedList[0];
 
       if (this.hoveredControlId === id) {
@@ -626,7 +623,7 @@ export default {
       this.emitChain();
       this.$emit('control-removed', {
         control: removed,
-        index: idx
+        index
       });
     },
 
@@ -662,13 +659,13 @@ export default {
 
     onMultiSelectChange(control, index, values) {
       const next = Array.isArray(values) ? values.slice() : [];
-      const prev = Array.isArray(control.selectedValues)
+      const previous = Array.isArray(control.selectedValues)
         ? control.selectedValues
         : [];
 
       if (
-        prev.length === next.length &&
-        prev.every((item, i) => item === next[i])
+        previous.length === next.length &&
+        previous.every((item, position) => item === next[position])
       ) {
         return;
       }
@@ -707,9 +704,9 @@ export default {
 
       if (this.hoveredControlId === control.id) {
         const borderIndex = index % this.depthHighlightColors.length;
-        const bgIndex = index % this.depthHighlightBgColors.length;
+        const backgroundIndex = index % this.depthHighlightBgColors.length;
         style.borderColor = this.depthHighlightColors[borderIndex];
-        style.backgroundColor = this.depthHighlightBgColors[bgIndex];
+        style.backgroundColor = this.depthHighlightBgColors[backgroundIndex];
       }
 
       return style;
@@ -761,15 +758,14 @@ export default {
 .control-chain__available-list-wrapper {
   flex: 1;
   overflow-y: auto;
-  height: auto;
 }
 
-/* 배경 드랍을 위해 최소 높이를 픽셀로 고정 */
+/* 목록 컨테이너가 영역 전체를 덮게 해서 배경 드랍 + 필요할 때만 스크롤 */
 .control-chain__available-list {
   list-style: none;
   padding: 0;
   margin: 0;
-  min-height: 260px;
+  height: 100%;
 }
 
 .control-chain__available-item + .control-chain__available-item {
@@ -875,9 +871,6 @@ export default {
   font-size: 12px;
 }
 </style>
-
-
-
 
 
 
@@ -1214,10 +1207,10 @@ export default {
   },
 
   mounted() {
-    const ref = this.$refs.controlChain;
-    if (ref) {
-      ref.setHorizontalAlign(this.horizontalAlignInput);
-      ref.setVerticalAlign(this.verticalAlignInput);
+    const chainRef = this.$refs.controlChain;
+    if (chainRef) {
+      chainRef.setHorizontalAlign(this.horizontalAlignInput);
+      chainRef.setVerticalAlign(this.verticalAlignInput);
     }
   },
 
@@ -1233,79 +1226,79 @@ export default {
     },
 
     applyAvailableWidth() {
-      const ref = this.$refs.controlChain;
-      if (!ref) {
+      const chainRef = this.$refs.controlChain;
+      if (!chainRef) {
         return;
       }
       const width = this.availableWidthInput && this.availableWidthInput.trim()
         ? this.availableWidthInput.trim()
         : '220px';
 
-      ref.setAvailableWidth(width);
+      chainRef.setAvailableWidth(width);
     },
 
     applyBaseFontColor() {
-      const ref = this.$refs.controlChain;
-      if (!ref || !this.baseFontInput) {
+      const chainRef = this.$refs.controlChain;
+      if (!chainRef || !this.baseFontInput) {
         return;
       }
-      ref.setBaseFontColor(this.baseFontInput.trim());
+      chainRef.setBaseFontColor(this.baseFontInput.trim());
     },
 
     applyHighlightFontColor() {
-      const ref = this.$refs.controlChain;
-      if (!ref || !this.highlightFontInput) {
+      const chainRef = this.$refs.controlChain;
+      if (!chainRef || !this.highlightFontInput) {
         return;
       }
-      ref.setHighlightFontColor(this.highlightFontInput.trim());
+      chainRef.setHighlightFontColor(this.highlightFontInput.trim());
     },
 
     applyHighlightBorderColors() {
-      const ref = this.$refs.controlChain;
-      if (!ref || !this.highlightBorderInput) {
+      const chainRef = this.$refs.controlChain;
+      if (!chainRef || !this.highlightBorderInput) {
         return;
       }
-      const arr = this.highlightBorderInput
+      const array = this.highlightBorderInput
         .split(',')
         .map(item => item.trim())
         .filter(item => item);
 
-      if (!arr.length) {
+      if (!array.length) {
         return;
       }
-      ref.setHighlightBorderColors(arr);
+      chainRef.setHighlightBorderColors(array);
     },
 
     applyHighlightBackgroundColors() {
-      const ref = this.$refs.controlChain;
-      if (!ref || !this.highlightBackgroundInput) {
+      const chainRef = this.$refs.controlChain;
+      if (!chainRef || !this.highlightBackgroundInput) {
         return;
       }
-      const arr = this.highlightBackgroundInput
+      const array = this.highlightBackgroundInput
         .split(',')
         .map(item => item.trim())
         .filter(item => item);
 
-      if (!arr.length) {
+      if (!array.length) {
         return;
       }
-      ref.setHighlightBackgroundColors(arr);
+      chainRef.setHighlightBackgroundColors(array);
     },
 
     applyHorizontalAlign() {
-      const ref = this.$refs.controlChain;
-      if (!ref) {
+      const chainRef = this.$refs.controlChain;
+      if (!chainRef) {
         return;
       }
-      ref.setHorizontalAlign(this.horizontalAlignInput);
+      chainRef.setHorizontalAlign(this.horizontalAlignInput);
     },
 
     applyVerticalAlign() {
-      const ref = this.$refs.controlChain;
-      if (!ref) {
+      const chainRef = this.$refs.controlChain;
+      if (!chainRef) {
         return;
       }
-      ref.setVerticalAlign(this.verticalAlignInput);
+      chainRef.setVerticalAlign(this.verticalAlignInput);
     },
 
     logEvent(type, payload) {
