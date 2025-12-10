@@ -543,6 +543,97 @@ activeAreaStyle() {
 
 
 
+activeDraggableStyle() {
+  const style = {
+    display: 'flex',
+    boxSizing: 'border-box',
+    rowGap: '6px',
+    columnGap: '8px',
+    minHeight: 0,
+    minWidth: 0,
+    flex: '1 1 auto'
+  };
+
+  if (this.useHorizontalScroll) {
+    style.flexWrap = 'nowrap';
+    style.width = 'max-content';
+    style.minWidth = '100%';
+    style.justifyContent = 'flex-start';
+    style.alignItems = this.useVerticalScroll ? 'flex-start' : this.verticalAlign;
+  } else {
+    style.flexWrap = 'wrap';
+    // 가로 스크롤 비활성화 시 width를 auto로
+    style.width = this.useHorizontalScroll ? '100%' : 'auto';
+    style.minWidth = '100%'; // 최소 너비는 유지
+    style.justifyContent = this.horizontalAlign;
+    style.alignContent = this.useVerticalScroll ? 'flex-start' : this.verticalAlign;
+  }
+
+  // 세로 스크롤 비활성화 시 height를 auto로
+  if (!this.useVerticalScroll) {
+    style.minHeight = 'auto';
+    style.height = 'auto';
+  }
+
+  return style;
+}
+그리고 activeAreaStyle도 함께 수정:
+activeAreaStyle() {
+  const style = {
+    flex: '1 1 auto',
+    padding: '8px',
+    border: '1px solid #e5e5e5',
+    background: '#fff',
+    display: 'flex',
+    flexDirection: 'column',
+    boxSizing: 'border-box'
+  };
+
+  const h = toSize(this.height);
+  
+  if (h) {
+    style.height = '100%';
+    style.minHeight = h;
+  } else {
+    style.height = 'auto';
+    style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
+  }
+
+  style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
+  style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
+  
+  // 스크롤 비활성화 시 minWidth 제거
+  if (!this.useHorizontalScroll) {
+    style.minWidth = 'auto';
+  } else {
+    style.minWidth = 0;
+  }
+
+  return style;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
