@@ -172,6 +172,7 @@ const horizontalMap = {
   center: 'center',
   right: 'flex-end'
 };
+
 const verticalMap = {
   top: 'flex-start',
   center: 'center',
@@ -195,13 +196,13 @@ export default {
       type: String,
       default: '목록에서 드래그하여 추가해 주세요.'
     },
-    availableTitle: { type: String, default: '' },
+    availableTitle: { 
+      type: String, 
+      default: '' 
+    },
 
     width: [Number, String],
-    height: [Number, String],
-
-    useHorizontalScroll: Boolean,
-    useVerticalScroll: Boolean
+    height: [Number, String]
   },
 
   data() {
@@ -242,6 +243,15 @@ export default {
   },
 
   computed: {
+    // width/height가 지정되면 자동으로 스크롤 활성화
+    shouldUseVerticalScroll() {
+      return !!this.height;
+    },
+
+    shouldUseHorizontalScroll() {
+      return !!this.width;
+    },
+
     layoutClass() {
       return `control-chain--available-${this.availablePlacement}`;
     },
@@ -252,57 +262,62 @@ export default {
         boxSizing: 'border-box'
       };
 
-      const h = toSize(this.height);
-      if (h) {
-        style.height = h;
-        style.minHeight = h;
+      const heightValue = toSize(this.height);
+      if (heightValue) {
+        // height 지정 시 고정
+        style.height = heightValue;
+        style.minHeight = heightValue;
       } else {
+        // height 미지정 시 컨텐츠에 맞춰 자동 확장
         style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
       }
+      
       return style;
     },
 
- 
-activeAreaStyle() {
-  const style = {
-    flex: '1 1 auto',
-    padding: '8px',
-    border: '1px solid #e5e5e5',
-    background: '#fff',
-    display: 'flex',
-    flexDirection: 'column',
-    minWidth: 0,
-    boxSizing: 'border-box'
-  };
+    activeAreaStyle() {
+      const style = {
+        flex: '1 1 auto',
+        padding: '8px',
+        border: '1px solid #e5e5e5',
+        background: '#fff',
+        display: 'flex',
+        flexDirection: 'column',
+        boxSizing: 'border-box'
+      };
 
-  const h = toSize(this.height);
-  
-  // height prop이 있을 때
-  if (h) {
-    style.height = '100%';
-    style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
-    style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
-  } 
-  // height prop이 없을 때
-  else {
-    style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
-    // 스크롤 비활성화 시 내용에 따라 자동 확장
-    style.height = 'auto';
-    style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
-    style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
-  }
+      if (this.shouldUseVerticalScroll) {
+        // 세로 스크롤 사용: 영역 고정, overflow auto
+        style.height = '100%';
+        style.overflowY = 'auto';
+      } else {
+        // 세로 스크롤 미사용: 컨텐츠에 맞춰 자동 확장
+        style.height = 'auto';
+        style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
+        style.overflowY = 'visible';
+      }
 
-  return style;
-},
+      if (this.shouldUseHorizontalScroll) {
+        // 가로 스크롤 사용
+        style.overflowX = 'auto';
+        style.minWidth = 0;
+      } else {
+        // 가로 스크롤 미사용
+        style.overflowX = 'visible';
+        style.minWidth = 'auto';
+      }
+
+      return style;
+    },
 
     availableAreaStyle() {
-      const raw = this.availableWidth ?? `${DEFAULT_AVAILABLE_WIDTH}px`;
-      const w = toSize(raw) ?? raw;
+      const rawWidth = this.availableWidth ?? `${DEFAULT_AVAILABLE_WIDTH}px`;
+      const widthValue = toSize(rawWidth) ?? rawWidth;
 
       const style = {
-        width: w,
-        flexBasis: w,
+        width: widthValue,
+        flexBasis: widthValue,
         flexGrow: 0,
         flexShrink: 0,
         padding: '8px',
@@ -313,8 +328,14 @@ activeAreaStyle() {
         flexDirection: 'column'
       };
 
-      const h = toSize(this.height);
-      style.height = h ? '100%' : 'auto';
+      if (this.shouldUseVerticalScroll) {
+        // 세로 스크롤 사용: active 영역과 동일한 높이
+        style.height = '100%';
+      } else {
+        // 세로 스크롤 미사용: 컨텐츠에 맞춰 자동 확장
+        style.height = 'auto';
+        style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
+      }
 
       return style;
     },
@@ -325,22 +346,33 @@ activeAreaStyle() {
         boxSizing: 'border-box',
         rowGap: '6px',
         columnGap: '8px',
-        minHeight: 0,
-        minWidth: 0,
         flex: '1 1 auto'
       };
 
-      if (this.useHorizontalScroll) {
+      if (this.shouldUseHorizontalScroll) {
+        // 가로 스크롤 사용: 한 줄로 나열
         style.flexWrap = 'nowrap';
         style.width = 'max-content';
         style.minWidth = '100%';
+        style.minHeight = 0;
         style.justifyContent = 'flex-start';
-        style.alignItems = this.useVerticalScroll ? 'flex-start' : this.verticalAlign;
+        // 세로 스크롤도 함께 사용하면 무조건 top 정렬
+        style.alignItems = this.shouldUseVerticalScroll ? 'flex-start' : this.verticalAlign;
       } else {
+        // 가로 스크롤 미사용: 줄바꿈 허용
         style.flexWrap = 'wrap';
         style.width = '100%';
+        style.minWidth = 0;
+        style.minHeight = 0;
         style.justifyContent = this.horizontalAlign;
-        style.alignContent = this.verticalAlign;
+        // 세로 스크롤도 함께 사용하면 무조건 top 정렬
+        style.alignContent = this.shouldUseVerticalScroll ? 'flex-start' : this.verticalAlign;
+      }
+
+      // 양쪽 스크롤 모두 미사용: 컨텐츠에 맞춰 자동 확장
+      if (!this.shouldUseVerticalScroll && !this.shouldUseHorizontalScroll) {
+        style.height = 'auto';
+        style.minHeight = 'auto';
       }
 
       return style;
@@ -359,8 +391,18 @@ activeAreaStyle() {
   },
 
   watch: {
-    value: { handler() { this.buildControls(); }, deep: true },
-    controlTemplates: { handler() { this.buildControls(); }, deep: true }
+    value: { 
+      handler() { 
+        this.buildControls(); 
+      }, 
+      deep: true 
+    },
+    controlTemplates: { 
+      handler() { 
+        this.buildControls(); 
+      }, 
+      deep: true 
+    }
   },
 
   created() {
@@ -368,29 +410,35 @@ activeAreaStyle() {
   },
 
   methods: {
-    // 외부 API들
+    // 외부 API
     setHighlightBorderColors(colors) {
-      const arr = toArray(colors);
-      if (arr) this.depthHighlightColors = arr;
+      const colorArray = toArray(colors);
+      if (colorArray) this.depthHighlightColors = colorArray;
     },
+
     setHighlightBackgroundColors(colors) {
-      const arr = toArray(colors);
-      if (arr) this.depthHighlightBgColors = arr;
+      const colorArray = toArray(colors);
+      if (colorArray) this.depthHighlightBgColors = colorArray;
     },
+
     setBaseFontColor(color) {
       if (color) this.baseFontColor = color;
     },
+
     setHighlightFontColor(color) {
       if (color) this.highlightFontColor = color;
     },
-    setAvailableWidth(w) {
-      if (typeof w === 'number') this.availableWidth = `${w}px`;
-      else if (w) this.availableWidth = w;
+
+    setAvailableWidth(width) {
+      if (typeof width === 'number') this.availableWidth = `${width}px`;
+      else if (width) this.availableWidth = width;
     },
+
     setHorizontalAlign(mode) {
       const mapped = horizontalMap[mode];
       if (mapped) this.horizontalAlign = mapped;
     },
+
     setVerticalAlign(mode) {
       const mapped = verticalMap[mode];
       if (mapped) this.verticalAlign = mapped;
@@ -400,39 +448,40 @@ activeAreaStyle() {
     getStableId(control) {
       const key = control.key || control.label;
       if (!this.idMap[key]) {
-        this.idMap[key] = `${key}-${Math.random().toString(36).slice(2,8)}`;
+        this.idMap[key] = `${key}-${Math.random().toString(36).slice(2, 8)}`;
       }
       return this.idMap[key];
     },
 
     buildControls() {
-      const valueArr = Array.isArray(this.value) ? this.value : [];
-      const templateArr = Array.isArray(this.controlTemplates)
+      const valueArray = Array.isArray(this.value) ? this.value : [];
+      const templateArray = Array.isArray(this.controlTemplates)
         ? this.controlTemplates
         : [];
 
-      const used = new Set(valueArr.map(v => v.key));
+      const usedKeys = new Set(valueArray.map(item => item.key));
 
-      this.activeControls = valueArr.map(c => ({
-        ...c,
-        id: c.id || this.getStableId(c)
+      this.activeControls = valueArray.map(control => ({
+        ...control,
+        id: control.id || this.getStableId(control)
       }));
 
-      this.availableControls = templateArr
-        .filter(t => !used.has(t.key))
-        .map(t => ({
-          ...t,
-          id: t.id || this.getStableId(t)
+      this.availableControls = templateArray
+        .filter(template => !usedKeys.has(template.key))
+        .map(template => ({
+          ...template,
+          id: template.id || this.getStableId(template)
         }));
     },
 
     emitChain() {
-      const cloned = this.activeControls.map(c => {
-        const o = { ...c };
-        if (Array.isArray(o.selectedValues))
-          o.selectedValues = o.selectedValues.slice();
-        delete o.id;
-        return o;
+      const cloned = this.activeControls.map(control => {
+        const obj = { ...control };
+        if (Array.isArray(obj.selectedValues)) {
+          obj.selectedValues = obj.selectedValues.slice();
+        }
+        delete obj.id;
+        return obj;
       });
       this.$emit('input', cloned);
       this.$emit('change', cloned);
@@ -441,9 +490,14 @@ activeAreaStyle() {
     // 드래그/드롭 이벤트
     onActiveChange(event) {
       this.emitChain();
+      
       if (event.added) {
-        this.$emit('control-added', { control: event.added.element, index: event.added.newIndex });
+        this.$emit('control-added', { 
+          control: event.added.element, 
+          index: event.added.newIndex 
+        });
       }
+      
       if (event.moved) {
         this.$emit('control-depth-change', {
           control: event.moved.element,
@@ -451,6 +505,7 @@ activeAreaStyle() {
           newIndex: event.moved.newIndex
         });
       }
+      
       if (event.removed) {
         this.$emit('control-removed', {
           control: event.removed.element,
@@ -459,45 +514,74 @@ activeAreaStyle() {
       }
     },
 
-    removeControlById(id) {
-      const i = this.activeControls.findIndex(c => c.id === id);
-      if (i < 0) return;
+    removeControlById(controlId) {
+      const index = this.activeControls.findIndex(ctrl => ctrl.id === controlId);
+      if (index < 0) return;
 
-      const removed = this.activeControls.splice(i, 1)[0];
+      const removed = this.activeControls.splice(index, 1)[0];
       this.availableControls.push(removed);
 
-      if (this.hoveredControlId === id) this.hoveredControlId = null;
-      if (this.showCloseControlId === id) this.showCloseControlId = null;
+      if (this.hoveredControlId === controlId) {
+        this.hoveredControlId = null;
+      }
+      if (this.showCloseControlId === controlId) {
+        this.showCloseControlId = null;
+      }
 
       this.emitChain();
-      this.$emit('control-removed', { control: removed, index: i });
+      this.$emit('control-removed', { 
+        control: removed, 
+        index: index 
+      });
     },
 
     onControlMouseEnter(element) {
       this.hoveredControlId = element.id;
       this.showCloseControlId = element.id;
     },
+
     onControlMouseLeave(element) {
-      if (this.hoveredControlId === element.id) this.hoveredControlId = null;
-      if (this.showCloseControlId === element.id) this.showCloseControlId = null;
+      if (this.hoveredControlId === element.id) {
+        this.hoveredControlId = null;
+      }
+      if (this.showCloseControlId === element.id) {
+        this.showCloseControlId = null;
+      }
     },
 
     // 선택 변경 이벤트
-    onSingleSelectChange(element, index, val) {
-      if (element.selectedValue === val) return;
-      element.selectedValue = val;
+    onSingleSelectChange(element, index, value) {
+      if (element.selectedValue === value) return;
+      
+      element.selectedValue = value;
       this.emitChain();
-      this.$emit('control-selection-change', { control: element, index, type: 'single', value: val });
+      this.$emit('control-selection-change', { 
+        control: element, 
+        index, 
+        type: 'single', 
+        value 
+      });
     },
 
-    onMultiSelectChange(element, index, vals) {
-      const next = Array.isArray(vals) ? vals.slice() : [];
-      const prev = Array.isArray(element.selectedValues) ? element.selectedValues : [];
-      if (prev.length === next.length && prev.every((v,i)=>v===next[i])) return;
+    onMultiSelectChange(element, index, values) {
+      const nextValues = Array.isArray(values) ? values.slice() : [];
+      const prevValues = Array.isArray(element.selectedValues) 
+        ? element.selectedValues 
+        : [];
+      
+      const isSame = prevValues.length === nextValues.length 
+        && prevValues.every((val, idx) => val === nextValues[idx]);
+      
+      if (isSame) return;
 
-      element.selectedValues = next;
+      element.selectedValues = nextValues;
       this.emitChain();
-      this.$emit('control-selection-change', { control: element, index, type: 'multi', values: next });
+      this.$emit('control-selection-change', { 
+        control: element, 
+        index, 
+        type: 'multi', 
+        values: nextValues 
+      });
     },
 
     // 스타일 로직
@@ -511,18 +595,18 @@ activeAreaStyle() {
     },
 
     getContentStyle(index, element) {
-      const s = {};
+      const style = {};
 
-      const maxW = element.maxWidth ?? this.defaultMaxWidth;
-      s.maxWidth = typeof maxW === 'number' ? `${maxW}px` : maxW;
+      const maxWidth = element.maxWidth ?? this.defaultMaxWidth;
+      style.maxWidth = typeof maxWidth === 'number' ? `${maxWidth}px` : maxWidth;
 
       if (this.hoveredControlId === element.id) {
-        const bi = index % this.depthHighlightColors.length;
-        s.borderColor = this.depthHighlightColors[bi];
-        s.backgroundColor = this.depthHighlightBgColors[bi];
+        const colorIndex = index % this.depthHighlightColors.length;
+        style.borderColor = this.depthHighlightColors[colorIndex];
+        style.backgroundColor = this.depthHighlightBgColors[colorIndex];
       }
 
-      return s;
+      return style;
     }
   }
 };
@@ -539,121 +623,6 @@ activeAreaStyle() {
   @import './control-chain-modern.css';
 */
 </style>
-
-
-
-
-
-
-containerStyle() {
-  const style = {
-    width: toSize(this.width) || '100%',
-    boxSizing: 'border-box'
-  };
-
-  const h = toSize(this.height);
-  if (h) {
-    style.height = h;
-    style.minHeight = h;
-  } else {
-    // 스크롤 비활성화 시 컨테이너가 자동으로 커지도록
-    style.height = (this.useVerticalScroll || this.useHorizontalScroll) ? 'auto' : 'auto';
-    style.minHeight = (this.useVerticalScroll || this.useHorizontalScroll) ? `${DEFAULT_MIN_HEIGHT}px` : 'auto';
-  }
-  return style;
-},
-
-activeAreaStyle() {
-  const style = {
-    flex: '1 1 auto',
-    padding: '8px',
-    border: '1px solid #e5e5e5',
-    background: '#fff',
-    display: 'flex',
-    flexDirection: 'column',
-    boxSizing: 'border-box'
-  };
-
-  const h = toSize(this.height);
-  
-  if (h) {
-    style.height = '100%';
-  } else {
-    style.height = 'auto';
-    style.minHeight = this.useVerticalScroll ? `${DEFAULT_MIN_HEIGHT}px` : 'auto';
-  }
-
-  style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
-  style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
-  style.minWidth = this.useHorizontalScroll ? 0 : 'auto';
-
-  return style;
-},
-
-availableAreaStyle() {
-  const raw = this.availableWidth ?? `${DEFAULT_AVAILABLE_WIDTH}px`;
-  const w = toSize(raw) ?? raw;
-
-  const style = {
-    width: w,
-    flexBasis: w,
-    flexGrow: 0,
-    flexShrink: 0,
-    padding: '8px',
-    border: '1px solid #e5e5e5',
-    background: '#fff',
-    boxSizing: 'border-box',
-    display: 'flex',
-    flexDirection: 'column'
-  };
-
-  const h = toSize(this.height);
-  
-  if (h) {
-    style.height = '100%';
-  } else {
-    // active 영역과 함께 늘어나도록
-    style.height = 'auto';
-    style.minHeight = this.useVerticalScroll ? `${DEFAULT_MIN_HEIGHT}px` : 'auto';
-  }
-
-  return style;
-},
-
-activeDraggableStyle() {
-  const style = {
-    display: 'flex',
-    boxSizing: 'border-box',
-    rowGap: '6px',
-    columnGap: '8px',
-    flex: '1 1 auto'
-  };
-
-  if (this.useHorizontalScroll) {
-    style.flexWrap = 'nowrap';
-    style.width = 'max-content';
-    style.minWidth = '100%';
-    style.minHeight = 0;
-    style.justifyContent = 'flex-start';
-    style.alignItems = this.useVerticalScroll ? 'flex-start' : this.verticalAlign;
-  } else {
-    style.flexWrap = 'wrap';
-    style.width = '100%';
-    style.minWidth = 0;
-    style.minHeight = 0;
-    style.justifyContent = this.horizontalAlign;
-    style.alignContent = this.useVerticalScroll ? 'flex-start' : this.verticalAlign;
-  }
-
-  // 스크롤 비활성화 시 자동 확장
-  if (!this.useVerticalScroll && !this.useHorizontalScroll) {
-    style.height = 'auto';
-    style.minHeight = 'auto';
-  }
-
-  return style;
-}
-
 
 
 
