@@ -45,7 +45,7 @@
             class="control-chain__content"
             :style="getContentStyle(index, element)"
           >
-            <!-- 타이틀 + 드래그핸들 + 삭제버튼 -->
+            <!-- 헤더: 타이틀 + 드래그핸들 + 삭제버튼 -->
             <div
               class="control-chain__header"
               @mouseenter="onControlMouseEnter(element)"
@@ -87,7 +87,7 @@
                 sm
                 v-model="element.selectedValues"
                 :items="element.items"
-                :all-select="element.allSelect"
+                :all-select="element.allSelect === true"
                 @input="onMultiSelectChange(element, index, $event)"
               />
 
@@ -104,7 +104,7 @@
         </div>
       </draggable>
 
-      <!-- 안내 문구: 드롭 방해하지 않도록 draggable 바깥 + pointer-events: none -->
+      <!-- 비어 있을 때 안내 문구 (드롭 방해 안 하도록 absolute + pointer-events:none) -->
       <div
         v-if="!activeControls.length"
         class="control-chain__empty"
@@ -114,7 +114,7 @@
       </div>
     </div>
 
-    <!-- 사용 가능한 컨트롤 영역 (오른쪽/왼쪽) -->
+    <!-- 사용 가능한 컨트롤 영역 (오른쪽) -->
     <div
       class="control-chain__available"
       :style="availableAreaStyle"
@@ -201,10 +201,7 @@ export default {
   name: 'ControlChain',
   components: { draggable },
 
-  model: {
-    prop: 'value',
-    event: 'input'
-  },
+  model: { prop: 'value', event: 'input' },
 
   props: {
     value: {
@@ -233,7 +230,6 @@ export default {
       default: ''
     },
 
-    // 전체 컨테이너 크기
     width: {
       type: [Number, String],
       default: null
@@ -243,7 +239,6 @@ export default {
       default: null
     },
 
-    // 스크롤 사용 여부 (부모 레이아웃과 독립적으로 동작)
     useHorizontalScroll: {
       type: Boolean,
       default: false
@@ -270,7 +265,6 @@ export default {
 
       idMap: {},
 
-      // 뎁스별 하이라이트 색상
       depthHighlightColors: [
         '#D5383A',
         '#EB702D',
@@ -288,16 +282,13 @@ export default {
         '#E5E0F6'
       ],
 
-      // 컨트롤 기본 최대 너비 (컨트롤별 maxWidth 속성으로 오버라이드 가능)
       defaultMaxWidth: 240,
 
       baseFontColor: '#222222',
       highlightFontColor: '#1E5FCB',
 
-      // 사용 가능한 컨트롤 영역 고정 너비
       availableWidth: null,
 
-      // 정렬 상태
       horizontalAlign: 'flex-start',
       verticalAlign: 'center'
     };
@@ -309,23 +300,12 @@ export default {
     },
 
     containerStyle() {
-      const style = {
+      // 부모 레이아웃 영향 최소화를 위해 height는 여기서 건드리지 않고
+      // width만 지정. 높이는 내부 영역(active/available)이 직접 가짐.
+      return {
+        width: toSize(this.width) || '100%',
         boxSizing: 'border-box'
       };
-
-      const width = toSize(this.width);
-      style.width = width ?? '100%';
-
-      const height = toSize(this.height);
-      if (height) {
-        style.height = height;
-        style.minHeight = height;
-      } else {
-        style.height = 'auto';
-        style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
-      }
-
-      return style;
     },
 
     activeAreaStyle() {
@@ -337,14 +317,14 @@ export default {
         display: 'flex',
         flexDirection: 'column',
         boxSizing: 'border-box',
-        position: 'relative'
+        position: 'relative' // 안내 문구 absolute 기준
       };
 
-      const height = toSize(this.height);
-      if (height) {
-        // 부모 height에 100% 의존하지 않고, 자기 안에서 스크롤 처리
-        style.height = '100%';
-        style.minHeight = 0;
+      const heightValue = toSize(this.height);
+      if (heightValue) {
+        // 컨트롤 체인 높이를 직접 사용 (부모 height:100% 의존 X)
+        style.height = heightValue;
+        style.minHeight = heightValue;
       } else {
         style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
@@ -358,11 +338,11 @@ export default {
 
     availableAreaStyle() {
       const rawWidth = this.availableWidth ?? `${DEFAULT_AVAILABLE_WIDTH}px`;
-      const width = toSize(rawWidth) ?? rawWidth;
+      const widthValue = toSize(rawWidth) ?? rawWidth;
 
       const style = {
-        width,
-        flexBasis: width,
+        width: widthValue,
+        flexBasis: widthValue,
         flexShrink: 0,
         flexGrow: 0,
         padding: '8px',
@@ -373,9 +353,10 @@ export default {
         flexDirection: 'column'
       };
 
-      const height = toSize(this.height);
-      if (height) {
-        style.height = '100%';
+      const heightValue = toSize(this.height);
+      if (heightValue) {
+        style.height = heightValue;
+        style.minHeight = heightValue;
       } else {
         style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
@@ -392,13 +373,21 @@ export default {
         columnGap: '8px',
         flex: '1 1 auto',
         width: '100%',
-        minWidth: 0,
-        minHeight: '140px'
+        minWidth: 0
       };
 
-      // 스크롤 여부와 상관없이 정렬은 항상 horizontalAlign / verticalAlign 사용
+      const heightValue = toSize(this.height);
+      if (heightValue) {
+        // 지정 높이인 경우, 드랍 영역이 꽉 차도록
+        style.minHeight = '100%';
+      } else {
+        // 높이 미지정 시에도 배경 영역에 드롭 가능하도록 기본 높이 확보
+        style.minHeight = '140px';
+      }
+
       style.flexWrap = this.useHorizontalScroll ? 'nowrap' : 'wrap';
       style.justifyContent = this.horizontalAlign;
+
       if (this.useHorizontalScroll) {
         style.alignItems = this.verticalAlign;
       } else {
@@ -442,9 +431,8 @@ export default {
   },
 
   methods: {
-    // ===================== 외부 API =====================
+    // ===== 외부에서 호출 가능한 설정 함수들 =====
 
-    // 뎁스별 테두리 색상 설정
     setHighlightBorderColors(colors) {
       const array = toArray(colors);
       if (array) {
@@ -452,7 +440,6 @@ export default {
       }
     },
 
-    // 뎁스별 배경 색상 설정
     setHighlightBackgroundColors(colors) {
       const array = toArray(colors);
       if (array) {
@@ -460,33 +447,26 @@ export default {
       }
     },
 
-    // 기본 폰트 색상
     setBaseFontColor(color) {
       if (color) {
         this.baseFontColor = color;
       }
     },
 
-    // 호버 시 강조 폰트 색상 (왼쪽 체인에만 적용)
     setHighlightFontColor(color) {
       if (color) {
         this.highlightFontColor = color;
       }
     },
 
-    // 오른쪽 목록 영역 너비
     setAvailableWidth(width) {
-      if (width == null || width === '') {
-        return;
-      }
       if (typeof width === 'number') {
         this.availableWidth = `${width}px`;
-      } else {
+      } else if (width) {
         this.availableWidth = width;
       }
     },
 
-    // 왼쪽 체인 컨트롤들의 가로 정렬
     setHorizontalAlign(mode) {
       const mapped = horizontalMap[mode];
       if (mapped) {
@@ -494,7 +474,6 @@ export default {
       }
     },
 
-    // 왼쪽 체인 컨트롤들의 세로 정렬
     setVerticalAlign(mode) {
       const mapped = verticalMap[mode];
       if (mapped) {
@@ -502,7 +481,7 @@ export default {
       }
     },
 
-    // ===================== 내부 로직 =====================
+    // ===== 내부 로직 =====
 
     getStableId(control) {
       const key = control.key || control.label || 'control';
@@ -551,7 +530,7 @@ export default {
       this.$emit('change', cloned);
     },
 
-    // ===================== 드래그/드롭 핸들러 =====================
+    // ===== 드래그/드롭 이벤트 =====
 
     onActiveChange(event) {
       this.emitChain();
@@ -616,7 +595,7 @@ export default {
       }
     },
 
-    // ===================== 선택 변경 핸들러 =====================
+    // ===== 선택 변경 이벤트 =====
 
     onSingleSelectChange(element, index, value) {
       if (element.selectedValue === value) {
@@ -633,30 +612,30 @@ export default {
     },
 
     onMultiSelectChange(element, index, values) {
-      const next = Array.isArray(values) ? values.slice() : [];
-      const previous = Array.isArray(element.selectedValues)
+      const nextValues = Array.isArray(values) ? values.slice() : [];
+      const previousValues = Array.isArray(element.selectedValues)
         ? element.selectedValues
         : [];
 
       const isSame =
-        previous.length === next.length &&
-        previous.every((item, i) => item === next[i]);
+        previousValues.length === nextValues.length &&
+        previousValues.every((item, position) => item === nextValues[position]);
 
       if (isSame) {
         return;
       }
 
-      element.selectedValues = next;
+      element.selectedValues = nextValues;
       this.emitChain();
       this.$emit('control-selection-change', {
         control: element,
         index,
         type: 'multi',
-        values: next
+        values: nextValues
       });
     },
 
-    // ===================== 스타일 헬퍼 =====================
+    // ===== 스타일 헬퍼 =====
 
     getTextStyle(element, isActiveArea) {
       const isHovered = this.hoveredControlId === element.id;
@@ -671,12 +650,9 @@ export default {
     getContentStyle(index, element) {
       const style = {};
 
-      // 컨트롤별 최대 width (없으면 defaultMaxWidth 사용)
-      const maxWidth = element.maxWidth != null
-        ? element.maxWidth
-        : this.defaultMaxWidth;
-      style.maxWidth =
-        typeof maxWidth === 'number' ? `${maxWidth}px` : maxWidth;
+      const maxWidth =
+        element.maxWidth != null ? element.maxWidth : this.defaultMaxWidth;
+      style.maxWidth = typeof maxWidth === 'number' ? `${maxWidth}px` : maxWidth;
 
       if (this.hoveredControlId === element.id) {
         const colorIndex = index % this.depthHighlightColors.length;
@@ -709,7 +685,6 @@ export default {
   flex-direction: row-reverse;
 }
 
-/* 활성 체인 영역 */
 .control-chain__active {
   position: relative;
   box-sizing: border-box;
@@ -717,13 +692,9 @@ export default {
 
 .control-chain__draggable {
   width: 100%;
-  /* 부모 height에 100% 의존하지 않도록 auto + min-height로 고정 */
-  height: auto;
-  min-height: 140px;
-  box-sizing: border-box;
+  height: 100%;
 }
 
-/* 사용 가능한 컨트롤 영역 */
 .control-chain__available {
   box-sizing: border-box;
 }
@@ -750,7 +721,6 @@ export default {
   margin-top: 4px;
 }
 
-/* 공통 아이템/컨트롤 */
 .control-chain__item {
   display: flex;
   align-items: center;
@@ -760,7 +730,6 @@ export default {
   margin-right: 4px;
 }
 
-/* 컨트롤 박스 */
 .control-chain__content {
   border: 1px solid #e4e4e4;
   padding: 6px 8px;
@@ -813,7 +782,6 @@ export default {
   width: 11px;
 }
 
-/* 바디 */
 .control-chain__body {
   display: flex;
   align-items: stretch;
@@ -838,7 +806,7 @@ export default {
   box-sizing: border-box;
 }
 
-/* 안내 문구: 드랍 방해하지 않도록 pointer-events: none */
+/* 비어 있을 때 안내 문구: 드롭 방해 안 하도록 absolute */
 .control-chain__empty {
   font-size: 12px;
   position: absolute;
@@ -850,7 +818,6 @@ export default {
   text-align: center;
 }
 
-/* 오른쪽 목록 아이템 */
 .control-chain__available-content {
   border: 1px solid #e0e0e0;
   padding: 4px 6px;
