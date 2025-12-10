@@ -290,7 +290,6 @@ export default {
 
       availableWidth: null,
 
-      // 정렬 (외부에서 setHorizontalAlign / setVerticalAlign으로 변경)
       horizontalAlign: 'flex-start',
       verticalAlign: 'center'
     };
@@ -327,23 +326,18 @@ export default {
         background: '#ffffff',
         display: 'flex',
         flexDirection: 'column',
-        boxSizing: 'border-box'
+        boxSizing: 'border-box',
+        minHeight: `${DEFAULT_MIN_HEIGHT}px`
       };
 
-      const hasHeight = !!this.height;
-
-      if (hasHeight) {
-        // 컨테이너의 height를 기준으로 채움
+      const heightValue = toSize(this.height);
+      if (heightValue) {
         style.height = '100%';
       } else {
         style.height = 'auto';
-        style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
       }
 
-      // 세로 스크롤 여부
       style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
-
-      // 가로 스크롤 여부
       style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
 
       return style;
@@ -365,20 +359,17 @@ export default {
         background: '#ffffff',
         boxSizing: 'border-box',
         display: 'flex',
-        flexDirection: 'column'
+        flexDirection: 'column',
+        minHeight: `${DEFAULT_MIN_HEIGHT}px`
       };
 
-      const hasHeight = !!this.height;
-
-      if (hasHeight) {
+      const heightValue = toSize(this.height);
+      if (heightValue) {
         style.height = '100%';
       } else {
         style.height = 'auto';
-        style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
       }
 
-      // 오른쪽 목록은 항상 세로 스크롤 허용 (내용 많을 수 있으니까)
-      // 실제 스크롤 동작은 내부 wrapper가 담당
       return style;
     },
 
@@ -389,28 +380,22 @@ export default {
         rowGap: '6px',
         columnGap: '8px',
         flex: '1 1 auto',
-        minHeight: `${DEFAULT_MIN_HEIGHT - 16}px`, // 패딩 제외한 최소 드롭 영역
+        width: '100%',
         minWidth: 0
       };
 
-      if (this.useHorizontalScroll) {
-        // 가로 스크롤: 한 줄 배치 + 내용에 따라 확장
-        style.flexWrap = 'nowrap';
-        style.width = 'max-content';
-        style.minWidth = '100%';
-      } else {
-        // 줄바꿈 허용
-        style.flexWrap = 'wrap';
-        style.width = '100%';
-      }
+      // 🔹 가로 스크롤 여부에 따라 wrap 방식만 변경
+      style.flexWrap = this.useHorizontalScroll ? 'nowrap' : 'wrap';
 
-      // 정렬은 스크롤 여부와 관계없이 항상 옵션 사용
+      // 🔹 정렬은 스크롤 여부와 상관없이 항상 옵션 사용
       style.justifyContent = this.horizontalAlign;
 
-      // 한 줄일 때는 alignItems, 여러 줄일 때는 alignContent가 핵심
+      // 한 줄 / 여러 줄에 따라 세로 정렬 대상 다름
       if (this.useHorizontalScroll) {
+        // 대부분 한 줄 → alignItems 사용
         style.alignItems = this.verticalAlign;
       } else {
+        // 여러 줄 래핑 → alignContent 사용
         style.alignContent = this.verticalAlign;
       }
 
@@ -832,7 +817,6 @@ export default {
   font-size: 12px;
 }
 
-/* 오른쪽 목록 아이템 */
 .control-chain__available-content {
   border: 1px solid #e0e0e0;
   padding: 4px 6px;
@@ -852,6 +836,7 @@ export default {
   font-size: 12px;
 }
 </style>
+
 
 
 
