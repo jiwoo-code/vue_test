@@ -1,7 +1,6 @@
-
 <!--
   필요한 라이브러리
-  - vuedraggable (Sortable.js 기반)  
+  - vuedraggable (Sortable.js 기반)
     npm install vuedraggable sortablejs
     yarn add vuedraggable sortablejs
 -->
@@ -237,8 +236,8 @@ export default {
 
       availableWidth: null,
 
-      horizontalAlign: 'flex-start',
-      verticalAlign: 'center'
+      horizontalAlign: 'flex-start', // left|center|right → flex 값
+      verticalAlign: 'center'        // top|center|bottom → flex 값
     };
   },
 
@@ -319,7 +318,7 @@ export default {
       return style;
     },
 
-    /* 🔥 수정된 부분 — height 사용 여부와 상관없이 verticalAlign을 반영하도록 변경 */
+    /* 🔧 가로/세로 정렬 모두 horizontalAlign / verticalAlign을 항상 사용 */
     activeDraggableStyle() {
       const style = {
         display: 'flex',
@@ -330,32 +329,31 @@ export default {
       };
 
       if (this.shouldUseHorizontalScroll) {
-        // 가로 스크롤 사용
+        // 가로 스크롤 사용: 한 줄로 나열, 정렬은 옵션값 사용
         style.flexWrap = 'nowrap';
         style.width = 'max-content';
         style.minWidth = '100%';
         style.minHeight = 0;
 
-        // 항상 verticalAlign 적용
+        style.justifyContent = this.horizontalAlign;
         style.alignItems = this.verticalAlign;
-        style.justifyContent = 'flex-start';
-
       } else {
-        // 가로 스크롤 미사용
+        // 가로 스크롤 미사용: 줄바꿈 허용, 정렬은 그대로 사용
         style.flexWrap = 'wrap';
         style.width = '100%';
         style.minWidth = 0;
         style.minHeight = 0;
 
-        // 항상 verticalAlign 적용
-        style.alignContent = this.verticalAlign;
         style.justifyContent = this.horizontalAlign;
+        style.alignContent = this.verticalAlign;
       }
 
       return style;
     },
 
-    emptyGuideTextStyle() { return { color: '#999' }; },
+    emptyGuideTextStyle() {
+      return { color: '#999' };
+    },
 
     availableTitleTextStyle() {
       return {
@@ -366,8 +364,14 @@ export default {
   },
 
   watch: {
-    value: { handler() { this.buildControls(); }, deep: true },
-    controlTemplates: { handler() { this.buildControls(); }, deep: true }
+    value: {
+      handler() { this.buildControls(); },
+      deep: true
+    },
+    controlTemplates: {
+      handler() { this.buildControls(); },
+      deep: true
+    }
   },
 
   created() {
@@ -375,7 +379,7 @@ export default {
   },
 
   methods: {
-    /* ========================= Public API ========================= */
+    // ========================= Public API =========================
 
     setHighlightBorderColors(colors) {
       const arr = toArray(colors);
@@ -387,8 +391,13 @@ export default {
       if (arr) this.depthHighlightBgColors = arr;
     },
 
-    setBaseFontColor(color) { if (color) this.baseFontColor = color; },
-    setHighlightFontColor(color) { if (color) this.highlightFontColor = color; },
+    setBaseFontColor(color) {
+      if (color) this.baseFontColor = color;
+    },
+
+    setHighlightFontColor(color) {
+      if (color) this.highlightFontColor = color;
+    },
 
     setAvailableWidth(width) {
       if (typeof width === 'number') this.availableWidth = `${width}px`;
@@ -396,16 +405,16 @@ export default {
     },
 
     setHorizontalAlign(mode) {
-      const m = horizontalMap[mode];
-      if (m) this.horizontalAlign = m;
+      const mapped = horizontalMap[mode];
+      if (mapped) this.horizontalAlign = mapped;
     },
 
     setVerticalAlign(mode) {
-      const m = verticalMap[mode];
-      if (m) this.verticalAlign = m;
+      const mapped = verticalMap[mode];
+      if (mapped) this.verticalAlign = mapped;
     },
 
-    /* ========================= 내부 로직 ========================= */
+    // ========================= 내부 로직 =========================
 
     getStableId(control) {
       const key = control.key || control.label;
@@ -416,29 +425,29 @@ export default {
     },
 
     buildControls() {
-      const val = Array.isArray(this.value) ? this.value : [];
-      const templates = Array.isArray(this.controlTemplates)
+      const valueArray = Array.isArray(this.value) ? this.value : [];
+      const templateArray = Array.isArray(this.controlTemplates)
         ? this.controlTemplates
         : [];
 
-      const used = new Set(val.map(c => c.key));
+      const usedKeys = new Set(valueArray.map(item => item.key));
 
-      this.activeControls = val.map(c => ({
-        ...c,
-        id: c.id || this.getStableId(c)
+      this.activeControls = valueArray.map(control => ({
+        ...control,
+        id: control.id || this.getStableId(control)
       }));
 
-      this.availableControls = templates
-        .filter(t => !used.has(t.key))
-        .map(t => ({
-          ...t,
-          id: t.id || this.getStableId(t)
+      this.availableControls = templateArray
+        .filter(template => !usedKeys.has(template.key))
+        .map(template => ({
+          ...template,
+          id: template.id || this.getStableId(template)
         }));
     },
 
     emitChain() {
-      const cloned = this.activeControls.map(c => {
-        const obj = { ...c };
+      const cloned = this.activeControls.map(control => {
+        const obj = { ...control };
         if (Array.isArray(obj.selectedValues)) {
           obj.selectedValues = obj.selectedValues.slice();
         }
@@ -449,7 +458,7 @@ export default {
       this.$emit('change', cloned);
     },
 
-    /* =================== Drag & Drop =================== */
+    // =================== Drag & Drop ===================
 
     onActiveChange(event) {
       this.emitChain();
@@ -501,14 +510,17 @@ export default {
       if (this.showCloseControlId === element.id) this.showCloseControlId = null;
     },
 
-    /* =================== 선택 변경 =================== */
+    // =================== 선택 변경 ===================
 
     onSingleSelectChange(element, index, value) {
       if (element.selectedValue === value) return;
       element.selectedValue = value;
       this.emitChain();
       this.$emit('control-selection-change', {
-        control: element, index, type: 'single', value
+        control: element,
+        index,
+        type: 'single',
+        value
       });
     },
 
@@ -526,29 +538,34 @@ export default {
       element.selectedValues = next;
       this.emitChain();
       this.$emit('control-selection-change', {
-        control: element, index, type: 'multi', values: next
+        control: element,
+        index,
+        type: 'multi',
+        values: next
       });
     },
 
-    /* =================== 스타일 =================== */
+    // =================== 스타일 ===================
 
-    getTextStyle(element, isActive) {
-      const hover = this.hoveredControlId === element.id;
+    getTextStyle(element, isActiveArea) {
+      const isHovered = this.hoveredControlId === element.id;
       return {
-        color: isActive && hover ? this.highlightFontColor : this.baseFontColor
+        color: isActiveArea && isHovered
+          ? this.highlightFontColor
+          : this.baseFontColor
       };
     },
 
     getContentStyle(index, element) {
       const style = {};
 
-      const maxW = element.maxWidth ?? this.defaultMaxWidth;
-      style.maxWidth = typeof maxW === 'number' ? `${maxW}px` : maxW;
+      const maxWidth = element.maxWidth ?? this.defaultMaxWidth;
+      style.maxWidth = typeof maxWidth === 'number' ? `${maxWidth}px` : maxWidth;
 
       if (this.hoveredControlId === element.id) {
-        const i = index % this.depthHighlightColors.length;
-        style.borderColor = this.depthHighlightColors[i];
-        style.backgroundColor = this.depthHighlightBgColors[i];
+        const colorIndex = index % this.depthHighlightColors.length;
+        style.borderColor = this.depthHighlightColors[colorIndex];
+        style.backgroundColor = this.depthHighlightBgColors[colorIndex];
       }
 
       return style;
@@ -622,7 +639,7 @@ export default {
   background: #ffffff;
   min-width: 180px;
   min-height: 44px;
-  transition: background-color 0.15s, border-color 0.15s;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
   display: flex;
   flex-direction: column;
 }
@@ -702,7 +719,7 @@ export default {
   align-items: center;
   gap: 4px;
   background: #ffffff;
-  transition: background-color 0.12s, border-color 0.12s;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
 .control-chain__available-content:hover {
@@ -714,7 +731,6 @@ export default {
   font-size: 12px;
 }
 </style>
-
 
 
 
