@@ -1,1109 +1,78 @@
-<!--
-  필요한 라이브러리
-  - vuedraggable (Sortable.js 기반)
-    npm install vuedraggable sortablejs
-    yarn add vuedraggable sortablejs
--->
-
 <template>
-  <div
-    class="control-chain"
-    :class="layoutClass"
-    :style="containerStyle"
-  >
-    <!-- 활성 체인 영역 (왼쪽) -->
-    <div
-      class="control-chain__active"
-      :style="activeAreaStyle"
-    >
-      <draggable
-        :list="activeControls"
-        :group="dragGroup"
-        item-key="id"
-        class="control-chain__draggable"
-        :style="activeDraggableStyle"
-        :handle="dragHandleSelector"
-        @change="onActiveChange"
-      >
-        <div
-          v-for="(element, index) in activeControls"
-          :key="element.id"
-          class="control-chain__item"
-        >
-          <span
-            v-if="index > 0"
-            class="control-chain__separator"
-          >
-            >>
-          </span>
-
-          <div
-            class="control-chain__content"
-            :style="getContentStyle(index, element)"
-          >
-            <!-- 타이틀 + 드래그핸들 + 삭제버튼 -->
-            <div
-              class="control-chain__header"
-              @mouseenter="onControlMouseEnter(element)"
-              @mouseleave="onControlMouseLeave(element)"
-            >
-              <div class="control-chain__header-left">
-                <span class="control-chain__drag-handle">≡</span>
-
-                <span
-                  class="control-chain__title"
-                  :style="getTextStyle(element, true)"
-                >
-                  {{ element.label }}
-                </span>
-              </div>
-
-              <button
-                type="button"
-                class="control-chain__close-button"
-                :style="{ visibility: showCloseControlId === element.id ? 'visible' : 'hidden' }"
-                @click.stop="removeControlById(element.id)"
-              >
-                ✕
-              </button>
-            </div>
-
-            <!-- 컨트롤 바디 -->
-            <div class="control-chain__body">
-              <ur-dropdown
-                v-if="element.type === 'single'"
-                class="control-chain__dropdown"
-                sm
-                v-model="element.selectedValue"
-                :items="element.items"
-                @input="onSingleSelectChange(element, index, $event)"
-              />
-
-              <ur-multi-dropdown
-                v-else-if="element.type === 'multi'"
-                class="control-chain__dropdown"
-                sm
-                v-model="element.selectedValues"
-                :items="element.items"
-                @input="onMultiSelectChange(element, index, $event)"
-              />
-
-              <!-- 라벨 컨트롤 -->
-              <span
-                v-else
-                class="control-chain__label-value"
-                :style="{ color: baseFontColor }"
-              >
-                {{ element.displayValue || '-' }}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 활성 컨트롤이 없을 때 안내 문구 (여기에도 드롭 가능) -->
-        <div
-          v-if="!activeControls.length"
-          class="control-chain__empty"
-          :style="emptyGuideTextStyle"
-        >
-          {{ emptyGuideText }}
-        </div>
-      </draggable>
-    </div>
-
-    <!-- 사용 가능한 컨트롤 영역 -->
-    <div
-      class="control-chain__available"
-      :style="availableAreaStyle"
-    >
-      <div
-        v-if="availableTitle"
-        class="control-chain__available-title"
-        :style="availableTitleTextStyle"
-      >
-        {{ availableTitle }}
-      </div>
-
-      <div class="control-chain__available-list-wrapper">
-        <draggable
-          :list="availableControls"
-          :group="dragGroup"
-          item-key="id"
-          class="control-chain__available-list"
-          :handle="dragHandleSelector"
-        >
-          <li
-            v-for="element in availableControls"
-            :key="element.id"
-            class="control-chain__available-item"
-          >
-            <div
-              class="control-chain__available-content"
-              @mouseenter="onControlMouseEnter(element)"
-              @mouseleave="onControlMouseLeave(element)"
-            >
-              <span class="control-chain__drag-handle control-chain__drag-handle--small">
-                ≡
-              </span>
-
-              <span
-                class="control-chain__available-label"
-                :style="getTextStyle(element, false)"
-              >
-                {{ element.label }}
-              </span>
-            </div>
-          </li>
-        </draggable>
-      </div>
-    </div>
-  </div>
-</template>
-
-<script>
-import draggable from 'vuedraggable';
-
-const DEFAULT_MIN_HEIGHT = 260;
-const DEFAULT_AVAILABLE_WIDTH = 220;
-
-const toSize = (value) => {
-  if (value == null || value === '') {
-    return undefined;
-  }
-  return typeof value === 'number' ? `${value}px` : value;
-};
-
-const toArray = (input) => {
-  if (!input) {
-    return null;
-  }
-  if (Array.isArray(input)) {
-    return input.length ? input.slice() : null;
-  }
-  return [input];
-};
-
-const horizontalMap = {
-  left: 'flex-start',
-  center: 'center',
-  right: 'flex-end'
-};
-
-const verticalMap = {
-  top: 'flex-start',
-  center: 'center',
-  bottom: 'flex-end'
-};
-
-export default {
-  name: 'ControlChain',
-  components: { draggable },
-
-  model: { prop: 'value', event: 'input' },
-
-  props: {
-    value: {
-      type: Array,
-      default() {
-        return [];
-      }
-    },
-    controlTemplates: {
-      type: Array,
-      required: true
-    },
-    availablePlacement: {
-      type: String,
-      default: 'right',
-      validator(v) {
-        return v === 'right' || v === 'left';
-      }
-    },
-    emptyGuideText: {
-      type: String,
-      default: '목록에서 드래그하여 추가해 주세요.'
-    },
-    availableTitle: {
-      type: String,
-      default: ''
-    },
-
-    // 전체 컨트롤 체인 영역 크기
-    width: {
-      type: [Number, String],
-      default: null
-    },
-    height: {
-      type: [Number, String],
-      default: null
-    },
-
-    // 스크롤 사용 여부 (뎁스 영역 기준)
-    useHorizontalScroll: {
-      type: Boolean,
-      default: false
-    },
-    useVerticalScroll: {
-      type: Boolean,
-      default: false
-    }
-  },
-
-  data() {
-    return {
-      activeControls: [],
-      availableControls: [],
-
-      dragGroup: {
-        name: 'control-chain',
-        pull: true,
-        put: true
-      },
-      dragHandleSelector: '.control-chain__drag-handle',
-
-      hoveredControlId: null,
-      showCloseControlId: null,
-
-      idMap: {},
-
-      depthHighlightColors: [
-        '#D5383A',
-        '#EB702D',
-        '#FBB41A',
-        '#2DA379',
-        '#1E5FCB',
-        '#553CA5'
-      ],
-      depthHighlightBgColors: [
-        '#F8DDDF',
-        '#FAE2D4',
-        '#FFF0C8',
-        '#E0F0E8',
-        '#E0EBFA',
-        '#E5E0F6'
-      ],
-
-      defaultMaxWidth: 240,
-
-      baseFontColor: '#222222',
-      highlightFontColor: '#1E5FCB',
-
-      availableWidth: null,
-
-      horizontalAlign: 'flex-start',
-      verticalAlign: 'center'
-    };
-  },
-
-  computed: {
-    layoutClass() {
-      return `control-chain--available-${this.availablePlacement}`;
-    },
-
-    containerStyle() {
-      const style = {
-        width: toSize(this.width) || '100%',
-        boxSizing: 'border-box'
-      };
-
-      const heightValue = toSize(this.height);
-      if (heightValue) {
-        style.height = heightValue;
-        style.minHeight = heightValue;
-      } else {
-        style.height = 'auto';
-        style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
-      }
-
-      return style;
-    },
-
-    activeAreaStyle() {
-      const style = {
-        flex: '1 1 auto',
-        padding: '8px',
-        border: '1px solid #e5e5e5',
-        background: '#ffffff',
-        display: 'flex',
-        flexDirection: 'column',
-        boxSizing: 'border-box',
-        minHeight: `${DEFAULT_MIN_HEIGHT}px`
-      };
-
-      const heightValue = toSize(this.height);
-      if (heightValue) {
-        style.height = '100%';
-      } else {
-        style.height = 'auto';
-      }
-
-      style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
-      style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
-
-      return style;
-    },
-
-    availableAreaStyle() {
-      const rawWidth = this.availableWidth != null
-        ? this.availableWidth
-        : `${DEFAULT_AVAILABLE_WIDTH}px`;
-      const widthValue = toSize(rawWidth) || rawWidth;
-
-      const style = {
-        width: widthValue,
-        flexBasis: widthValue,
-        flexShrink: 0,
-        flexGrow: 0,
-        padding: '8px',
-        border: '1px solid #e5e5e5',
-        background: '#ffffff',
-        boxSizing: 'border-box',
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: `${DEFAULT_MIN_HEIGHT}px`
-      };
-
-      const heightValue = toSize(this.height);
-      if (heightValue) {
-        style.height = '100%';
-      } else {
-        style.height = 'auto';
-      }
-
-      return style;
-    },
-
-    activeDraggableStyle() {
-      const style = {
-        display: 'flex',
-        boxSizing: 'border-box',
-        rowGap: '6px',
-        columnGap: '8px',
-        flex: '1 1 auto',
-        width: '100%',
-        minWidth: 0
-      };
-
-      // 🔹 가로 스크롤 여부에 따라 wrap 방식만 변경
-      style.flexWrap = this.useHorizontalScroll ? 'nowrap' : 'wrap';
-
-      // 🔹 정렬은 스크롤 여부와 상관없이 항상 옵션 사용
-      style.justifyContent = this.horizontalAlign;
-
-      // 한 줄 / 여러 줄에 따라 세로 정렬 대상 다름
-      if (this.useHorizontalScroll) {
-        // 대부분 한 줄 → alignItems 사용
-        style.alignItems = this.verticalAlign;
-      } else {
-        // 여러 줄 래핑 → alignContent 사용
-        style.alignContent = this.verticalAlign;
-      }
-
-      return style;
-    },
-
-    emptyGuideTextStyle() {
-      return {
-        color: '#999999'
-      };
-    },
-
-    availableTitleTextStyle() {
-      return {
-        color: this.baseFontColor,
-        fontWeight: '600'
-      };
-    }
-  },
-
-  watch: {
-    value: {
-      handler() {
-        this.buildControls();
-      },
-      deep: true
-    },
-    controlTemplates: {
-      handler() {
-        this.buildControls();
-      },
-      deep: true
-    }
-  },
-
-  created() {
-    this.buildControls();
-  },
-
-  methods: {
-    // ========================= Public API =========================
-
-    setHighlightBorderColors(colors) {
-      const array = toArray(colors);
-      if (array) {
-        this.depthHighlightColors = array;
-      }
-    },
-
-    setHighlightBackgroundColors(colors) {
-      const array = toArray(colors);
-      if (array) {
-        this.depthHighlightBgColors = array;
-      }
-    },
-
-    setBaseFontColor(color) {
-      if (color) {
-        this.baseFontColor = color;
-      }
-    },
-
-    setHighlightFontColor(color) {
-      if (color) {
-        this.highlightFontColor = color;
-      }
-    },
-
-    setAvailableWidth(width) {
-      if (typeof width === 'number') {
-        this.availableWidth = `${width}px`;
-      } else if (width) {
-        this.availableWidth = width;
-      }
-    },
-
-    setHorizontalAlign(mode) {
-      const mapped = horizontalMap[mode];
-      if (mapped) {
-        this.horizontalAlign = mapped;
-      }
-    },
-
-    setVerticalAlign(mode) {
-      const mapped = verticalMap[mode];
-      if (mapped) {
-        this.verticalAlign = mapped;
-      }
-    },
-
-    // ========================= 내부 로직 =========================
-
-    getStableId(control) {
-      const baseKey = control.key || control.label || 'control';
-      if (!this.idMap[baseKey]) {
-        this.idMap[baseKey] = `${baseKey}-${Math.random().toString(36).slice(2, 8)}`;
-      }
-      return this.idMap[baseKey];
-    },
-
-    buildControls() {
-      const valueArray = Array.isArray(this.value) ? this.value : [];
-      const templateArray = Array.isArray(this.controlTemplates)
-        ? this.controlTemplates
-        : [];
-
-      const usedKeys = new Set(
-        valueArray
-          .map(control => control.key)
-          .filter(key => key != null)
-      );
-
-      this.activeControls = valueArray.map(control => ({
-        ...control,
-        id: control.id || this.getStableId(control)
-      }));
-
-      this.availableControls = templateArray
-        .filter(template => !usedKeys.has(template.key))
-        .map(template => ({
-          ...template,
-          id: template.id || this.getStableId(template)
-        }));
-    },
-
-    emitChain() {
-      const cloned = this.activeControls.map(control => {
-        const clone = { ...control };
-        if (Array.isArray(clone.selectedValues)) {
-          clone.selectedValues = clone.selectedValues.slice();
-        }
-        delete clone.id;
-        return clone;
-      });
-
-      this.$emit('input', cloned);
-      this.$emit('change', cloned);
-    },
-
-    // =================== Drag & Drop ===================
-
-    onActiveChange(event) {
-      this.emitChain();
-
-      if (event.added) {
-        this.$emit('control-added', {
-          control: event.added.element,
-          index: event.added.newIndex
-        });
-      }
-
-      if (event.moved) {
-        this.$emit('control-depth-change', {
-          control: event.moved.element,
-          oldIndex: event.moved.oldIndex,
-          newIndex: event.moved.newIndex
-        });
-      }
-
-      if (event.removed) {
-        this.$emit('control-removed', {
-          control: event.removed.element,
-          index: event.removed.oldIndex
-        });
-      }
-    },
-
-    removeControlById(id) {
-      const index = this.activeControls.findIndex(control => control.id === id);
-      if (index < 0) {
-        return;
-      }
-
-      const removed = this.activeControls.splice(index, 1)[0];
-      this.availableControls.push(removed);
-
-      if (this.hoveredControlId === id) {
-        this.hoveredControlId = null;
-      }
-      if (this.showCloseControlId === id) {
-        this.showCloseControlId = null;
-      }
-
-      this.emitChain();
-      this.$emit('control-removed', {
-        control: removed,
-        index
-      });
-    },
-
-    onControlMouseEnter(element) {
-      this.hoveredControlId = element.id;
-      this.showCloseControlId = element.id;
-    },
-
-    onControlMouseLeave(element) {
-      if (this.hoveredControlId === element.id) {
-        this.hoveredControlId = null;
-      }
-      if (this.showCloseControlId === element.id) {
-        this.showCloseControlId = null;
-      }
-    },
-
-    // =================== 선택 변경 ===================
-
-    onSingleSelectChange(element, index, value) {
-      if (element.selectedValue === value) {
-        return;
-      }
-      element.selectedValue = value;
-      this.emitChain();
-      this.$emit('control-selection-change', {
-        control: element,
-        index,
-        type: 'single',
-        value
-      });
-    },
-
-    onMultiSelectChange(element, index, values) {
-      const next = Array.isArray(values) ? values.slice() : [];
-      const previous = Array.isArray(element.selectedValues)
-        ? element.selectedValues
-        : [];
-
-      const isSame =
-        previous.length === next.length &&
-        previous.every((item, position) => item === next[position]);
-
-      if (isSame) {
-        return;
-      }
-
-      element.selectedValues = next;
-      this.emitChain();
-      this.$emit('control-selection-change', {
-        control: element,
-        index,
-        type: 'multi',
-        values: next
-      });
-    },
-
-    // =================== 스타일 ===================
-
-    getTextStyle(element, isActiveArea) {
-      const isHovered = this.hoveredControlId === element.id;
-      const color =
-        isActiveArea && isHovered ? this.highlightFontColor : this.baseFontColor;
-
-      return { color };
-    },
-
-    getContentStyle(index, element) {
-      const style = {};
-
-      const maxWidth =
-        element.maxWidth != null ? element.maxWidth : this.defaultMaxWidth;
-      style.maxWidth = typeof maxWidth === 'number' ? `${maxWidth}px` : maxWidth;
-
-      if (this.hoveredControlId === element.id) {
-        const borderIndex = index % this.depthHighlightColors.length;
-        const backgroundIndex = index % this.depthHighlightBgColors.length;
-        style.borderColor = this.depthHighlightColors[borderIndex];
-        style.backgroundColor = this.depthHighlightBgColors[backgroundIndex];
-      }
-
-      return style;
-    }
-  }
-};
-</script>
-
-<style scoped>
-.control-chain {
-  display: flex;
-  gap: 16px;
-  align-items: stretch;
-  background: #fafafa;
-  border: 1px solid #e5e5e5;
-  padding: 8px;
-  box-sizing: border-box;
-}
-
-.control-chain--available-right {
-  flex-direction: row;
-}
-
-.control-chain--available-left {
-  flex-direction: row-reverse;
-}
-
-/* 활성 체인 영역 */
-.control-chain__active {
-  position: relative;
-  box-sizing: border-box;
-}
-
-.control-chain__draggable {
-  width: 100%;
-  height: 100%;
-}
-
-/* 사용 가능한 컨트롤 영역 */
-.control-chain__available {
-  box-sizing: border-box;
-}
-
-.control-chain__available-title {
-  margin-bottom: 8px;
-  font-weight: bold;
-  font-size: 12px;
-}
-
-.control-chain__available-list-wrapper {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.control-chain__available-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  height: 100%;
-}
-
-.control-chain__available-item + .control-chain__available-item {
-  margin-top: 4px;
-}
-
-/* 공통 아이템/컨트롤 스타일 */
-.control-chain__item {
-  display: flex;
-  align-items: center;
-}
-
-.control-chain__separator {
-  margin-right: 4px;
-}
-
-/* 컨트롤 박스 */
-.control-chain__content {
-  border: 1px solid #e4e4e4;
-  padding: 6px 8px;
-  background: #ffffff;
-  min-width: 180px;
-  min-height: 44px;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
-  display: flex;
-  flex-direction: column;
-}
-
-.control-chain__header {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 4px;
-  align-items: center;
-}
-
-.control-chain__header-left {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.control-chain__title {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.control-chain__close-button {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font-size: 12px;
-  width: 12px;
-  height: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.control-chain__drag-handle {
-  cursor: grab;
-  font-size: 12px;
-  width: 12px;
-}
-
-.control-chain__drag-handle--small {
-  font-size: 11px;
-  width: 11px;
-}
-
-.control-chain__body {
-  display: flex;
-  align-items: stretch;
-  gap: 4px;
-  min-height: 24px;
-}
-
-.control-chain__dropdown {
-  width: 100%;
-}
-
-.control-chain__label-value {
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  width: 100%;
-  min-height: 26px;
-  padding: 3px 6px;
-  background: #ffffff;
-  border: 1px solid #d9d9d9;
-  box-sizing: border-box;
-}
-
-.control-chain__empty {
-  font-size: 12px;
-}
-
-.control-chain__available-content {
-  border: 1px solid #e0e0e0;
-  padding: 4px 6px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: #ffffff;
-  transition: background-color 0.12s ease, border-color 0.12s ease;
-}
-
-.control-chain__available-content:hover {
-  background: #f7f7f7;
-  border-color: #d0d0d0;
-}
-
-.control-chain__available-label {
-  font-size: 12px;
-}
-</style>
-
-
-
-
-
-
-
-
-
-
-
-<template>
-  <div class="control-chain-demo">
-    <!-- 설정 패널 -->
-    <div class="demo-panel">
-      <h3 class="demo-panel__title">ControlChain Demo</h3>
-
-      <!-- width -->
-      <div class="demo-panel__row">
-        <label class="demo-panel__label">
-          고정 width 사용
+  <div class="demo-wrapper">
+    <h3>ControlChain Demo (latest)</h3>
+
+    <!-- 옵션 패널 -->
+    <div class="demo-controls">
+      <div class="demo-controls__row">
+        <label>
+          width:
           <input
-            type="checkbox"
-            v-model="useFixedWidth"
+            type="number"
+            v-model.number="widthInput"
+            placeholder="예: 900"
           />
         </label>
-        <input
-          v-if="useFixedWidth"
-          type="number"
-          class="demo-panel__input"
-          v-model.number="fixedWidth"
-          min="400"
-          step="50"
-        />
-        <span
-          v-if="useFixedWidth"
-          class="demo-panel__suffix"
-        >
-          px
-        </span>
-      </div>
 
-      <!-- height -->
-      <div class="demo-panel__row">
-        <label class="demo-panel__label">
-          고정 height 사용
+        <label>
+          height:
           <input
-            type="checkbox"
-            v-model="useFixedHeight"
+            type="number"
+            v-model.number="heightInput"
+            placeholder="예: 260"
           />
         </label>
-        <input
-          v-if="useFixedHeight"
-          type="number"
-          class="demo-panel__input"
-          v-model.number="fixedHeight"
-          min="220"
-          step="20"
-        />
-        <span
-          v-if="useFixedHeight"
-          class="demo-panel__suffix"
-        >
-          px
-        </span>
-      </div>
 
-      <!-- 가로/세로 스크롤 -->
-      <div class="demo-panel__section-title">
-        스크롤 옵션 (뎁스 영역)
-      </div>
-
-      <div class="demo-panel__row">
-        <label class="demo-panel__label">
-          가로 스크롤 사용
+        <label>
+          가로 스크롤:
+          <input
+            type="checkbox"
+            v-model="useHorizontalScroll"
+          />
         </label>
-        <input
-          type="checkbox"
-          v-model="useHorizontalScroll"
-        />
-      </div>
 
-      <div class="demo-panel__row">
-        <label class="demo-panel__label">
-          세로 스크롤 사용
-        </label>
-        <input
-          type="checkbox"
-          v-model="useVerticalScroll"
-        />
-      </div>
-
-      <!-- 오른쪽 목록 width -->
-      <div class="demo-panel__section-title">
-        레이아웃
-      </div>
-
-      <div class="demo-panel__row">
-        <label class="demo-panel__label">
-          목록 영역 width
-        </label>
-        <input
-          type="number"
-          class="demo-panel__input"
-          v-model.number="availableWidth"
-          min="160"
-          step="20"
-        />
-        <span class="demo-panel__suffix">px</span>
-        <button
-          type="button"
-          class="demo-panel__button"
-          @click="applyAvailableWidth"
-        >
-          적용
-        </button>
-      </div>
-
-      <!-- 목록 위치 -->
-      <div class="demo-panel__row">
-        <label class="demo-panel__label">
-          컨트롤 목록 위치
-        </label>
-        <select
-          v-model="availablePlacement"
-          class="demo-panel__select"
-        >
-          <option value="right">오른쪽</option>
-          <option value="left">왼쪽</option>
-        </select>
-      </div>
-
-      <!-- 타이틀 / 안내문구 -->
-      <div class="demo-panel__row">
-        <label class="demo-panel__label">
-          목록 타이틀
+        <label>
+          세로 스크롤:
+          <input
+            type="checkbox"
+            v-model="useVerticalScroll"
+          />
         </label>
       </div>
-      <div class="demo-panel__row demo-panel__row--block">
-        <input
-          type="text"
-          class="demo-panel__input demo-panel__input--full"
-          v-model="availableTitle"
-          placeholder="예: 사용 가능한 컨트롤"
-        />
-      </div>
 
-      <div class="demo-panel__row">
-        <label class="demo-panel__label">
-          빈 체인 안내 문구
+      <div class="demo-controls__row">
+        <label>
+          목록 위치:
+          <select v-model="availablePlacement">
+            <option value="right">오른쪽</option>
+            <option value="left">왼쪽</option>
+          </select>
         </label>
-      </div>
-      <div class="demo-panel__row demo-panel__row--block">
-        <input
-          type="text"
-          class="demo-panel__input demo-panel__input--full"
-          v-model="emptyGuideText"
-          placeholder="예: 목록에서 드래그하여 추가해 주세요."
-        />
-      </div>
 
-      <!-- 정렬 -->
-      <div class="demo-panel__section-title">
-        정렬
-      </div>
+        <label>
+          목록 타이틀:
+          <input
+            type="text"
+            v-model="availableTitle"
+            placeholder="사용 가능한 컨트롤"
+          />
+        </label>
 
-      <div class="demo-panel__row">
-        <span class="demo-panel__label demo-panel__label--small">
-          가로 정렬
-        </span>
-        <select
-          v-model="horizontalMode"
-          class="demo-panel__select"
-          @change="applyHorizontalAlign"
-        >
-          <option value="left">left</option>
-          <option value="center">center</option>
-          <option value="right">right</option>
-        </select>
-      </div>
-
-      <div class="demo-panel__row">
-        <span class="demo-panel__label demo-panel__label--small">
-          세로 정렬
-        </span>
-        <select
-          v-model="verticalMode"
-          class="demo-panel__select"
-          @change="applyVerticalAlign"
-        >
-          <option value="top">top</option>
-          <option value="center">center</option>
-          <option value="bottom">bottom</option>
-        </select>
-      </div>
-
-      <!-- 폰트 컬러 -->
-      <div class="demo-panel__section-title">
-        폰트 색상
-      </div>
-
-      <div class="demo-panel__row">
-        <span class="demo-panel__label demo-panel__label--small">
-          기본 폰트
-        </span>
-        <input
-          type="text"
-          class="demo-panel__input"
-          v-model="baseFontColorInput"
-          placeholder="#222222"
-        />
-        <button
-          type="button"
-          class="demo-panel__button"
-          @click="applyBaseFontColor"
-        >
-          적용
-        </button>
-      </div>
-
-      <div class="demo-panel__row">
-        <span class="demo-panel__label demo-panel__label--small">
-          하이라이트 폰트
-        </span>
-        <input
-          type="text"
-          class="demo-panel__input"
-          v-model="highlightFontColorInput"
-          placeholder="#1E5FCB"
-        />
-        <button
-          type="button"
-          class="demo-panel__button"
-          @click="applyHighlightFontColor"
-        >
-          적용
-        </button>
-      </div>
-
-      <!-- 뎁스별 하이라이트 색상 preset -->
-      <div class="demo-panel__section-title">
-        뎁스 하이라이트 색상 Preset
-      </div>
-
-      <div class="demo-panel__row demo-panel__row--block">
-        <button
-          type="button"
-          class="demo-panel__button demo-panel__button--full"
-          @click="applyDefaultHighlightColors"
-        >
-          기본 프리셋 적용
-        </button>
-      </div>
-      <div class="demo-panel__row demo-panel__row--block">
-        <button
-          type="button"
-          class="demo-panel__button demo-panel__button--full"
-          @click="applySoftBlueHighlight"
-        >
-          블루 계열 프리셋 적용
-        </button>
+        <label class="demo-controls__empty-guide">
+          안내 문구:
+          <input
+            type="text"
+            v-model="emptyGuideText"
+            placeholder="목록에서 드래그하여 추가해 주세요."
+          />
+        </label>
       </div>
     </div>
 
-    <!-- 오른쪽: ControlChain -->
-    <div class="demo-chain-wrapper">
+    <!-- 컨트롤체인: 부모 레이아웃 단순화 -->
+    <div class="demo-chain-container">
       <control-chain
-        ref="controlChain"
+        ref="chain"
         v-model="chain"
         :control-templates="controlTemplates"
         :available-placement="availablePlacement"
@@ -1113,11 +82,19 @@ export default {
         :use-vertical-scroll="useVerticalScroll"
         :available-title="availableTitle"
         :empty-guide-text="emptyGuideText"
-        @control-added="logEvent('control-added', $event)"
-        @control-removed="logEvent('control-removed', $event)"
-        @control-depth-change="logEvent('control-depth-change', $event)"
-        @control-selection-change="logEvent('control-selection-change', $event)"
+        @control-added="logEvent('added', $event)"
+        @control-removed="logEvent('removed', $event)"
+        @control-depth-change="logEvent('depth-change', $event)"
+        @control-selection-change="logEvent('selection-change', $event)"
       />
+    </div>
+
+    <!-- 현재 체인 값 확인용 -->
+    <div class="demo-log-wrapper">
+      <div class="demo-log-title">현재 체인 값 (v-model)</div>
+      <pre class="demo-log">
+{{ formattedChain }}
+      </pre>
     </div>
   </div>
 </template>
@@ -1126,17 +103,23 @@ export default {
 import ControlChain from '@/components/ControlChain.vue';
 
 export default {
-  name: 'ControlChainDemo',
+  name: 'ControlChainDemoLatest',
   components: { ControlChain },
 
   data() {
     return {
-      chain: [],
+      widthInput: 900,
+      heightInput: 260,
+      useHorizontalScroll: false,
+      useVerticalScroll: false,
+      availablePlacement: 'right',
+      availableTitle: '사용 가능한 컨트롤',
+      emptyGuideText: '목록에서 드래그하여 추가해 주세요.',
 
       controlTemplates: [
         {
           key: 'AAA',
-          label: 'AAA',
+          label: 'AAA (single, max 200px)',
           type: 'single',
           items: [
             { text: 'AAA1', value: 'aaa1' },
@@ -1144,298 +127,176 @@ export default {
             { text: 'AAA3', value: 'aaa3' }
           ],
           selectedValue: 'aaa1',
-          maxWidth: 260
+          maxWidth: 200
         },
         {
           key: 'BBB',
-          label: 'BBB',
+          label: 'BBB (multi, all-select)',
           type: 'multi',
           items: [
             { text: 'BBB1', value: 'bbb1' },
             { text: 'BBB2', value: 'bbb2' },
-            { text: 'BBB3', value: 'bbb3' },
-            { text: 'BBB4', value: 'bbb4' }
+            { text: 'BBB3', value: 'bbb3' }
           ],
           selectedValues: [],
+          allSelect: true,
           maxWidth: 260
         },
         {
           key: 'CCC',
-          label: 'CCC',
+          label: 'CCC (label)',
           type: 'label',
-          displayValue: '고정 라벨 1',
-          maxWidth: 260
+          displayValue: '고정 라벨입니다'
         },
         {
           key: 'DDD',
-          label: 'DDD',
+          label: 'DDD (single)',
           type: 'single',
           items: [
-            { text: '옵션 1', value: 'opt1' },
-            { text: '옵션 2', value: 'opt2' },
-            { text: '옵션 3', value: 'opt3' }
+            { text: 'DDD1', value: 'ddd1' },
+            { text: 'DDD2', value: 'ddd2' },
+            { text: 'DDD3', value: 'ddd3' }
           ],
-          selectedValue: 'opt1',
-          maxWidth: 260
+          selectedValue: 'ddd2'
         },
         {
           key: 'EEE',
-          label: 'EEE',
+          label: 'EEE (multi, no all-select)',
           type: 'multi',
           items: [
-            { text: 'E-1', value: 'e1' },
-            { text: 'E-2', value: 'e2' },
-            { text: 'E-3', value: 'e3' }
+            { text: 'EEE1', value: 'eee1' },
+            { text: 'EEE2', value: 'eee2' },
+            { text: 'EEE3', value: 'eee3' }
           ],
-          selectedValues: ['e1'],
-          maxWidth: 260
+          selectedValues: ['eee2'],
+          allSelect: false
         },
         {
           key: 'FFF',
-          label: 'FFF',
+          label: 'FFF (label, max 180px)',
           type: 'label',
-          displayValue: '설명용 라벨 텍스트',
-          maxWidth: 260
+          displayValue: '기본 조건',
+          maxWidth: 180
         }
       ],
 
-      useFixedWidth: true,
-      useFixedHeight: true,
-      fixedWidth: 900,
-      fixedHeight: 280,
-
-      useHorizontalScroll: false,
-      useVerticalScroll: true,
-
-      availablePlacement: 'right',
-      availableTitle: '사용 가능한 컨트롤',
-      emptyGuideText: '목록에서 드래그하여 추가해 주세요.',
-
-      availableWidth: 220,
-
-      horizontalMode: 'left',
-      verticalMode: 'center',
-
-      baseFontColorInput: '#222222',
-      highlightFontColorInput: '#1E5FCB'
+      chain: []
     };
   },
 
   computed: {
     resolvedWidth() {
-      if (!this.useFixedWidth) {
+      if (this.widthInput === null || this.widthInput === '') {
         return null;
       }
-      return this.fixedWidth;
+      const numeric = Number(this.widthInput);
+      if (Number.isNaN(numeric)) {
+        return null;
+      }
+      return numeric;
     },
 
     resolvedHeight() {
-      if (!this.useFixedHeight) {
+      if (this.heightInput === null || this.heightInput === '') {
         return null;
       }
-      return this.fixedHeight;
-    }
-  },
+      const numeric = Number(this.heightInput);
+      if (Number.isNaN(numeric)) {
+        return null;
+      }
+      return numeric;
+    },
 
-  mounted() {
-    this.applyHorizontalAlign();
-    this.applyVerticalAlign();
-    this.applyAvailableWidth();
-    this.applyBaseFontColor();
-    this.applyHighlightFontColor();
-    this.applyDefaultHighlightColors();
+    formattedChain() {
+      try {
+        return JSON.stringify(this.chain, null, 2);
+      } catch (error) {
+        return String(this.chain);
+      }
+    }
   },
 
   methods: {
     logEvent(type, payload) {
-      // 필요하면 디버깅용으로 사용
-      // console.log(`[${type}]`, payload);
-    },
-
-    applyAvailableWidth() {
-      if (!this.$refs.controlChain) {
-        return;
-      }
-      if (!this.availableWidth) {
-        return;
-      }
-      this.$refs.controlChain.setAvailableWidth(this.availableWidth);
-    },
-
-    applyHorizontalAlign() {
-      if (!this.$refs.controlChain) {
-        return;
-      }
-      this.$refs.controlChain.setHorizontalAlign(this.horizontalMode);
-    },
-
-    applyVerticalAlign() {
-      if (!this.$refs.controlChain) {
-        return;
-      }
-      this.$refs.controlChain.setVerticalAlign(this.verticalMode);
-    },
-
-    applyBaseFontColor() {
-      if (!this.$refs.controlChain) {
-        return;
-      }
-      if (!this.baseFontColorInput) {
-        return;
-      }
-      this.$refs.controlChain.setBaseFontColor(this.baseFontColorInput);
-    },
-
-    applyHighlightFontColor() {
-      if (!this.$refs.controlChain) {
-        return;
-      }
-      if (!this.highlightFontColorInput) {
-        return;
-      }
-      this.$refs.controlChain.setHighlightFontColor(this.highlightFontColorInput);
-    },
-
-    applyDefaultHighlightColors() {
-      if (!this.$refs.controlChain) {
-        return;
-      }
-      const borderColors = [
-        '#D5383A',
-        '#EB702D',
-        '#FBB41A',
-        '#2DA379',
-        '#1E5FCB',
-        '#553CA5'
-      ];
-      const backgroundColors = [
-        '#F8DDDF',
-        '#FAE2D4',
-        '#FFF0C8',
-        '#E0F0E8',
-        '#E0EBFA',
-        '#E5E0F6'
-      ];
-      this.$refs.controlChain.setHighlightBorderColors(borderColors);
-      this.$refs.controlChain.setHighlightBackgroundColors(backgroundColors);
-    },
-
-    applySoftBlueHighlight() {
-      if (!this.$refs.controlChain) {
-        return;
-      }
-      const borderColors = [
-        '#1E5FCB',
-        '#2DA379',
-        '#553CA5',
-        '#1E5FCB',
-        '#2DA379',
-        '#553CA5'
-      ];
-      const backgroundColors = [
-        '#E0EBFA',
-        '#E0F0E8',
-        '#E5E0F6',
-        '#E0EBFA',
-        '#E0F0E8',
-        '#E5E0F6'
-      ];
-      this.$refs.controlChain.setHighlightBorderColors(borderColors);
-      this.$refs.controlChain.setHighlightBackgroundColors(backgroundColors);
+      console.log(`[ControlChain ${type}]`, payload);
     }
   }
 };
 </script>
 
 <style scoped>
-.control-chain-demo {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-}
-
-/* 설정 패널 */
-.demo-panel {
-  width: 280px;
-  padding: 12px;
-  border: 1px solid #e5e5e5;
-  background: #ffffff;
+.demo-wrapper {
+  padding: 16px;
   box-sizing: border-box;
-  font-size: 12px;
-}
-
-.demo-panel__title {
-  margin: 0 0 12px;
   font-size: 13px;
-  font-weight: 600;
 }
 
-.demo-panel__section-title {
-  margin: 12px 0 6px;
-  font-size: 12px;
-  font-weight: 600;
-  border-top: 1px solid #f0f0f0;
-  padding-top: 8px;
-}
-
-.demo-panel__row {
-  display: flex;
-  align-items: center;
-  margin-bottom: 6px;
-  gap: 4px;
-}
-
-.demo-panel__row--block {
-  align-items: stretch;
-}
-
-.demo-panel__label {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.demo-panel__label--small {
-  width: 72px;
-}
-
-.demo-panel__input {
-  width: 90px;
-  padding: 2px 4px;
-  font-size: 12px;
+.demo-controls {
+  margin-bottom: 12px;
+  padding: 8px;
+  border: 1px solid #e5e5e5;
+  background: #fafafa;
   box-sizing: border-box;
 }
 
-.demo-panel__input--full {
-  width: 100%;
+.demo-controls__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
 }
 
-.demo-panel__suffix {
-  font-size: 11px;
-  color: #777777;
+.demo-controls__row:last-child {
+  margin-bottom: 0;
 }
 
-.demo-panel__select {
-  flex: 1;
-  padding: 2px 4px;
+.demo-controls label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
 }
 
-.demo-panel__button {
-  padding: 2px 6px;
+.demo-controls input[type='number'],
+.demo-controls input[type='text'],
+.demo-controls select {
+  font-size: 12px;
+  padding: 2px 4px;
+  box-sizing: border-box;
+}
+
+.demo-controls__empty-guide {
+  flex: 1 1 auto;
+}
+
+/* 부모 레이아웃 효과 최소화 */
+.demo-chain-container {
+  margin-top: 12px;
+  margin-bottom: 12px;
+  display: inline-block;
+}
+
+/* 체인 영역이 눈에 보이도록 약한 테두리 */
+.demo-chain-container > .control-chain {
+  outline: 1px dashed #cccccc;
+}
+
+.demo-log-wrapper {
+  margin-top: 8px;
+}
+
+.demo-log-title {
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.demo-log {
   font-size: 11px;
+  background: #f5f5f5;
   border: 1px solid #e0e0e0;
-  background: #fafafa;
-  cursor: pointer;
-}
-
-.demo-panel__button--full {
-  width: 100%;
-}
-
-/* 오른쪽 체인 영역 */
-.demo-chain-wrapper {
-  flex: 1;
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+  box-sizing: border-box;
 }
 </style>
