@@ -263,29 +263,38 @@ export default {
       return style;
     },
 
-    activeAreaStyle() {
-      const style = {
-        flex: '1 1 auto',
-        padding: '8px',
-        border: '1px solid #e5e5e5',
-        background: '#fff',
-        display: 'flex',
-        flexDirection: 'column',
-        minWidth: 0,
-        boxSizing: 'border-box'
-      };
+ 
+activeAreaStyle() {
+  const style = {
+    flex: '1 1 auto',
+    padding: '8px',
+    border: '1px solid #e5e5e5',
+    background: '#fff',
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    boxSizing: 'border-box'
+  };
 
-      const h = toSize(this.height);
-      if (h) {
-        style.height = '100%';
-        style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
-      } else {
-        style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
-      }
+  const h = toSize(this.height);
+  
+  // height prop이 있을 때
+  if (h) {
+    style.height = '100%';
+    style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
+    style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
+  } 
+  // height prop이 없을 때
+  else {
+    style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
+    // 스크롤 비활성화 시 내용에 따라 자동 확장
+    style.height = 'auto';
+    style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
+    style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
+  }
 
-      style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
-      return style;
-    },
+  return style;
+},
 
     availableAreaStyle() {
       const raw = this.availableWidth ?? `${DEFAULT_AVAILABLE_WIDTH}px`;
