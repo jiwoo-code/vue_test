@@ -30,7 +30,12 @@
           :key="element.id"
           class="control-chain__item"
         >
-          <span v-if="index > 0" class="control-chain__separator">>></span>
+          <span
+            v-if="index > 0"
+            class="control-chain__separator"
+          >
+            >>
+          </span>
 
           <div
             class="control-chain__content"
@@ -95,6 +100,7 @@
           </div>
         </div>
 
+        <!-- 활성 컨트롤이 없을 때 안내 문구 (여기에도 드롭 가능) -->
         <div
           v-if="!activeControls.length"
           class="control-chain__empty"
@@ -151,7 +157,6 @@
         </draggable>
       </div>
     </div>
-
   </div>
 </template>
 
@@ -162,13 +167,19 @@ const DEFAULT_MIN_HEIGHT = 260;
 const DEFAULT_AVAILABLE_WIDTH = 220;
 
 const toSize = (value) => {
-  if (value == null || value === '') return undefined;
+  if (value == null || value === '') {
+    return undefined;
+  }
   return typeof value === 'number' ? `${value}px` : value;
 };
 
 const toArray = (input) => {
-  if (!input) return null;
-  if (Array.isArray(input)) return input.length ? input.slice() : null;
+  if (!input) {
+    return null;
+  }
+  if (Array.isArray(input)) {
+    return input.length ? input.slice() : null;
+  }
   return [input];
 };
 
@@ -191,20 +202,51 @@ export default {
   model: { prop: 'value', event: 'input' },
 
   props: {
-    value: Array,
-    controlTemplates: Array,
+    value: {
+      type: Array,
+      default() {
+        return [];
+      }
+    },
+    controlTemplates: {
+      type: Array,
+      required: true
+    },
     availablePlacement: {
       type: String,
-      default: 'right'
+      default: 'right',
+      validator(v) {
+        return v === 'right' || v === 'left';
+      }
     },
     emptyGuideText: {
       type: String,
       default: '목록에서 드래그하여 추가해 주세요.'
     },
-    availableTitle: { type: String, default: '' },
+    availableTitle: {
+      type: String,
+      default: ''
+    },
 
-    width: [Number, String],
-    height: [Number, String]
+    // 전체 컨트롤 체인 영역 크기
+    width: {
+      type: [Number, String],
+      default: null
+    },
+    height: {
+      type: [Number, String],
+      default: null
+    },
+
+    // 스크롤 사용 여부 (뎁스 영역 기준)
+    useHorizontalScroll: {
+      type: Boolean,
+      default: false
+    },
+    useVerticalScroll: {
+      type: Boolean,
+      default: false
+    }
   },
 
   data() {
@@ -212,7 +254,11 @@ export default {
       activeControls: [],
       availableControls: [],
 
-      dragGroup: { name: 'control-chain', pull: true, put: true },
+      dragGroup: {
+        name: 'control-chain',
+        pull: true,
+        put: true
+      },
       dragHandleSelector: '.control-chain__drag-handle',
 
       hoveredControlId: null,
@@ -221,30 +267,36 @@ export default {
       idMap: {},
 
       depthHighlightColors: [
-        '#D5383A', '#EB702D', '#FBB41A',
-        '#2DA379', '#1E5FCB', '#553CA5'
+        '#D5383A',
+        '#EB702D',
+        '#FBB41A',
+        '#2DA379',
+        '#1E5FCB',
+        '#553CA5'
       ],
       depthHighlightBgColors: [
-        '#F8DDDF', '#FAE2D4', '#FFF0C8',
-        '#E0F0E8', '#E0EBFA', '#E5E0F6'
+        '#F8DDDF',
+        '#FAE2D4',
+        '#FFF0C8',
+        '#E0F0E8',
+        '#E0EBFA',
+        '#E5E0F6'
       ],
 
       defaultMaxWidth: 240,
 
-      baseFontColor: '#222',
+      baseFontColor: '#222222',
       highlightFontColor: '#1E5FCB',
 
       availableWidth: null,
 
-      horizontalAlign: 'flex-start', // left|center|right → flex 값
-      verticalAlign: 'center'        // top|center|bottom → flex 값
+      // 정렬 (외부에서 setHorizontalAlign / setVerticalAlign으로 변경)
+      horizontalAlign: 'flex-start',
+      verticalAlign: 'center'
     };
   },
 
   computed: {
-    shouldUseVerticalScroll() { return !!this.height; },
-    shouldUseHorizontalScroll() { return !!this.width; },
-
     layoutClass() {
       return `control-chain--available-${this.availablePlacement}`;
     },
@@ -263,6 +315,7 @@ export default {
         style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
       }
+
       return style;
     },
 
@@ -271,29 +324,36 @@ export default {
         flex: '1 1 auto',
         padding: '8px',
         border: '1px solid #e5e5e5',
-        background: '#fff',
+        background: '#ffffff',
         display: 'flex',
         flexDirection: 'column',
         boxSizing: 'border-box'
       };
 
-      if (this.shouldUseVerticalScroll) {
+      const hasHeight = !!this.height;
+
+      if (hasHeight) {
+        // 컨테이너의 height를 기준으로 채움
         style.height = '100%';
-        style.overflowY = 'auto';
       } else {
         style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
-        style.overflowY = 'visible';
       }
 
-      style.overflowX = this.shouldUseHorizontalScroll ? 'auto' : 'visible';
+      // 세로 스크롤 여부
+      style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
+
+      // 가로 스크롤 여부
+      style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
 
       return style;
     },
 
     availableAreaStyle() {
-      const rawWidth = this.availableWidth ?? `${DEFAULT_AVAILABLE_WIDTH}px`;
-      const widthValue = toSize(rawWidth) ?? rawWidth;
+      const rawWidth = this.availableWidth != null
+        ? this.availableWidth
+        : `${DEFAULT_AVAILABLE_WIDTH}px`;
+      const widthValue = toSize(rawWidth) || rawWidth;
 
       const style = {
         width: widthValue,
@@ -302,49 +362,55 @@ export default {
         flexGrow: 0,
         padding: '8px',
         border: '1px solid #e5e5e5',
-        background: '#fff',
+        background: '#ffffff',
         boxSizing: 'border-box',
         display: 'flex',
         flexDirection: 'column'
       };
 
-      if (this.shouldUseVerticalScroll) {
+      const hasHeight = !!this.height;
+
+      if (hasHeight) {
         style.height = '100%';
       } else {
         style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
       }
 
+      // 오른쪽 목록은 항상 세로 스크롤 허용 (내용 많을 수 있으니까)
+      // 실제 스크롤 동작은 내부 wrapper가 담당
       return style;
     },
 
-    /* 🔧 가로/세로 정렬 모두 horizontalAlign / verticalAlign을 항상 사용 */
     activeDraggableStyle() {
       const style = {
         display: 'flex',
         boxSizing: 'border-box',
         rowGap: '6px',
         columnGap: '8px',
-        flex: '1 1 auto'
+        flex: '1 1 auto',
+        minHeight: `${DEFAULT_MIN_HEIGHT - 16}px`, // 패딩 제외한 최소 드롭 영역
+        minWidth: 0
       };
 
-      if (this.shouldUseHorizontalScroll) {
-        // 가로 스크롤 사용: 한 줄로 나열, 정렬은 옵션값 사용
+      if (this.useHorizontalScroll) {
+        // 가로 스크롤: 한 줄 배치 + 내용에 따라 확장
         style.flexWrap = 'nowrap';
         style.width = 'max-content';
         style.minWidth = '100%';
-        style.minHeight = 0;
-
-        style.justifyContent = this.horizontalAlign;
-        style.alignItems = this.verticalAlign;
       } else {
-        // 가로 스크롤 미사용: 줄바꿈 허용, 정렬은 그대로 사용
+        // 줄바꿈 허용
         style.flexWrap = 'wrap';
         style.width = '100%';
-        style.minWidth = 0;
-        style.minHeight = 0;
+      }
 
-        style.justifyContent = this.horizontalAlign;
+      // 정렬은 스크롤 여부와 관계없이 항상 옵션 사용
+      style.justifyContent = this.horizontalAlign;
+
+      // 한 줄일 때는 alignItems, 여러 줄일 때는 alignContent가 핵심
+      if (this.useHorizontalScroll) {
+        style.alignItems = this.verticalAlign;
+      } else {
         style.alignContent = this.verticalAlign;
       }
 
@@ -352,7 +418,9 @@ export default {
     },
 
     emptyGuideTextStyle() {
-      return { color: '#999' };
+      return {
+        color: '#999999'
+      };
     },
 
     availableTitleTextStyle() {
@@ -365,11 +433,15 @@ export default {
 
   watch: {
     value: {
-      handler() { this.buildControls(); },
+      handler() {
+        this.buildControls();
+      },
       deep: true
     },
     controlTemplates: {
-      handler() { this.buildControls(); },
+      handler() {
+        this.buildControls();
+      },
       deep: true
     }
   },
@@ -382,46 +454,61 @@ export default {
     // ========================= Public API =========================
 
     setHighlightBorderColors(colors) {
-      const arr = toArray(colors);
-      if (arr) this.depthHighlightColors = arr;
+      const array = toArray(colors);
+      if (array) {
+        this.depthHighlightColors = array;
+      }
     },
 
     setHighlightBackgroundColors(colors) {
-      const arr = toArray(colors);
-      if (arr) this.depthHighlightBgColors = arr;
+      const array = toArray(colors);
+      if (array) {
+        this.depthHighlightBgColors = array;
+      }
     },
 
     setBaseFontColor(color) {
-      if (color) this.baseFontColor = color;
+      if (color) {
+        this.baseFontColor = color;
+      }
     },
 
     setHighlightFontColor(color) {
-      if (color) this.highlightFontColor = color;
+      if (color) {
+        this.highlightFontColor = color;
+      }
     },
 
     setAvailableWidth(width) {
-      if (typeof width === 'number') this.availableWidth = `${width}px`;
-      else if (width) this.availableWidth = width;
+      if (typeof width === 'number') {
+        this.availableWidth = `${width}px`;
+      } else if (width) {
+        this.availableWidth = width;
+      }
     },
 
     setHorizontalAlign(mode) {
       const mapped = horizontalMap[mode];
-      if (mapped) this.horizontalAlign = mapped;
+      if (mapped) {
+        this.horizontalAlign = mapped;
+      }
     },
 
     setVerticalAlign(mode) {
       const mapped = verticalMap[mode];
-      if (mapped) this.verticalAlign = mapped;
+      if (mapped) {
+        this.verticalAlign = mapped;
+      }
     },
 
     // ========================= 내부 로직 =========================
 
     getStableId(control) {
-      const key = control.key || control.label;
-      if (!this.idMap[key]) {
-        this.idMap[key] = `${key}-${Math.random().toString(36).slice(2, 8)}`;
+      const baseKey = control.key || control.label || 'control';
+      if (!this.idMap[baseKey]) {
+        this.idMap[baseKey] = `${baseKey}-${Math.random().toString(36).slice(2, 8)}`;
       }
-      return this.idMap[key];
+      return this.idMap[baseKey];
     },
 
     buildControls() {
@@ -430,7 +517,11 @@ export default {
         ? this.controlTemplates
         : [];
 
-      const usedKeys = new Set(valueArray.map(item => item.key));
+      const usedKeys = new Set(
+        valueArray
+          .map(control => control.key)
+          .filter(key => key != null)
+      );
 
       this.activeControls = valueArray.map(control => ({
         ...control,
@@ -447,13 +538,14 @@ export default {
 
     emitChain() {
       const cloned = this.activeControls.map(control => {
-        const obj = { ...control };
-        if (Array.isArray(obj.selectedValues)) {
-          obj.selectedValues = obj.selectedValues.slice();
+        const clone = { ...control };
+        if (Array.isArray(clone.selectedValues)) {
+          clone.selectedValues = clone.selectedValues.slice();
         }
-        delete obj.id;
-        return obj;
+        delete clone.id;
+        return clone;
       });
+
       this.$emit('input', cloned);
       this.$emit('change', cloned);
     },
@@ -487,17 +579,26 @@ export default {
     },
 
     removeControlById(id) {
-      const idx = this.activeControls.findIndex(c => c.id === id);
-      if (idx < 0) return;
+      const index = this.activeControls.findIndex(control => control.id === id);
+      if (index < 0) {
+        return;
+      }
 
-      const removed = this.activeControls.splice(idx, 1)[0];
+      const removed = this.activeControls.splice(index, 1)[0];
       this.availableControls.push(removed);
 
-      if (this.hoveredControlId === id) this.hoveredControlId = null;
-      if (this.showCloseControlId === id) this.showCloseControlId = null;
+      if (this.hoveredControlId === id) {
+        this.hoveredControlId = null;
+      }
+      if (this.showCloseControlId === id) {
+        this.showCloseControlId = null;
+      }
 
       this.emitChain();
-      this.$emit('control-removed', { control: removed, index: idx });
+      this.$emit('control-removed', {
+        control: removed,
+        index
+      });
     },
 
     onControlMouseEnter(element) {
@@ -506,14 +607,20 @@ export default {
     },
 
     onControlMouseLeave(element) {
-      if (this.hoveredControlId === element.id) this.hoveredControlId = null;
-      if (this.showCloseControlId === element.id) this.showCloseControlId = null;
+      if (this.hoveredControlId === element.id) {
+        this.hoveredControlId = null;
+      }
+      if (this.showCloseControlId === element.id) {
+        this.showCloseControlId = null;
+      }
     },
 
     // =================== 선택 변경 ===================
 
     onSingleSelectChange(element, index, value) {
-      if (element.selectedValue === value) return;
+      if (element.selectedValue === value) {
+        return;
+      }
       element.selectedValue = value;
       this.emitChain();
       this.$emit('control-selection-change', {
@@ -526,14 +633,17 @@ export default {
 
     onMultiSelectChange(element, index, values) {
       const next = Array.isArray(values) ? values.slice() : [];
-      const prev = Array.isArray(element.selectedValues)
+      const previous = Array.isArray(element.selectedValues)
         ? element.selectedValues
         : [];
 
-      const same = prev.length === next.length &&
-        prev.every((v, i) => v === next[i]);
+      const isSame =
+        previous.length === next.length &&
+        previous.every((item, position) => item === next[position]);
 
-      if (same) return;
+      if (isSame) {
+        return;
+      }
 
       element.selectedValues = next;
       this.emitChain();
@@ -549,23 +659,24 @@ export default {
 
     getTextStyle(element, isActiveArea) {
       const isHovered = this.hoveredControlId === element.id;
-      return {
-        color: isActiveArea && isHovered
-          ? this.highlightFontColor
-          : this.baseFontColor
-      };
+      const color =
+        isActiveArea && isHovered ? this.highlightFontColor : this.baseFontColor;
+
+      return { color };
     },
 
     getContentStyle(index, element) {
       const style = {};
 
-      const maxWidth = element.maxWidth ?? this.defaultMaxWidth;
+      const maxWidth =
+        element.maxWidth != null ? element.maxWidth : this.defaultMaxWidth;
       style.maxWidth = typeof maxWidth === 'number' ? `${maxWidth}px` : maxWidth;
 
       if (this.hoveredControlId === element.id) {
-        const colorIndex = index % this.depthHighlightColors.length;
-        style.borderColor = this.depthHighlightColors[colorIndex];
-        style.backgroundColor = this.depthHighlightBgColors[colorIndex];
+        const borderIndex = index % this.depthHighlightColors.length;
+        const backgroundIndex = index % this.depthHighlightBgColors.length;
+        style.borderColor = this.depthHighlightColors[borderIndex];
+        style.backgroundColor = this.depthHighlightBgColors[backgroundIndex];
       }
 
       return style;
@@ -585,9 +696,15 @@ export default {
   box-sizing: border-box;
 }
 
-.control-chain--available-right { flex-direction: row; }
-.control-chain--available-left { flex-direction: row-reverse; }
+.control-chain--available-right {
+  flex-direction: row;
+}
 
+.control-chain--available-left {
+  flex-direction: row-reverse;
+}
+
+/* 활성 체인 영역 */
 .control-chain__active {
   position: relative;
   box-sizing: border-box;
@@ -598,6 +715,7 @@ export default {
   height: 100%;
 }
 
+/* 사용 가능한 컨트롤 영역 */
 .control-chain__available {
   box-sizing: border-box;
 }
@@ -624,6 +742,7 @@ export default {
   margin-top: 4px;
 }
 
+/* 공통 아이템/컨트롤 스타일 */
 .control-chain__item {
   display: flex;
   align-items: center;
@@ -633,6 +752,7 @@ export default {
   margin-right: 4px;
 }
 
+/* 컨트롤 박스 */
 .control-chain__content {
   border: 1px solid #e4e4e4;
   padding: 6px 8px;
@@ -712,6 +832,7 @@ export default {
   font-size: 12px;
 }
 
+/* 오른쪽 목록 아이템 */
 .control-chain__available-content {
   border: 1px solid #e0e0e0;
   padding: 4px 6px;
@@ -731,13 +852,6 @@ export default {
   font-size: 12px;
 }
 </style>
-
-
-
-
-
-
-
 
 
 
@@ -804,7 +918,36 @@ export default {
         </span>
       </div>
 
+      <!-- 가로/세로 스크롤 -->
+      <div class="demo-panel__section-title">
+        스크롤 옵션 (뎁스 영역)
+      </div>
+
+      <div class="demo-panel__row">
+        <label class="demo-panel__label">
+          가로 스크롤 사용
+        </label>
+        <input
+          type="checkbox"
+          v-model="useHorizontalScroll"
+        />
+      </div>
+
+      <div class="demo-panel__row">
+        <label class="demo-panel__label">
+          세로 스크롤 사용
+        </label>
+        <input
+          type="checkbox"
+          v-model="useVerticalScroll"
+        />
+      </div>
+
       <!-- 오른쪽 목록 width -->
+      <div class="demo-panel__section-title">
+        레이아웃
+      </div>
+
       <div class="demo-panel__row">
         <label class="demo-panel__label">
           목록 영역 width
@@ -947,7 +1090,7 @@ export default {
         </button>
       </div>
 
-      <!-- 뎁스별 하이라이트 색상 -->
+      <!-- 뎁스별 하이라이트 색상 preset -->
       <div class="demo-panel__section-title">
         뎁스 하이라이트 색상 Preset
       </div>
@@ -972,7 +1115,7 @@ export default {
       </div>
     </div>
 
-    <!-- 오른쪽: 실제 ControlChain -->
+    <!-- 오른쪽: ControlChain -->
     <div class="demo-chain-wrapper">
       <control-chain
         ref="controlChain"
@@ -981,6 +1124,8 @@ export default {
         :available-placement="availablePlacement"
         :width="resolvedWidth"
         :height="resolvedHeight"
+        :use-horizontal-scroll="useHorizontalScroll"
+        :use-vertical-scroll="useVerticalScroll"
         :available-title="availableTitle"
         :empty-guide-text="emptyGuideText"
         @control-added="logEvent('control-added', $event)"
@@ -1074,6 +1219,9 @@ export default {
       fixedWidth: 900,
       fixedHeight: 280,
 
+      useHorizontalScroll: false,
+      useVerticalScroll: true,
+
       availablePlacement: 'right',
       availableTitle: '사용 가능한 컨트롤',
       emptyGuideText: '목록에서 드래그하여 추가해 주세요.',
@@ -1105,7 +1253,6 @@ export default {
   },
 
   mounted() {
-    // 초기 정렬/색상/목록 width 적용
     this.applyHorizontalAlign();
     this.applyVerticalAlign();
     this.applyAvailableWidth();
@@ -1116,7 +1263,7 @@ export default {
 
   methods: {
     logEvent(type, payload) {
-      // 필요하면 디버깅용으로 열어서 사용
+      // 필요하면 디버깅용으로 사용
       // console.log(`[${type}]`, payload);
     },
 
@@ -1222,7 +1369,7 @@ export default {
   align-items: flex-start;
 }
 
-/* 왼쪽 설정 패널 */
+/* 설정 패널 */
 .demo-panel {
   width: 280px;
   padding: 12px;
