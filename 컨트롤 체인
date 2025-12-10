@@ -1,25 +1,12 @@
 <!--
-  ---------------------------------------------------------------------------
-  필요한 라이브러리
-
+  필수 라이브러리
   vuedraggable (Sortable.js 기반 드래그)
     npm install vuedraggable sortablejs
-    yarn add vuedraggable sortablejs
-
-  ---------------------------------------------------------------------------
 -->
-
 <template>
-  <div
-    class="control-chain"
-    :class="layoutClass"
-    :style="containerStyle"
-  >
-    <!-- 활성 체인 영역 (왼쪽) -->
-    <div
-      class="control-chain__active"
-      :style="activeAreaStyle"
-    >
+  <div class="control-chain" :class="layoutClass" :style="containerStyle">
+    <!-- Active area (left) -->
+    <div class="control-chain__active" :style="activeAreaStyle">
       <draggable
         :list="activeControls"
         :group="dragGroup"
@@ -27,6 +14,8 @@
         class="control-chain__draggable"
         :style="activeDraggableStyle"
         :handle="dragHandleSelector"
+        :force-fallback="true"
+        :fallback-tolerance="8"
         @change="onActiveChange"
       >
         <div
@@ -34,29 +23,17 @@
           :key="element.id"
           class="control-chain__item"
         >
-          <span
-            v-if="index > 0"
-            class="control-chain__separator"
-          >
-            >>
-          </span>
+          <span v-if="index > 0" class="control-chain__separator">>></span>
 
-          <div
-            class="control-chain__content"
-            :style="getContentStyle(index, element)"
-          >
-            <!-- 헤더: 타이틀 + 드래그핸들 + 삭제버튼 -->
+          <div class="control-chain__content" :style="getContentStyle(index, element)">
             <div
               class="control-chain__header"
               @mouseenter="onControlMouseEnter(element)"
               @mouseleave="onControlMouseLeave(element)"
             >
               <div class="control-chain__header-left">
-                <span class="control-chain__drag-handle">≡</span>
-                <span
-                  class="control-chain__title"
-                  :style="getTextStyle(element, true)"
-                >
+                <span class="control-chain__drag-handle" title="Drag">⋮⋮</span>
+                <span class="control-chain__title" :style="getTextStyle(element, true)">
                   {{ element.label }}
                 </span>
               </div>
@@ -70,7 +47,6 @@
               </button>
             </div>
 
-            <!-- 컨트롤 바디 -->
             <div class="control-chain__body">
               <ur-dropdown
                 v-if="element.type === 'single'"
@@ -91,12 +67,7 @@
                 @input="onMultiSelectChange(element, index, $event)"
               />
 
-              <!-- 라벨 컨트롤 -->
-              <span
-                v-else
-                class="control-chain__label-value"
-                :style="{ color: baseFontColor }"
-              >
+              <span v-else class="control-chain__label-value" :style="{ color: baseFontColor }">
                 {{ element.displayValue || '-' }}
               </span>
             </div>
@@ -104,26 +75,14 @@
         </div>
       </draggable>
 
-      <!-- 비어 있을 때 안내 문구 (드롭 방해 안 하도록 absolute + pointer-events:none) -->
-      <div
-        v-if="!activeControls.length"
-        class="control-chain__empty"
-        :style="emptyGuideTextStyle"
-      >
+      <div v-if="!activeControls.length" class="control-chain__empty" :style="emptyGuideTextStyle">
         {{ emptyGuideText }}
       </div>
     </div>
 
-    <!-- 사용 가능한 컨트롤 영역 (오른쪽) -->
-    <div
-      class="control-chain__available"
-      :style="availableAreaStyle"
-    >
-      <div
-        v-if="availableTitle"
-        class="control-chain__available-title"
-        :style="availableTitleTextStyle"
-      >
+    <!-- Available area (right) -->
+    <div class="control-chain__available" :style="availableAreaStyle">
+      <div v-if="availableTitle" class="control-chain__available-title" :style="availableTitleTextStyle">
         {{ availableTitle }}
       </div>
 
@@ -134,6 +93,8 @@
           item-key="id"
           class="control-chain__available-list"
           :handle="dragHandleSelector"
+          :force-fallback="true"
+          :fallback-tolerance="8"
         >
           <li
             v-for="element in availableControls"
@@ -145,13 +106,10 @@
               @mouseenter="onControlMouseEnter(element)"
               @mouseleave="onControlMouseLeave(element)"
             >
-              <span class="control-chain__drag-handle control-chain__drag-handle--small">
-                ≡
+              <span class="control-chain__drag-handle control-chain__drag-handle--small" title="Drag">
+                ⋮⋮
               </span>
-              <span
-                class="control-chain__available-label"
-                :style="getTextStyle(element, false)"
-              >
+              <span class="control-chain__available-label" :style="getTextStyle(element, false)">
                 {{ element.label }}
               </span>
             </div>
@@ -164,6 +122,8 @@
 
 <script>
 import draggable from 'vuedraggable';
+import UrDropdown from './UrDropdown.vue';
+import UrMultiDropdown from './UrMultiDropdown.vue';
 
 const DEFAULT_MIN_HEIGHT = 260;
 const DEFAULT_AVAILABLE_WIDTH = 220;
@@ -199,21 +159,24 @@ const verticalMap = {
 
 export default {
   name: 'ControlChain',
-  components: { draggable },
+  components: { draggable, UrDropdown, UrMultiDropdown },
 
   model: { prop: 'value', event: 'input' },
 
   props: {
+    // 부모가 관리하는 체인 값
     value: {
       type: Array,
       default() {
         return [];
       }
     },
+    // 우측에 표시되는 컨트롤 템플릿 목록
     controlTemplates: {
       type: Array,
       required: true
     },
+    // 사용 가능한 컨트롤 영역 위치
     availablePlacement: {
       type: String,
       default: 'right',
@@ -221,15 +184,18 @@ export default {
         return ['right', 'left'].includes(v);
       }
     },
+    // 비어 있을 때 안내 문구
     emptyGuideText: {
       type: String,
-      default: '목록에서 드래그하여 추가해 주세요.'
+      default: '목록에서 드래그하여 추가해 주세요'
     },
+    // 사용 가능 영역 타이틀
     availableTitle: {
       type: String,
       default: ''
     },
 
+    // 컨테이너 크기
     width: {
       type: [Number, String],
       default: null
@@ -251,8 +217,11 @@ export default {
 
   data() {
     return {
+      // 현재 활성화된 체인 요소
       activeControls: [],
+      // 사용 가능한 요소 목록
       availableControls: [],
+      // draggable 공유 그룹 설정
       dragGroup: {
         name: 'control-chain',
         pull: true,
@@ -265,22 +234,8 @@ export default {
 
       idMap: {},
 
-      depthHighlightColors: [
-        '#D5383A',
-        '#EB702D',
-        '#FBB41A',
-        '#2DA379',
-        '#1E5FCB',
-        '#553CA5'
-      ],
-      depthHighlightBgColors: [
-        '#F8DDDF',
-        '#FAE2D4',
-        '#FFF0C8',
-        '#E0F0E8',
-        '#E0EBFA',
-        '#E5E0F6'
-      ],
+      depthHighlightColors: ['#D5383A', '#EB702D', '#FBB41A', '#2DA379', '#1E5FCB', '#553CA5'],
+      depthHighlightBgColors: ['#F8DDDF', '#FAE2D4', '#FFF0C8', '#E0F0E8', '#E0EBFA', '#E5E0F6'],
 
       defaultMaxWidth: 240,
 
@@ -295,19 +250,20 @@ export default {
   },
 
   computed: {
+    // 레이아웃 방향 클래스
     layoutClass() {
       return `control-chain--available-${this.availablePlacement}`;
     },
 
+    // 전체 컨테이너 스타일
     containerStyle() {
-      // 부모 레이아웃 영향 최소화를 위해 height는 여기서 건드리지 않고
-      // width만 지정. 높이는 내부 영역(active/available)이 직접 가짐.
       return {
         width: toSize(this.width) || '100%',
         boxSizing: 'border-box'
       };
     },
 
+    // 좌측 활성 영역 스타일
     activeAreaStyle() {
       const style = {
         flex: '1 1 auto',
@@ -317,14 +273,17 @@ export default {
         display: 'flex',
         flexDirection: 'column',
         boxSizing: 'border-box',
-        position: 'relative' // 안내 문구 absolute 기준
+        position: 'relative'
       };
 
       const heightValue = toSize(this.height);
       if (heightValue) {
-        // 컨트롤 체인 높이를 직접 사용 (부모 height:100% 의존 X)
         style.height = heightValue;
         style.minHeight = heightValue;
+      } else if (this.useHorizontalScroll && !this.useVerticalScroll) {
+        // Horizontal-only compact mode.
+        style.height = 'auto';
+        style.minHeight = 'auto';
       } else {
         style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
@@ -336,6 +295,7 @@ export default {
       return style;
     },
 
+    // 우측 사용 가능 영역 스타일
     availableAreaStyle() {
       const rawWidth = this.availableWidth ?? `${DEFAULT_AVAILABLE_WIDTH}px`;
       const widthValue = toSize(rawWidth) ?? rawWidth;
@@ -357,6 +317,10 @@ export default {
       if (heightValue) {
         style.height = heightValue;
         style.minHeight = heightValue;
+      } else if (this.useHorizontalScroll && !this.useVerticalScroll) {
+        // Horizontal-only mode: shrink with content when height is not provided.
+        style.height = 'auto';
+        style.minHeight = 'auto';
       } else {
         style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
@@ -365,6 +329,7 @@ export default {
       return style;
     },
 
+    // 드래그 래퍼 스타일
     activeDraggableStyle() {
       const style = {
         display: 'flex',
@@ -378,31 +343,36 @@ export default {
 
       const heightValue = toSize(this.height);
       if (heightValue) {
-        // 지정 높이인 경우, 드랍 영역이 꽉 차도록
         style.minHeight = '100%';
+      } else if (this.useHorizontalScroll && !this.useVerticalScroll) {
+        style.minHeight = 'auto';
       } else {
-        // 높이 미지정 시에도 배경 영역에 드롭 가능하도록 기본 높이 확보
         style.minHeight = '140px';
       }
 
-      style.flexWrap = this.useHorizontalScroll ? 'nowrap' : 'wrap';
+      const horizontalOnly = this.useHorizontalScroll;
+      style.flexWrap = horizontalOnly ? 'nowrap' : 'wrap';
       style.justifyContent = this.horizontalAlign;
-
-      if (this.useHorizontalScroll) {
-        style.alignItems = this.verticalAlign;
+      if (horizontalOnly) {
+        style.alignItems = this.verticalAlign; // 가로 스크롤 모드에서는 행 단위 정렬만 사용
       } else {
+        // 래핑되는 경우 전체 행들의 수직 정렬을 verticalAlign으로 맞춘다.
+        style.alignItems = 'stretch';
         style.alignContent = this.verticalAlign;
       }
+      style.padding = '8px';
 
       return style;
     },
 
+    // 안내 문구 스타일
     emptyGuideTextStyle() {
       return {
         color: '#999999'
       };
     },
 
+    // 타이틀 텍스트 스타일
     availableTitleTextStyle() {
       return {
         color: this.baseFontColor,
@@ -431,8 +401,9 @@ export default {
   },
 
   methods: {
-    // ===== 외부에서 호출 가능한 설정 함수들 =====
+    // ===== setters =====
 
+    // 하이라이트 테두리 컬러 변경
     setHighlightBorderColors(colors) {
       const array = toArray(colors);
       if (array) {
@@ -440,6 +411,7 @@ export default {
       }
     },
 
+    // 하이라이트 배경 컬러 변경
     setHighlightBackgroundColors(colors) {
       const array = toArray(colors);
       if (array) {
@@ -447,18 +419,21 @@ export default {
       }
     },
 
+    // 기본 글자색 지정
     setBaseFontColor(color) {
       if (color) {
         this.baseFontColor = color;
       }
     },
 
+    // 하이라이트 글자색 지정
     setHighlightFontColor(color) {
       if (color) {
         this.highlightFontColor = color;
       }
     },
 
+    // 사용 가능 영역 너비 지정
     setAvailableWidth(width) {
       if (typeof width === 'number') {
         this.availableWidth = `${width}px`;
@@ -467,6 +442,7 @@ export default {
       }
     },
 
+    // 수평 정렬 지정
     setHorizontalAlign(mode) {
       const mapped = horizontalMap[mode];
       if (mapped) {
@@ -474,6 +450,7 @@ export default {
       }
     },
 
+    // 수직 정렬 지정
     setVerticalAlign(mode) {
       const mapped = verticalMap[mode];
       if (mapped) {
@@ -481,8 +458,9 @@ export default {
       }
     },
 
-    // ===== 내부 로직 =====
+    // ===== core logic =====
 
+    // 키/라벨 기준으로 안정적인 내부 id 생성
     getStableId(control) {
       const key = control.key || control.label || 'control';
       if (!this.idMap[key]) {
@@ -491,33 +469,33 @@ export default {
       return this.idMap[key];
     },
 
+    // props 기반으로 active/available 리스트 구성
     buildControls() {
       const valueArray = Array.isArray(this.value) ? this.value : [];
-      const templateArray = Array.isArray(this.controlTemplates)
-        ? this.controlTemplates
-        : [];
+      const templateArray = Array.isArray(this.controlTemplates) ? this.controlTemplates : [];
 
       const usedKeys = new Set(
         valueArray
-          .map(control => control.key)
-          .filter(key => key != null)
+          .map((control) => control.key)
+          .filter((key) => key != null)
       );
 
-      this.activeControls = valueArray.map(control => ({
+      this.activeControls = valueArray.map((control) => ({
         ...control,
         id: control.id || this.getStableId(control)
       }));
 
       this.availableControls = templateArray
-        .filter(template => !usedKeys.has(template.key))
-        .map(template => ({
+        .filter((template) => !usedKeys.has(template.key))
+        .map((template) => ({
           ...template,
           id: template.id || this.getStableId(template)
         }));
     },
 
+    // 부모로 체인 변경 이벤트 전달
     emitChain() {
-      const cloned = this.activeControls.map(control => {
+      const cloned = this.activeControls.map((control) => {
         const clone = { ...control };
         if (Array.isArray(clone.selectedValues)) {
           clone.selectedValues = clone.selectedValues.slice();
@@ -530,8 +508,7 @@ export default {
       this.$emit('change', cloned);
     },
 
-    // ===== 드래그/드롭 이벤트 =====
-
+    // 드래그/드롭 발생 시 이벤트 브로드캐스트
     onActiveChange(event) {
       this.emitChain();
 
@@ -558,8 +535,9 @@ export default {
       }
     },
 
+    // x 버튼으로 컨트롤 제거
     removeControlById(id) {
-      const index = this.activeControls.findIndex(control => control.id === id);
+      const index = this.activeControls.findIndex((control) => control.id === id);
       if (index < 0) {
         return;
       }
@@ -581,6 +559,7 @@ export default {
       });
     },
 
+    // hover 상태 토글
     onControlMouseEnter(element) {
       this.hoveredControlId = element.id;
       this.showCloseControlId = element.id;
@@ -595,8 +574,9 @@ export default {
       }
     },
 
-    // ===== 선택 변경 이벤트 =====
+    // ===== selection events =====
 
+    // 단일 선택 변경
     onSingleSelectChange(element, index, value) {
       if (element.selectedValue === value) {
         return;
@@ -611,11 +591,10 @@ export default {
       });
     },
 
+    // 멀티 선택 변경
     onMultiSelectChange(element, index, values) {
       const nextValues = Array.isArray(values) ? values.slice() : [];
-      const previousValues = Array.isArray(element.selectedValues)
-        ? element.selectedValues
-        : [];
+      const previousValues = Array.isArray(element.selectedValues) ? element.selectedValues : [];
 
       const isSame =
         previousValues.length === nextValues.length &&
@@ -635,23 +614,21 @@ export default {
       });
     },
 
-    // ===== 스타일 헬퍼 =====
+    // ===== helpers =====
 
+    // 텍스트 색상 계산 (hover 상태 반영)
     getTextStyle(element, isActiveArea) {
       const isHovered = this.hoveredControlId === element.id;
       return {
-        color:
-          isActiveArea && isHovered
-            ? this.highlightFontColor
-            : this.baseFontColor
+        color: isActiveArea && isHovered ? this.highlightFontColor : this.baseFontColor
       };
     },
 
+    // 컨트롤 카드 스타일 계산 (폭/하이라이트)
     getContentStyle(index, element) {
       const style = {};
 
-      const maxWidth =
-        element.maxWidth != null ? element.maxWidth : this.defaultMaxWidth;
+      const maxWidth = element.maxWidth != null ? element.maxWidth : this.defaultMaxWidth;
       style.maxWidth = typeof maxWidth === 'number' ? `${maxWidth}px` : maxWidth;
 
       if (this.hoveredControlId === element.id) {
@@ -764,8 +741,8 @@ export default {
   border: none;
   cursor: pointer;
   font-size: 12px;
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -793,7 +770,6 @@ export default {
   width: 100%;
 }
 
-/* 라벨 영역 */
 .control-chain__label-value {
   font-size: 12px;
   display: flex;
@@ -806,7 +782,6 @@ export default {
   box-sizing: border-box;
 }
 
-/* 비어 있을 때 안내 문구: 드롭 방해 안 하도록 absolute */
 .control-chain__empty {
   font-size: 12px;
   position: absolute;
