@@ -1,12 +1,8 @@
 <!--
-  ---------------------------------------------------------------------------
   필요한 라이브러리
 
   vuedraggable (Sortable.js 기반 드래그)
     npm install vuedraggable sortablejs
-    yarn add vuedraggable sortablejs
-
-  ---------------------------------------------------------------------------
 -->
 
 <template>
@@ -104,7 +100,7 @@
         </div>
       </draggable>
 
-      <!-- 비어 있을 때 안내 문구 (드롭 방해 안 하도록 absolute + pointer-events:none) -->
+      <!-- 비어 있을 때 안내 문구 -->
       <div
         v-if="!activeControls.length"
         class="control-chain__empty"
@@ -302,8 +298,6 @@ export default {
     },
 
     containerStyle() {
-      // 부모 레이아웃 영향 최소화를 위해 height는 여기서 건드리지 않고
-      // width만 지정. 높이는 내부 영역(active/available)이 직접 가짐.
       return {
         width: toSize(this.width) || '100%',
         boxSizing: 'border-box'
@@ -319,12 +313,11 @@ export default {
         display: 'flex',
         flexDirection: 'column',
         boxSizing: 'border-box',
-        position: 'relative' // 안내 문구 absolute 기준
+        position: 'relative'
       };
 
       const heightValue = toSize(this.height);
       if (heightValue) {
-        // 컨트롤 체인 높이를 직접 사용 (부모 height:100% 의존 X)
         style.height = heightValue;
         style.minHeight = heightValue;
       } else {
@@ -380,10 +373,8 @@ export default {
 
       const heightValue = toSize(this.height);
       if (heightValue) {
-        // 지정 높이인 경우, 드랍 영역이 꽉 차도록
         style.minHeight = '100%';
       } else {
-        // 높이 미지정 시에도 배경 영역에 드롭 가능하도록 기본 높이 확보
         style.minHeight = this.activeControls.length ? 'auto' : '140px';
       }
 
@@ -433,34 +424,35 @@ export default {
   },
 
   methods: {
-    // ===== 외부에서 호출 가능한 설정 함수들 =====
+    // ===== setters =====
 
+    // 하이라이트 테두리 색상 배열 설정
     setHighlightBorderColors(colors) {
       const array = toArray(colors);
       if (array) {
         this.depthHighlightColors = array;
       }
     },
-
+    // 하이라이트 배경 색상 배열 설정
     setHighlightBackgroundColors(colors) {
       const array = toArray(colors);
       if (array) {
         this.depthHighlightBgColors = array;
       }
     },
-
+    // 기본 글자색 설정
     setBaseFontColor(color) {
       if (color) {
         this.baseFontColor = color;
       }
     },
-
+    // 하이라이트 글자색 설정
     setHighlightFontColor(color) {
       if (color) {
         this.highlightFontColor = color;
       }
     },
-
+    // 사용 가능 영역 너비 설정
     setAvailableWidth(width) {
       if (typeof width === 'number') {
         this.availableWidth = `${width}px`;
@@ -468,14 +460,14 @@ export default {
         this.availableWidth = width;
       }
     },
-
+    // 가로 정렬 설정
     setHorizontalAlign(mode) {
       const mapped = horizontalMap[mode];
       if (mapped) {
         this.horizontalAlign = mapped;
       }
     },
-
+    // 세로 정렬 설정
     setVerticalAlign(mode) {
       const mapped = verticalMap[mode];
       if (mapped) {
@@ -483,8 +475,9 @@ export default {
       }
     },
 
-    // ===== 내부 로직 =====
+    // ===== core logic =====
 
+    // key/label 기반으로 안정적인 id를 만들어 vuedraggable이 리스트를 추적하도록 함
     getStableId(control) {
       const key = control.key || control.label || 'control';
       if (!this.idMap[key]) {
@@ -492,7 +485,7 @@ export default {
       }
       return this.idMap[key];
     },
-
+    // props(value, controlTemplates) 변경 시 활성/사용 가능 리스트 재구성
     buildControls() {
       const valueArray = Array.isArray(this.value) ? this.value : [];
       const templateArray = Array.isArray(this.controlTemplates)
@@ -517,7 +510,7 @@ export default {
           id: template.id || this.getStableId(template)
         }));
     },
-
+    // 현재 체인 상태를 부모에 동기화 (input/change 동시 발행)
     emitChain() {
       const cloned = this.activeControls.map(control => {
         const clone = { ...control };
@@ -532,8 +525,9 @@ export default {
       this.$emit('change', cloned);
     },
 
-    // ===== 드래그/드롭 이벤트 =====
+    // ===== Drag and drop events =====
 
+    // 드래그로 추가/이동/삭제된 내용을 부모에 알림
     onActiveChange(event) {
       this.emitChain();
 
@@ -559,7 +553,7 @@ export default {
         });
       }
     },
-
+    // 닫기 버튼으로 활성 컨트롤을 제거하고 사용 가능 영역으로 반환
     removeControlById(id) {
       const index = this.activeControls.findIndex(control => control.id === id);
       if (index < 0) {
@@ -582,12 +576,12 @@ export default {
         index
       });
     },
-
+    // hover 시 강조 및 닫기 버튼 노출
     onControlMouseEnter(element) {
       this.hoveredControlId = element.id;
       this.showCloseControlId = element.id;
     },
-
+    // hover 해제 시 강조 및 닫기 버튼 숨김
     onControlMouseLeave(element) {
       if (this.hoveredControlId === element.id) {
         this.hoveredControlId = null;
@@ -597,8 +591,9 @@ export default {
       }
     },
 
-    // ===== 선택 변경 이벤트 =====
+    // ===== selection events =====
 
+    // 단일 선택 컨트롤 값 변경 후 상태/이벤트 반영
     onSingleSelectChange(element, index, value) {
       if (element.selectedValue === value) {
         return;
@@ -612,7 +607,7 @@ export default {
         value
       });
     },
-
+    // 멀티 선택 컨트롤 값 변경 후 상태/이벤트 반영
     onMultiSelectChange(element, index, values) {
       const nextValues = Array.isArray(values) ? values.slice() : [];
       const previousValues = Array.isArray(element.selectedValues)
@@ -648,7 +643,7 @@ export default {
             : this.baseFontColor
       };
     },
-
+    // 호버된 컨트롤을 깊이별 색상으로 강조
     getContentStyle(index, element) {
       const style = {};
 
@@ -795,7 +790,6 @@ export default {
   width: 100%;
 }
 
-/* 라벨 영역 */
 .control-chain__label-value {
   font-size: 12px;
   display: flex;
@@ -808,7 +802,6 @@ export default {
   box-sizing: border-box;
 }
 
-/* 비어 있을 때 안내 문구: 드롭 방해 안 하도록 absolute */
 .control-chain__empty {
   font-size: 12px;
   position: absolute;
