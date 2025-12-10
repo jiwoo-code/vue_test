@@ -750,10 +750,11 @@ export default {
 
 <template>
   <div class="control-chain-demo">
-    <!-- 데모 설정 패널 -->
+    <!-- 설정 패널 -->
     <div class="demo-panel">
       <h3 class="demo-panel__title">ControlChain Demo</h3>
 
+      <!-- width -->
       <div class="demo-panel__row">
         <label class="demo-panel__label">
           고정 width 사용
@@ -767,12 +768,18 @@ export default {
           type="number"
           class="demo-panel__input"
           v-model.number="fixedWidth"
-          min="300"
+          min="400"
           step="50"
         />
-        <span v-if="useFixedWidth" class="demo-panel__suffix">px</span>
+        <span
+          v-if="useFixedWidth"
+          class="demo-panel__suffix"
+        >
+          px
+        </span>
       </div>
 
+      <!-- height -->
       <div class="demo-panel__row">
         <label class="demo-panel__label">
           고정 height 사용
@@ -786,36 +793,40 @@ export default {
           type="number"
           class="demo-panel__input"
           v-model.number="fixedHeight"
-          min="200"
+          min="220"
           step="20"
         />
-        <span v-if="useFixedHeight" class="demo-panel__suffix">px</span>
+        <span
+          v-if="useFixedHeight"
+          class="demo-panel__suffix"
+        >
+          px
+        </span>
       </div>
 
+      <!-- 오른쪽 목록 width -->
       <div class="demo-panel__row">
         <label class="demo-panel__label">
-          사용 가능한 컨트롤 제목
+          목록 영역 width
         </label>
         <input
-          type="text"
-          class="demo-panel__input demo-panel__input--full"
-          v-model="availableTitle"
-          placeholder="예: 사용 가능한 컨트롤"
+          type="number"
+          class="demo-panel__input"
+          v-model.number="availableWidth"
+          min="160"
+          step="20"
         />
+        <span class="demo-panel__suffix">px</span>
+        <button
+          type="button"
+          class="demo-panel__button"
+          @click="applyAvailableWidth"
+        >
+          적용
+        </button>
       </div>
 
-      <div class="demo-panel__row">
-        <label class="demo-panel__label">
-          빈 체인 안내 문구
-        </label>
-        <input
-          type="text"
-          class="demo-panel__input demo-panel__input--full"
-          v-model="emptyGuideText"
-          placeholder="예: 목록에서 드래그하여 추가해 주세요."
-        />
-      </div>
-
+      <!-- 목록 위치 -->
       <div class="demo-panel__row">
         <label class="demo-panel__label">
           컨트롤 목록 위치
@@ -828,11 +839,143 @@ export default {
           <option value="left">왼쪽</option>
         </select>
       </div>
+
+      <!-- 타이틀 / 안내문구 -->
+      <div class="demo-panel__row">
+        <label class="demo-panel__label">
+          목록 타이틀
+        </label>
+      </div>
+      <div class="demo-panel__row demo-panel__row--block">
+        <input
+          type="text"
+          class="demo-panel__input demo-panel__input--full"
+          v-model="availableTitle"
+          placeholder="예: 사용 가능한 컨트롤"
+        />
+      </div>
+
+      <div class="demo-panel__row">
+        <label class="demo-panel__label">
+          빈 체인 안내 문구
+        </label>
+      </div>
+      <div class="demo-panel__row demo-panel__row--block">
+        <input
+          type="text"
+          class="demo-panel__input demo-panel__input--full"
+          v-model="emptyGuideText"
+          placeholder="예: 목록에서 드래그하여 추가해 주세요."
+        />
+      </div>
+
+      <!-- 정렬 -->
+      <div class="demo-panel__section-title">
+        정렬
+      </div>
+
+      <div class="demo-panel__row">
+        <span class="demo-panel__label demo-panel__label--small">
+          가로 정렬
+        </span>
+        <select
+          v-model="horizontalMode"
+          class="demo-panel__select"
+          @change="applyHorizontalAlign"
+        >
+          <option value="left">left</option>
+          <option value="center">center</option>
+          <option value="right">right</option>
+        </select>
+      </div>
+
+      <div class="demo-panel__row">
+        <span class="demo-panel__label demo-panel__label--small">
+          세로 정렬
+        </span>
+        <select
+          v-model="verticalMode"
+          class="demo-panel__select"
+          @change="applyVerticalAlign"
+        >
+          <option value="top">top</option>
+          <option value="center">center</option>
+          <option value="bottom">bottom</option>
+        </select>
+      </div>
+
+      <!-- 폰트 컬러 -->
+      <div class="demo-panel__section-title">
+        폰트 색상
+      </div>
+
+      <div class="demo-panel__row">
+        <span class="demo-panel__label demo-panel__label--small">
+          기본 폰트
+        </span>
+        <input
+          type="text"
+          class="demo-panel__input"
+          v-model="baseFontColorInput"
+          placeholder="#222222"
+        />
+        <button
+          type="button"
+          class="demo-panel__button"
+          @click="applyBaseFontColor"
+        >
+          적용
+        </button>
+      </div>
+
+      <div class="demo-panel__row">
+        <span class="demo-panel__label demo-panel__label--small">
+          하이라이트 폰트
+        </span>
+        <input
+          type="text"
+          class="demo-panel__input"
+          v-model="highlightFontColorInput"
+          placeholder="#1E5FCB"
+        />
+        <button
+          type="button"
+          class="demo-panel__button"
+          @click="applyHighlightFontColor"
+        >
+          적용
+        </button>
+      </div>
+
+      <!-- 뎁스별 하이라이트 색상 -->
+      <div class="demo-panel__section-title">
+        뎁스 하이라이트 색상 Preset
+      </div>
+
+      <div class="demo-panel__row demo-panel__row--block">
+        <button
+          type="button"
+          class="demo-panel__button demo-panel__button--full"
+          @click="applyDefaultHighlightColors"
+        >
+          기본 프리셋 적용
+        </button>
+      </div>
+      <div class="demo-panel__row demo-panel__row--block">
+        <button
+          type="button"
+          class="demo-panel__button demo-panel__button--full"
+          @click="applySoftBlueHighlight"
+        >
+          블루 계열 프리셋 적용
+        </button>
+      </div>
     </div>
 
-    <!-- 실제 ControlChain 영역 -->
+    <!-- 오른쪽: 실제 ControlChain -->
     <div class="demo-chain-wrapper">
       <control-chain
+        ref="controlChain"
         v-model="chain"
         :control-templates="controlTemplates"
         :available-placement="availablePlacement"
@@ -858,10 +1001,8 @@ export default {
 
   data() {
     return {
-      // 체인 상태
       chain: [],
 
-      // 전체 템플릿 목록
       controlTemplates: [
         {
           key: 'AAA',
@@ -928,16 +1069,22 @@ export default {
         }
       ],
 
-      // 레이아웃/스크롤 제어용
       useFixedWidth: true,
       useFixedHeight: true,
       fixedWidth: 900,
       fixedHeight: 280,
 
-      // 기타 텍스트/옵션
       availablePlacement: 'right',
       availableTitle: '사용 가능한 컨트롤',
-      emptyGuideText: '목록에서 드래그하여 추가해 주세요.'
+      emptyGuideText: '목록에서 드래그하여 추가해 주세요.',
+
+      availableWidth: 220,
+
+      horizontalMode: 'left',
+      verticalMode: 'center',
+
+      baseFontColorInput: '#222222',
+      highlightFontColorInput: '#1E5FCB'
     };
   },
 
@@ -957,10 +1104,112 @@ export default {
     }
   },
 
+  mounted() {
+    // 초기 정렬/색상/목록 width 적용
+    this.applyHorizontalAlign();
+    this.applyVerticalAlign();
+    this.applyAvailableWidth();
+    this.applyBaseFontColor();
+    this.applyHighlightFontColor();
+    this.applyDefaultHighlightColors();
+  },
+
   methods: {
     logEvent(type, payload) {
-      // 필요하면 실제 로깅/디버깅에 사용
+      // 필요하면 디버깅용으로 열어서 사용
       // console.log(`[${type}]`, payload);
+    },
+
+    applyAvailableWidth() {
+      if (!this.$refs.controlChain) {
+        return;
+      }
+      if (!this.availableWidth) {
+        return;
+      }
+      this.$refs.controlChain.setAvailableWidth(this.availableWidth);
+    },
+
+    applyHorizontalAlign() {
+      if (!this.$refs.controlChain) {
+        return;
+      }
+      this.$refs.controlChain.setHorizontalAlign(this.horizontalMode);
+    },
+
+    applyVerticalAlign() {
+      if (!this.$refs.controlChain) {
+        return;
+      }
+      this.$refs.controlChain.setVerticalAlign(this.verticalMode);
+    },
+
+    applyBaseFontColor() {
+      if (!this.$refs.controlChain) {
+        return;
+      }
+      if (!this.baseFontColorInput) {
+        return;
+      }
+      this.$refs.controlChain.setBaseFontColor(this.baseFontColorInput);
+    },
+
+    applyHighlightFontColor() {
+      if (!this.$refs.controlChain) {
+        return;
+      }
+      if (!this.highlightFontColorInput) {
+        return;
+      }
+      this.$refs.controlChain.setHighlightFontColor(this.highlightFontColorInput);
+    },
+
+    applyDefaultHighlightColors() {
+      if (!this.$refs.controlChain) {
+        return;
+      }
+      const borderColors = [
+        '#D5383A',
+        '#EB702D',
+        '#FBB41A',
+        '#2DA379',
+        '#1E5FCB',
+        '#553CA5'
+      ];
+      const backgroundColors = [
+        '#F8DDDF',
+        '#FAE2D4',
+        '#FFF0C8',
+        '#E0F0E8',
+        '#E0EBFA',
+        '#E5E0F6'
+      ];
+      this.$refs.controlChain.setHighlightBorderColors(borderColors);
+      this.$refs.controlChain.setHighlightBackgroundColors(backgroundColors);
+    },
+
+    applySoftBlueHighlight() {
+      if (!this.$refs.controlChain) {
+        return;
+      }
+      const borderColors = [
+        '#1E5FCB',
+        '#2DA379',
+        '#553CA5',
+        '#1E5FCB',
+        '#2DA379',
+        '#553CA5'
+      ];
+      const backgroundColors = [
+        '#E0EBFA',
+        '#E0F0E8',
+        '#E5E0F6',
+        '#E0EBFA',
+        '#E0F0E8',
+        '#E5E0F6'
+      ];
+      this.$refs.controlChain.setHighlightBorderColors(borderColors);
+      this.$refs.controlChain.setHighlightBackgroundColors(backgroundColors);
     }
   }
 };
@@ -975,7 +1224,7 @@ export default {
 
 /* 왼쪽 설정 패널 */
 .demo-panel {
-  width: 260px;
+  width: 280px;
   padding: 12px;
   border: 1px solid #e5e5e5;
   background: #ffffff;
@@ -989,11 +1238,23 @@ export default {
   font-weight: 600;
 }
 
+.demo-panel__section-title {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  border-top: 1px solid #f0f0f0;
+  padding-top: 8px;
+}
+
 .demo-panel__row {
   display: flex;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   gap: 4px;
+}
+
+.demo-panel__row--block {
+  align-items: stretch;
 }
 
 .demo-panel__label {
@@ -1003,8 +1264,12 @@ export default {
   gap: 4px;
 }
 
+.demo-panel__label--small {
+  width: 72px;
+}
+
 .demo-panel__input {
-  width: 80px;
+  width: 90px;
   padding: 2px 4px;
   font-size: 12px;
   box-sizing: border-box;
@@ -1023,6 +1288,18 @@ export default {
   flex: 1;
   padding: 2px 4px;
   font-size: 12px;
+}
+
+.demo-panel__button {
+  padding: 2px 6px;
+  font-size: 11px;
+  border: 1px solid #e0e0e0;
+  background: #fafafa;
+  cursor: pointer;
+}
+
+.demo-panel__button--full {
+  width: 100%;
 }
 
 /* 오른쪽 체인 영역 */
