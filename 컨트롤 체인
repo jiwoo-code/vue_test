@@ -1031,3 +1031,46 @@ export default {
   font-size: 12px;
 }
 </style>
+
+
+
+
+
+
+
+
+
+
+
+const DROPDOWN_SAFE_RIGHT_GAP = 260; // 필요하면 나중에 값 조정
+
+activeAreaStyle() {
+  const style = {
+    flex: '1 1 auto',
+    // padding 한 줄 대신 네 방향으로 나눠서 오른쪽만 크게
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    paddingLeft: '8px',
+    paddingRight: `${8 + DROPDOWN_SAFE_RIGHT_GAP}px`,
+    border: '1px solid #e5e5e5',
+    background: '#ffffff',
+    display: 'flex',
+    flexDirection: 'column',
+    boxSizing: 'border-box',
+    position: 'relative'
+  };
+
+  const h = toSize(this.height);
+  if (h) {
+    style.height = '100%';
+    style.minHeight = 0;
+    style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
+  } else {
+    style.height = 'auto';
+    style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
+    style.overflowY = 'visible';
+  }
+
+  style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
+  return style;
+}
