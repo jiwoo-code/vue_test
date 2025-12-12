@@ -1118,3 +1118,51 @@ export default {
   font-size: 12px;
 }
 </style>
+
+
+
+
+
+
+
+
+transferColorBySelection(removedIndex) {
+  if (!this.useColorBy || !this.activeControls.length) {
+    this.colorBySelectedKey = null;
+    return;
+  }
+
+  const length = this.activeControls.length;
+  let newSelectedKey = null;
+  let newSelectedControl = null;
+
+  if (this.colorByTransferRule === 'first') {
+    newSelectedControl = this.activeControls[0];
+  }
+
+  else if (this.colorByTransferRule === 'left') {
+    const targetIndex = removedIndex - 1;
+    newSelectedControl =
+      targetIndex >= 0
+        ? this.activeControls[targetIndex]
+        : this.activeControls[0];
+  }
+
+  else if (this.colorByTransferRule === 'right') {
+    const targetIndex = removedIndex;
+    newSelectedControl =
+      targetIndex < length
+        ? this.activeControls[targetIndex]
+        : this.activeControls[length - 1];
+  }
+
+  // 최종 키/컨트롤 결정
+  newSelectedKey = newSelectedControl?.key ?? null;
+  this.colorBySelectedKey = newSelectedKey;
+
+  // 🔥 추가된 부분: 자동 변경 시에도 부모에게 이벤트 알림
+  this.$emit('color-by-change', {
+    key: newSelectedKey,
+    control: newSelectedControl
+  });
+}
