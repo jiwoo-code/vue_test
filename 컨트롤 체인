@@ -45,16 +45,14 @@
             class="control-chain__content"
             :style="getContentStyle(index, element)"
           >
-            <!-- 헤더 (타이틀 + 드래그핸들 + X 버튼) -->
+            <!-- 헤더: 드래그 핸들 + 타이틀 + 닫기 버튼 -->
             <div
               class="control-chain__header"
               @mouseenter="onControlMouseEnter(element)"
               @mouseleave="onControlMouseLeave(element)"
             >
               <div class="control-chain__header-left">
-                <span class="control-chain__drag-handle">
-                  ≡
-                </span>
+                <span class="control-chain__drag-handle">≡</span>
                 <span
                   class="control-chain__title"
                   :style="getTextStyle(element, true)"
@@ -62,7 +60,6 @@
                   {{ element.label }}
                 </span>
               </div>
-
               <button
                 type="button"
                 class="control-chain__close-button"
@@ -73,14 +70,10 @@
               </button>
             </div>
 
-            <!-- 바디 (dropdown / label) : items 없으면 통째로 안 그림 -->
-            <div
-              v-if="hasBody(element)"
-              class="control-chain__body"
-            >
-              <!-- single dropdown -->
+            <!-- 바디 영역: dropdown / multi / label -->
+            <div class="control-chain__body">
               <ur-dropdown
-                v-if="element.type === 'single'"
+                v-if="element.type === 'single' && element.items && element.items.length"
                 class="control-chain__dropdown"
                 sm
                 v-model="element.selectedValue"
@@ -88,50 +81,30 @@
                 @input="onSingleSelectChange(element, index, $event)"
               />
 
-              <!-- multi dropdown -->
               <ur-multi-dropdown
-                v-else-if="element.type === 'multi'"
+                v-else-if="element.type === 'multi' && element.items && element.items.length"
                 class="control-chain__dropdown"
                 sm
                 v-model="element.selectedValues"
                 :items="element.items"
-                :select-all="element.selectAll === true"
+                :select-all="!!element.showSelectAll"
                 @input="onMultiSelectChange(element, index, $event)"
               />
 
-              <!-- 라벨 컨트롤 -->
+              <!-- 라벨 컨트롤 또는 바디 없음 -->
               <span
-                v-else
+                v-else-if="element.type === 'label'"
                 class="control-chain__label-value"
                 :style="{ color: baseFontColor }"
               >
                 {{ element.displayValue || '-' }}
               </span>
             </div>
-
-            <!-- ColorBy 라디오 라인 -->
-            <div
-              v-if="useColorBy"
-              class="control-chain__colorby-row"
-            >
-              <label class="control-chain__colorby-label">
-                <input
-                  type="radio"
-                  class="control-chain__colorby-radio"
-                  :value="element.id"
-                  v-model="colorBySelectedId"
-                  @change="onColorByChange(element, index)"
-                />
-                <span class="control-chain__colorby-text">
-                  ColorBy
-                </span>
-              </label>
-            </div>
           </div>
         </div>
       </draggable>
 
-      <!-- 안내 문구: 드롭을 방해하지 않도록 absolute + pointer-events: none -->
+      <!-- 비어 있을 때 안내 문구 (드롭 영역 방해 안 하도록 absolute + pointer-events: none) -->
       <div
         v-if="!activeControls.length"
         class="control-chain__empty"
@@ -172,9 +145,7 @@
               @mouseenter="onControlMouseEnter(element)"
               @mouseleave="onControlMouseLeave(element)"
             >
-              <span
-                class="control-chain__drag-handle control-chain__drag-handle--small"
-              >
+              <span class="control-chain__drag-handle control-chain__drag-handle--small">
                 ≡
               </span>
               <span
@@ -198,33 +169,18 @@ const DEFAULT_MIN_HEIGHT = 260;
 const DEFAULT_AVAILABLE_WIDTH = 220;
 
 const toSize = (value) => {
-  if (value == null || value === '') {
-    return undefined;
-  }
+  if (value == null || value === '') return undefined;
   return typeof value === 'number' ? `${value}px` : value;
 };
 
 const toArray = (input) => {
-  if (!input) {
-    return null;
-  }
-  if (Array.isArray(input)) {
-    return input.length ? input.slice() : null;
-  }
+  if (!input) return null;
+  if (Array.isArray(input)) return input.length ? input.slice() : null;
   return [input];
 };
 
-const horizontalMap = {
-  left: 'flex-start',
-  center: 'center',
-  right: 'flex-end'
-};
-
-const verticalMap = {
-  top: 'flex-start',
-  center: 'center',
-  bottom: 'flex-end'
-};
+const horizontalMap = { left: 'flex-start', center: 'center', right: 'flex-end' };
+const verticalMap = { top: 'flex-start', center: 'center', bottom: 'flex-end' };
 
 export default {
   name: 'ControlChain',
@@ -258,7 +214,6 @@ export default {
       type: String,
       default: ''
     },
-
     width: {
       type: [Number, String],
       default: null
@@ -267,7 +222,6 @@ export default {
       type: [Number, String],
       default: null
     },
-
     useHorizontalScroll: {
       type: Boolean,
       default: false
@@ -275,28 +229,6 @@ export default {
     useVerticalScroll: {
       type: Boolean,
       default: false
-    },
-
-    // ColorBy 사용 여부
-    useColorBy: {
-      type: Boolean,
-      default: false
-    },
-
-    // 초기 ColorBy 선택 컨트롤을 결정하는 함수: (plainActiveControls) => key | null
-    resolveInitialColorByKey: {
-      type: Function,
-      default: null
-    },
-
-    // ColorBy 선택된 컨트롤이 삭제될 때 어느 컨트롤로 넘길지
-    // 'first' | 'left' | 'right'
-    colorByTransferRule: {
-      type: String,
-      default: 'first',
-      validator(v) {
-        return ['first', 'left', 'right'].includes(v);
-      }
     }
   },
 
@@ -310,10 +242,8 @@ export default {
         put: true
       },
       dragHandleSelector: '.control-chain__drag-handle',
-
       hoveredControlId: null,
       showCloseControlId: null,
-
       idMap: {},
 
       depthHighlightColors: [
@@ -341,10 +271,7 @@ export default {
       availableWidth: null,
 
       horizontalAlign: 'flex-start',
-      verticalAlign: 'center',
-
-      // ColorBy 선택 상태(id 기준)
-      colorBySelectedId: null
+      verticalAlign: 'center'
     };
   },
 
@@ -359,15 +286,14 @@ export default {
         boxSizing: 'border-box'
       };
 
-      const heightValue = toSize(this.height);
-      if (heightValue) {
-        style.height = heightValue;
-        style.minHeight = heightValue;
+      const h = toSize(this.height);
+      if (h) {
+        style.height = h;
+        style.minHeight = h;
       } else {
         style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
       }
-
       return style;
     },
 
@@ -383,29 +309,31 @@ export default {
         position: 'relative'
       };
 
-      const heightValue = toSize(this.height);
-
-      if (heightValue) {
+      const h = toSize(this.height);
+      if (h) {
+        // height 지정 시: 컨테이너 높이에 맞추고 필요하면 스크롤
         style.height = '100%';
         style.minHeight = 0;
+        style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
       } else {
+        // height 미지정 시: 내용에 따라 자연스럽게 늘어나되, 최소 높이만 보장
         style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
+        style.overflowY = 'visible';
       }
 
-      style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
       style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
 
       return style;
     },
 
     availableAreaStyle() {
-      const rawWidth = this.availableWidth ?? `${DEFAULT_AVAILABLE_WIDTH}px`;
-      const widthValue = toSize(rawWidth) ?? rawWidth;
+      const raw = this.availableWidth ?? `${DEFAULT_AVAILABLE_WIDTH}px`;
+      const w = toSize(raw) ?? raw;
 
       const style = {
-        width: widthValue,
-        flexBasis: widthValue,
+        width: w,
+        flexBasis: w,
         flexShrink: 0,
         flexGrow: 0,
         padding: '8px',
@@ -416,9 +344,10 @@ export default {
         flexDirection: 'column'
       };
 
-      const heightValue = toSize(this.height);
-      if (heightValue) {
+      const h = toSize(this.height);
+      if (h) {
         style.height = '100%';
+        style.minHeight = 0;
       } else {
         style.height = 'auto';
         style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
@@ -428,6 +357,9 @@ export default {
     },
 
     activeDraggableStyle() {
+      // 핵심 수정:
+      //  - 불필요한 minHeight/height 제거
+      //  - flex-wrap + alignContent/alignItems만으로 정렬 제어
       const style = {
         display: 'flex',
         boxSizing: 'border-box',
@@ -435,16 +367,18 @@ export default {
         columnGap: '8px',
         flex: '1 1 auto',
         width: '100%',
-        minWidth: 0,
-        minHeight: '140px'
+        minWidth: 0
       };
 
-      style.flexWrap = this.useHorizontalScroll ? 'nowrap' : 'wrap';
-      style.justifyContent = this.horizontalAlign;
-
       if (this.useHorizontalScroll) {
+        // 한 줄로 나열 + 가로 스크롤
+        style.flexWrap = 'nowrap';
+        style.justifyContent = this.horizontalAlign;
         style.alignItems = this.verticalAlign;
       } else {
+        // 여러 줄 래핑
+        style.flexWrap = 'wrap';
+        style.justifyContent = this.horizontalAlign;
         style.alignContent = this.verticalAlign;
       }
 
@@ -452,9 +386,7 @@ export default {
     },
 
     emptyGuideTextStyle() {
-      return {
-        color: '#999999'
-      };
+      return { color: '#999999' };
     },
 
     availableTitleTextStyle() {
@@ -485,7 +417,7 @@ export default {
   },
 
   methods: {
-    // ===================== Public API =====================
+    // --------- 외부에서 호출 가능한 설정 메서드 ---------
 
     setHighlightBorderColors(colors) {
       const array = toArray(colors);
@@ -535,7 +467,7 @@ export default {
       }
     },
 
-    // ===================== 내부 빌드 로직 =====================
+    // --------- 내부 데이터 빌드 ---------
 
     getStableId(control) {
       const key = control.key || control.label || 'control';
@@ -568,26 +500,23 @@ export default {
           ...template,
           id: template.id || this.getStableId(template)
         }));
-
-      this.initColorBySelection();
-      // ❗ 여기서는 emitChain 호출하지 않음 (무한 루프 방지)
     },
 
     emitChain() {
       const cloned = this.activeControls.map(control => {
-        const clone = { ...control };
-        if (Array.isArray(clone.selectedValues)) {
-          clone.selectedValues = clone.selectedValues.slice();
+        const obj = { ...control };
+        if (Array.isArray(obj.selectedValues)) {
+          obj.selectedValues = obj.selectedValues.slice();
         }
-        delete clone.id;
-        return clone;
+        delete obj.id;
+        return obj;
       });
 
       this.$emit('input', cloned);
       this.$emit('change', cloned);
     },
 
-    // ===================== 드래그/드랍 =====================
+    // --------- 드래그/드롭 이벤트 ---------
 
     onActiveChange(event) {
       this.emitChain();
@@ -598,7 +527,6 @@ export default {
           index: event.added.newIndex
         });
       }
-
       if (event.moved) {
         this.$emit('control-depth-change', {
           control: event.moved.element,
@@ -606,29 +534,19 @@ export default {
           newIndex: event.moved.newIndex
         });
       }
-
       if (event.removed) {
-        const removed = event.removed.element;
         this.$emit('control-removed', {
-          control: removed,
+          control: event.removed.element,
           index: event.removed.oldIndex
         });
-
-        if (this.useColorBy && removed && removed.id === this.colorBySelectedId) {
-          this.transferColorBySelection(event.removed.oldIndex);
-        }
       }
     },
 
     removeControlById(controlId) {
       const index = this.activeControls.findIndex(control => control.id === controlId);
-      if (index < 0) {
-        return;
-      }
+      if (index < 0) return;
 
-      const removedList = this.activeControls.splice(index, 1);
-      const removed = removedList[0];
-
+      const removed = this.activeControls.splice(index, 1)[0];
       this.availableControls.push(removed);
 
       if (this.hoveredControlId === controlId) {
@@ -636,10 +554,6 @@ export default {
       }
       if (this.showCloseControlId === controlId) {
         this.showCloseControlId = null;
-      }
-
-      if (this.useColorBy && removed && removed.id === this.colorBySelectedId) {
-        this.transferColorBySelection(index);
       }
 
       this.emitChain();
@@ -663,12 +577,13 @@ export default {
       }
     },
 
-    // ===================== 선택 변경 =====================
+    // --------- 선택 변경 이벤트 ---------
 
     onSingleSelectChange(element, index, value) {
       if (element.selectedValue === value) {
         return;
       }
+
       element.selectedValue = value;
       this.emitChain();
       this.$emit('control-selection-change', {
@@ -687,7 +602,7 @@ export default {
 
       const isSame =
         prevValues.length === nextValues.length &&
-        prevValues.every((item, position) => item === nextValues[position]);
+        prevValues.every((v, i) => v === nextValues[i]);
 
       if (isSame) {
         return;
@@ -703,137 +618,29 @@ export default {
       });
     },
 
-    // ===================== ColorBy 로직 =====================
-
-    hasBody(element) {
-      // dropdown: items 없으면 바디 렌더링 안 함
-      if (element.type === 'single' || element.type === 'multi') {
-        return Array.isArray(element.items) && element.items.length > 0;
-      }
-      // label은 항상 바디 표시
-      if (element.type === 'label') {
-        return true;
-      }
-      return false;
-    },
-
-    initColorBySelection() {
-      if (!this.useColorBy) {
-        this.colorBySelectedId = null;
-        return;
-      }
-
-      if (!this.activeControls.length) {
-        this.colorBySelectedId = null;
-        return;
-      }
-
-      // 기존 선택 유효하면 유지
-      if (
-        this.colorBySelectedId &&
-        this.activeControls.some(control => control.id === this.colorBySelectedId)
-      ) {
-        return;
-      }
-
-      // 호출부 resolver 우선
-      if (typeof this.resolveInitialColorByKey === 'function') {
-        const plainControls = this.activeControls.map(control => {
-          const clone = { ...control };
-          delete clone.id;
-          return clone;
-        });
-
-        const key = this.resolveInitialColorByKey(plainControls);
-        if (key) {
-          const matched = this.activeControls.find(control => control.key === key);
-          if (matched) {
-            this.colorBySelectedId = matched.id;
-            return;
-          }
-        }
-      }
-
-      // 기본: 첫 번째
-      this.colorBySelectedId = this.activeControls[0].id;
-    },
-
-    transferColorBySelection(removedIndex) {
-      if (!this.useColorBy) {
-        return;
-      }
-
-      if (!this.activeControls.length) {
-        this.colorBySelectedId = null;
-        this.$emit('color-by-change', null);
-        return;
-      }
-
-      const rule = this.colorByTransferRule || 'first';
-      let targetIndex = 0;
-
-      if (rule === 'left') {
-        const candidateIndex = removedIndex - 1;
-        if (candidateIndex >= 0 && candidateIndex < this.activeControls.length) {
-          targetIndex = candidateIndex;
-        }
-      } else if (rule === 'right') {
-        const candidateIndex = removedIndex;
-        if (candidateIndex >= 0 && candidateIndex < this.activeControls.length) {
-          targetIndex = candidateIndex;
-        }
-      }
-
-      const target = this.activeControls[targetIndex];
-      this.colorBySelectedId = target.id;
-
-      this.$emit('color-by-change', {
-        control: target,
-        index: targetIndex,
-        key: target.key
-      });
-    },
-
-    onColorByChange(element, index) {
-      this.colorBySelectedId = element.id;
-      this.$emit('color-by-change', {
-        control: element,
-        index,
-        key: element.key
-      });
-    },
-
-    // ===================== 스타일 =====================
+    // --------- 스타일 헬퍼 ---------
 
     getTextStyle(element, isActiveArea) {
       const isHovered = this.hoveredControlId === element.id;
-      const isColorBySelected =
-        this.useColorBy && this.colorBySelectedId === element.id;
-
-      let color = this.baseFontColor;
-
-      if (isActiveArea && isHovered) {
-        color = this.highlightFontColor;
-      } else if (isActiveArea && isColorBySelected) {
-        color = this.highlightFontColor;
-      }
-
-      return { color };
+      return {
+        color:
+          isActiveArea && isHovered
+            ? this.highlightFontColor
+            : this.baseFontColor
+      };
     },
 
     getContentStyle(index, element) {
       const style = {};
 
-      const maxWidth =
-        element.maxWidth != null ? element.maxWidth : this.defaultMaxWidth;
+      const maxWidth = element.maxWidth != null ? element.maxWidth : this.defaultMaxWidth;
       style.maxWidth = typeof maxWidth === 'number' ? `${maxWidth}px` : maxWidth;
 
       if (this.hoveredControlId === element.id) {
         const colorIndex = index % this.depthHighlightColors.length;
+        const bgIndex = index % this.depthHighlightBgColors.length;
         style.borderColor = this.depthHighlightColors[colorIndex];
-        style.backgroundColor = this.depthHighlightBgColors[colorIndex];
-      } else if (this.useColorBy && this.colorBySelectedId === element.id) {
-        style.borderColor = '#1E5FCB';
+        style.backgroundColor = this.depthHighlightBgColors[bgIndex];
       }
 
       return style;
@@ -856,7 +663,6 @@ export default {
 .control-chain--available-right {
   flex-direction: row;
 }
-
 .control-chain--available-left {
   flex-direction: row-reverse;
 }
@@ -981,26 +787,7 @@ export default {
   box-sizing: border-box;
 }
 
-.control-chain__colorby-row {
-  margin-top: 4px;
-}
-
-.control-chain__colorby-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: #666666;
-}
-
-.control-chain__colorby-radio {
-  cursor: pointer;
-}
-
-.control-chain__colorby-text {
-  user-select: none;
-}
-
+/* 안내 문구: 드롭 영역을 막지 않도록 absolute + pointer-events:none */
 .control-chain__empty {
   font-size: 12px;
   position: absolute;
@@ -1021,7 +808,6 @@ export default {
   background: #ffffff;
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
-
 .control-chain__available-content:hover {
   background: #f7f7f7;
   border-color: #d0d0d0;
@@ -1031,46 +817,3 @@ export default {
   font-size: 12px;
 }
 </style>
-
-
-
-
-
-
-
-
-
-
-
-const DROPDOWN_SAFE_RIGHT_GAP = 260; // 필요하면 나중에 값 조정
-
-activeAreaStyle() {
-  const style = {
-    flex: '1 1 auto',
-    // padding 한 줄 대신 네 방향으로 나눠서 오른쪽만 크게
-    paddingTop: '8px',
-    paddingBottom: '8px',
-    paddingLeft: '8px',
-    paddingRight: `${8 + DROPDOWN_SAFE_RIGHT_GAP}px`,
-    border: '1px solid #e5e5e5',
-    background: '#ffffff',
-    display: 'flex',
-    flexDirection: 'column',
-    boxSizing: 'border-box',
-    position: 'relative'
-  };
-
-  const h = toSize(this.height);
-  if (h) {
-    style.height = '100%';
-    style.minHeight = 0;
-    style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
-  } else {
-    style.height = 'auto';
-    style.minHeight = `${DEFAULT_MIN_HEIGHT}px`;
-    style.overflowY = 'visible';
-  }
-
-  style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
-  return style;
-}
