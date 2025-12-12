@@ -88,16 +88,16 @@
                 @input="onSingleSelectChange(element, index, $event)"
               />
 
-              <!-- multi-dropdown -->
-<ur-multi-dropdown
-  v-else-if="element.type === 'multi'"
-  class="control-chain__dropdown"
-  sm
-  v-model="element.selectedValues"
-  :items="element.items"
-  :select-all="element.selectAll === true"
-  @input="onMultiSelectChange(element, index, $event)"
-/>
+              <!-- multi dropdown -->
+              <ur-multi-dropdown
+                v-else-if="element.type === 'multi'"
+                class="control-chain__dropdown"
+                sm
+                v-model="element.selectedValues"
+                :items="element.items"
+                :select-all="element.selectAll === true"
+                @input="onMultiSelectChange(element, index, $event)"
+              />
 
               <!-- 라벨 컨트롤 -->
               <span
@@ -131,7 +131,7 @@
         </div>
       </draggable>
 
-      <!-- 안내 문구: 드롭을 방해하지 않도록 절대 위치 + pointer-events: none -->
+      <!-- 안내 문구: 드롭을 방해하지 않도록 absolute + pointer-events: none -->
       <div
         v-if="!activeControls.length"
         class="control-chain__empty"
@@ -277,32 +277,20 @@ export default {
       default: false
     },
 
-    /**
-     * ColorBy 기능 사용 여부
-     * - true: 각 컨트롤에 ColorBy 라디오 표시
-     * - false: ColorBy 라인 자체를 렌더링하지 않음
-     */
+    // ColorBy 사용 여부
     useColorBy: {
       type: Boolean,
       default: false
     },
 
-    /**
-     * ColorBy 초기 선택 컨트롤을 결정하는 함수
-     * - (activeControlsWithoutId:Array) => key(string) | null
-     * - null 또는 유효하지 않은 key를 리턴하면 기본 규칙(first) 사용
-     */
+    // 초기 ColorBy 선택 컨트롤을 결정하는 함수: (plainActiveControls) => key | null
     resolveInitialColorByKey: {
       type: Function,
       default: null
     },
 
-    /**
-     * ColorBy 선택된 컨트롤이 삭제될 때, 선택을 어디로 넘길지 규칙
-     * - 'first' : 항상 첫 번째 컨트롤로 이동
-     * - 'left'  : 삭제된 컨트롤의 왼쪽 컨트롤이 우선, 없으면 첫 번째
-     * - 'right' : 삭제된 컨트롤의 오른쪽 컨트롤이 우선, 없으면 첫 번째
-     */
+    // ColorBy 선택된 컨트롤이 삭제될 때 어느 컨트롤로 넘길지
+    // 'first' | 'left' | 'right'
     colorByTransferRule: {
       type: String,
       default: 'first',
@@ -582,7 +570,7 @@ export default {
         }));
 
       this.initColorBySelection();
-      this.emitChain();
+      // ❗ 여기서는 emitChain 호출하지 않음 (무한 루프 방지)
     },
 
     emitChain() {
@@ -740,7 +728,7 @@ export default {
         return;
       }
 
-      // 이미 선택된 id가 있고, 아직 목록에 남아 있으면 유지
+      // 기존 선택 유효하면 유지
       if (
         this.colorBySelectedId &&
         this.activeControls.some(control => control.id === this.colorBySelectedId)
@@ -748,7 +736,7 @@ export default {
         return;
       }
 
-      // 호출부에서 주는 resolver 우선
+      // 호출부 resolver 우선
       if (typeof this.resolveInitialColorByKey === 'function') {
         const plainControls = this.activeControls.map(control => {
           const clone = { ...control };
@@ -766,7 +754,7 @@ export default {
         }
       }
 
-      // 그 외에는 기본 규칙(first)
+      // 기본: 첫 번째
       this.colorBySelectedId = this.activeControls[0].id;
     },
 
@@ -782,7 +770,6 @@ export default {
       }
 
       const rule = this.colorByTransferRule || 'first';
-
       let targetIndex = 0;
 
       if (rule === 'left') {
@@ -846,7 +833,6 @@ export default {
         style.borderColor = this.depthHighlightColors[colorIndex];
         style.backgroundColor = this.depthHighlightBgColors[colorIndex];
       } else if (this.useColorBy && this.colorBySelectedId === element.id) {
-        // ColorBy 선택된 컨트롤은 살짝 테두리만 강조
         style.borderColor = '#1E5FCB';
       }
 
@@ -875,7 +861,6 @@ export default {
   flex-direction: row-reverse;
 }
 
-/* 활성 체인 영역 */
 .control-chain__active {
   position: relative;
   box-sizing: border-box;
@@ -886,7 +871,6 @@ export default {
   height: 100%;
 }
 
-/* 사용 가능한 컨트롤 영역 */
 .control-chain__available {
   box-sizing: border-box;
 }
@@ -913,7 +897,6 @@ export default {
   margin-top: 4px;
 }
 
-/* 체인 아이템 */
 .control-chain__item {
   display: flex;
   align-items: center;
@@ -934,7 +917,6 @@ export default {
   flex-direction: column;
 }
 
-/* 헤더 */
 .control-chain__header {
   display: flex;
   justify-content: space-between;
@@ -976,7 +958,6 @@ export default {
   width: 11px;
 }
 
-/* 바디 (dropdown / label) */
 .control-chain__body {
   display: flex;
   align-items: stretch;
@@ -988,7 +969,6 @@ export default {
   width: 100%;
 }
 
-/* 라벨 영역 */
 .control-chain__label-value {
   font-size: 12px;
   display: flex;
@@ -1001,7 +981,6 @@ export default {
   box-sizing: border-box;
 }
 
-/* ColorBy 라인 */
 .control-chain__colorby-row {
   margin-top: 4px;
 }
@@ -1022,7 +1001,6 @@ export default {
   user-select: none;
 }
 
-/* 안내 문구: 드롭 방해하지 않도록 absolute + pointer-events: none */
 .control-chain__empty {
   font-size: 12px;
   position: absolute;
@@ -1034,7 +1012,6 @@ export default {
   text-align: center;
 }
 
-/* 오른쪽 목록 */
 .control-chain__available-content {
   border: 1px solid #e0e0e0;
   padding: 4px 6px;
