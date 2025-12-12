@@ -88,16 +88,16 @@
                 @input="onSingleSelectChange(element, index, $event)"
               />
 
-              <!-- multi dropdown -->
-              <ur-multi-dropdown
-                v-else-if="element.type === 'multi'"
-                class="control-chain__dropdown"
-                sm
-                v-model="element.selectedValues"
-                :items="element.items"
-                :all-select="element.showAllSelect === true"
-                @input="onMultiSelectChange(element, index, $event)"
-              />
+              <!-- multi-dropdown -->
+<ur-multi-dropdown
+  v-else-if="element.type === 'multi'"
+  class="control-chain__dropdown"
+  sm
+  v-model="element.selectedValues"
+  :items="element.items"
+  :select-all="element.selectAll === true"
+  @input="onMultiSelectChange(element, index, $event)"
+/>
 
               <!-- 라벨 컨트롤 -->
               <span
