@@ -1166,3 +1166,1230 @@ transferColorBySelection(removedIndex) {
     control: newSelectedControl
   });
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!--
+  ---------------------------------------------------------------------------
+  필요한 라이브러리
+
+  vuedraggable (Sortable.js 기반 드래그)
+    npm install vuedraggable sortablejs
+      ---------------------------------------------------------------------------
+-->
+
+<template>
+  <div
+    class="control-chain"
+    :class="layoutClass"
+    :style="[containerStyle, cssVarStyle]"
+  >
+    <!-- 활성 체인 영역 (왼쪽) -->
+    <div
+      ref="activeArea"
+      class="control-chain__active"
+      :style="activeAreaStyle"
+    >
+      <draggable
+        :list="activeControls"
+        :group="dragGroup"
+        item-key="id"
+        class="control-chain__draggable"
+        :style="activeDraggableStyle"
+        :handle="dragHandleSelector"
+        :fallback-tolerance="8"
+        :force-fallback="true"
+        chosen-class="control-chain__chosen"
+        ghost-class="control-chain__ghost"
+        :animation="150"
+        @move="onDragMove"
+        @end="onDragEnd"
+        @change="onActiveChange"
+      >
+        <div
+          v-for="(element, index) in activeControls"
+          :key="element.id"
+          class="control-chain__item"
+        >
+          <span
+            v-if="index > 0"
+            class="control-chain__separator"
+          >
+            >>
+          </span>
+
+          <div
+            class="control-chain__content"
+            :style="getContentStyle(index, element)"
+          >
+            <!-- 헤더: 드래그 핸들 + 타이틀 + X 버튼 -->
+            <div
+              class="control-chain__header"
+              @mouseenter="onControlMouseEnter(element)"
+              @mouseleave="onControlMouseLeave(element)"
+            >
+              <div class="control-chain__header-left">
+                <span class="control-chain__drag-handle">
+                  ≡
+                </span>
+                <span
+                  class="control-chain__title"
+                  :style="getTextStyle(element, true)"
+                >
+                  {{ element.label }}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                class="control-chain__close-button"
+                :style="{ visibility: showCloseControlId === element.id ? 'visible' : 'hidden' }"
+                @click.stop="removeControlById(element.id)"
+              >
+                ✕
+              </button>
+            </div>
+
+            <!-- 바디: dropdown / label (옵션 없으면 통째로 미표시) -->
+            <div
+              v-if="hasBody(element)"
+              class="control-chain__body"
+            >
+              <ur-dropdown
+                v-if="element.type === 'single'"
+                class="control-chain__dropdown"
+                sm
+                v-model="element.selectedValue"
+                :items="element.items"
+                @input="onSingleSelectChange(element, index, $event)"
+              />
+
+              <ur-multi-dropdown
+                v-else-if="element.type === 'multi'"
+                class="control-chain__dropdown"
+                sm
+                v-model="element.selectedValues"
+                :items="element.items"
+                :all-select="element.allSelect === true"
+                @input="onMultiSelectChange(element, index, $event)"
+              />
+
+              <span
+                v-else-if="element.type === 'label'"
+                class="control-chain__label-value"
+                :style="{ color: baseFontColor }"
+              >
+                {{ element.displayValue || '-' }}
+              </span>
+            </div>
+
+            <!-- ColorBy 라인 -->
+            <div
+              v-if="useColorBy"
+              class="control-chain__color-by-row"
+            >
+              <label class="control-chain__color-by-label">
+                <input
+                  type="radio"
+                  class="control-chain__color-by-radio"
+                  :name="colorByGroupName"
+                  :value="element.key"
+                  v-model="colorBySelectedKey"
+                  @change="onColorByChange(element)"
+                />
+                ColorBy
+              </label>
+            </div>
+          </div>
+        </div>
+      </draggable>
+
+      <!-- 비어 있을 때 안내 문구: 드롭 방해 X -->
+      <div
+        v-if="!activeControls.length"
+        class="control-chain__empty"
+        :style="emptyGuideTextStyle"
+      >
+        {{ emptyGuideText }}
+      </div>
+    </div>
+
+    <!-- 사용 가능한 컨트롤 영역 (오른쪽) -->
+    <div
+      class="control-chain__available"
+      :style="availableAreaStyle"
+    >
+      <div
+        v-if="availableTitle"
+        ref="availableTitle"
+        class="control-chain__available-title"
+        :style="availableTitleTextStyle"
+      >
+        {{ availableTitle }}
+      </div>
+
+      <div class="control-chain__available-list-wrapper">
+        <draggable
+          :list="availableControls"
+          :group="dragGroup"
+          item-key="id"
+          class="control-chain__available-list"
+          :handle="dragHandleSelector"
+          :fallback-tolerance="8"
+          :force-fallback="true"
+          chosen-class="control-chain__chosen"
+          ghost-class="control-chain__ghost"
+          :animation="150"
+          tag="ul"
+          @move="onDragMove"
+          @end="onDragEnd"
+        >
+          <li
+            v-for="element in availableControls"
+            :key="element.id"
+            class="control-chain__available-item"
+          >
+            <div
+              class="control-chain__available-content"
+              @mouseenter="onControlMouseEnter(element)"
+              @mouseleave="onControlMouseLeave(element)"
+            >
+              <span class="control-chain__drag-handle control-chain__drag-handle--small">
+                ≡
+              </span>
+
+              <span
+                class="control-chain__available-label"
+                :style="getTextStyle(element, false)"
+              >
+                {{ element.label }}
+              </span>
+            </div>
+          </li>
+
+        </draggable>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import draggable from 'vuedraggable';
+import UrDropdown from './UrDropdown.vue';
+import UrMultiDropdown from './UrMultiDropdown.vue';
+
+const DEFAULT_AVAILABLE_WIDTH = 220;
+
+const toSize = (value) => {
+  if (value == null || value === '') {
+    return undefined;
+  }
+  return typeof value === 'number' ? `${value}px` : value;
+};
+
+const toArray = (input) => {
+  if (!input) return null;
+  if (Array.isArray(input)) return input.length ? input.slice() : null;
+  return [input];
+};
+
+const horizontalMap = {
+  left: 'flex-start',
+  center: 'center',
+  right: 'flex-end'
+};
+
+const verticalMap = {
+  top: 'flex-start',
+  center: 'center',
+  bottom: 'flex-end'
+};
+
+export default {
+  name: 'ControlChain',
+  components: { draggable, UrDropdown, UrMultiDropdown },
+
+  model: { prop: 'value', event: 'input' },
+
+  props: {
+    /**
+     * v-model 값
+     * - 활성 체인에 올라간 컨트롤 배열
+     */
+    value: {
+      type: Array,
+      default() {
+        return [];
+      }
+    },
+
+    /**
+     * 전체 컨트롤 템플릿 목록
+     */
+    controlTemplates: {
+      type: Array,
+      required: true
+    },
+
+    /**
+     * 오른쪽/왼쪽 중 어떤 쪽에 "사용 가능한 컨트롤 목록"을 둘지 결정
+     */
+    availablePlacement: {
+      type: String,
+      default: 'right',
+      validator(v) {
+        return ['right', 'left'].includes(v);
+      }
+    },
+
+    /**
+     * 왼쪽 체인이 비어 있을 때 보여줄 안내 문구
+     */
+    emptyGuideText: {
+      type: String,
+      default: '목록에서 드래그하여 추가해 주세요.'
+    },
+
+    /**
+     * 오른쪽 "사용 가능한 컨트롤" 영역의 타이틀
+     */
+    availableTitle: {
+      type: String,
+      default: ''
+    },
+
+    /**
+     * 전체 컨트롤체인 가로/세로 크기
+     * - height 미지정 시: 내용 높이에 따라 자동
+     */
+    width: {
+      type: [Number, String],
+      default: null
+    },
+    height: {
+      type: [Number, String],
+      default: null
+    },
+
+    /**
+     * 스크롤 사용 여부
+     */
+    useHorizontalScroll: {
+      type: Boolean,
+      default: false
+    },
+    useVerticalScroll: {
+      type: Boolean,
+      default: false
+    },
+
+    /**
+     * ColorBy 기능 사용 여부
+     */
+    useColorBy: {
+      type: Boolean,
+      default: false
+    },
+
+    /**
+     * 왼쪽으로 올릴 수 있는 컨트롤 최대 개수
+     * - null이면 제한 없음
+     */
+    maxActiveControls: {
+      type: Number,
+      default: null
+    },
+
+    /**
+     * 컨트롤 기본 min/max width
+     * - element.minWidth / element.maxWidth가 우선
+     */
+    defaultMinWidth: {
+      type: Number,
+      default: 160
+    },
+    defaultMaxWidth: {
+      type: Number,
+      default: 240
+    }
+  },
+
+  data() {
+    return {
+      activeControls: [],
+      availableControls: [],
+
+      dragGroup: {
+        name: 'control-chain',
+        pull: true,
+        put: true
+      },
+      dragHandleSelector: '.control-chain__drag-handle',
+
+      hoveredControlId: null,
+      showCloseControlId: null,
+
+      // ControlChain의 각 control의 고유 id 모음
+      idMap: {},
+
+      depthHighlightColors: [
+        '#D5383A',
+        '#EB702D',
+        '#FBB41A',
+        '#2DA379',
+        '#1E5FCB',
+        '#553CA5'
+      ],
+      depthHighlightBgColors: [
+        '#F8DDDF',
+        '#FAE2D4',
+        '#FFF0C8',
+        '#E0F0E8',
+        '#E0EBFA',
+        '#E5E0F6'
+      ],
+
+      baseFontColor: '#222222',
+      highlightFontColor: '#1E5FCB',
+
+      availableWidth: null,
+
+      horizontalAlign: 'flex-start',
+      verticalAlign: 'center',
+
+      // ColorBy 선택 상태 (key 기준)
+      colorBySelectedKey: null,
+
+      // 라디오 버튼 그룹명 (ControlChain 다중 사용 대비 랜덤 사용)
+      colorByGroupName: `color-by-${Math.random().toString(36).slice(2, 8)}`,
+
+      // 최대 개수 제한으로 "추가 시도"가 차단되었는지 여부 (드래그 세션 단위)
+      isAddBlockedByLimit: false,
+
+      // 오른쪽 드롭 높이(px): (왼쪽 드롭 영역 높이 - 오른쪽 제목 높이)
+      availableDropHeightPx: null,
+
+      // 측정 스케줄 중복 방지
+      isMeasuringScheduled: false
+    };
+  },
+
+  computed: {
+    layoutClass() {
+      return `control-chain--available-${this.availablePlacement}`;
+    },
+
+    containerStyle() {
+      const style = {
+        width: toSize(this.width) || '100%',
+        boxSizing: 'border-box'
+      };
+
+      const heightValue = toSize(this.height);
+      if (heightValue) {
+        style.height = heightValue;
+      }
+
+      return style;
+    },
+
+    cssVarStyle() {
+      if (typeof this.availableDropHeightPx !== 'number') {
+        return {};
+      }
+      return {
+        '--available-drop-height': `${this.availableDropHeightPx}px`
+      };
+    },
+
+    activeAreaStyle() {
+      const style = {
+        flex: '1 1 auto',
+        padding: '8px',
+        border: '1px solid #e5e5e5',
+        background: '#ffffff',
+        display: 'flex',
+        flexDirection: 'column',
+        boxSizing: 'border-box',
+        position: 'relative'
+      };
+
+      const heightValue = toSize(this.height);
+      if (heightValue) {
+        style.height = '100%';
+        style.minHeight = 0;
+      }
+
+      style.overflowY = this.useVerticalScroll ? 'auto' : 'visible';
+      style.overflowX = this.useHorizontalScroll ? 'auto' : 'visible';
+
+      return style;
+    },
+
+    availableAreaStyle() {
+      const widthValue = toSize(this.availableWidth ?? DEFAULT_AVAILABLE_WIDTH) ?? `${DEFAULT_AVAILABLE_WIDTH}px`;
+
+      const style = {
+        width: widthValue,
+        flexBasis: widthValue,
+        flexShrink: 0,
+        flexGrow: 0,
+        padding: '8px',
+        border: '1px solid #e5e5e5',
+        background: '#ffffff',
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column'
+      };
+
+      const heightValue = toSize(this.height);
+      if (heightValue) {
+        style.height = '100%';
+        style.minHeight = 0;
+      }
+
+      return style;
+    },
+
+    activeDraggableStyle() {
+      const style = {
+        display: 'flex',
+        boxSizing: 'border-box',
+        rowGap: '6px',
+        columnGap: '8px',
+        flex: '1 1 auto',
+        width: '100%',
+        minWidth: 0,
+        flexWrap: this.useHorizontalScroll ? 'nowrap' : 'wrap',
+        justifyContent: this.horizontalAlign
+      };
+
+      if (this.useHorizontalScroll) {
+        style.alignItems = this.verticalAlign;
+      } else {
+        style.alignContent = this.verticalAlign;
+      }
+
+      return style;
+    },
+
+    emptyGuideTextStyle() {
+      return {
+        color: '#999999'
+      };
+    },
+
+    availableTitleTextStyle() {
+      return {
+        color: this.baseFontColor,
+        fontWeight: '600'
+      };
+    }
+  },
+
+  watch: {
+    value: {
+      handler() {
+        this.buildControls();
+        this.scheduleMeasureAvailableDropHeight();
+      },
+      deep: true
+    },
+    controlTemplates: {
+      handler() {
+        this.buildControls();
+        this.scheduleMeasureAvailableDropHeight();
+      },
+      deep: true
+    },
+    height() {
+      this.scheduleMeasureAvailableDropHeight();
+    },
+    availableTitle() {
+      this.scheduleMeasureAvailableDropHeight();
+    }
+  },
+
+  mounted() {
+    this.scheduleMeasureAvailableDropHeight();
+    window.addEventListener('resize', this.onWindowResize);
+  },
+
+  beforeDestroy() {
+    window.removeEventListener('resize', this.onWindowResize);
+  },
+
+  methods: {
+    // ===================== 외부에서 호출 가능한 API =====================
+
+    setHighlightBorderColors(colors) {
+      const array = toArray(colors);
+      if (array) {
+        this.depthHighlightColors = array;
+      }
+    },
+
+    setHighlightBackgroundColors(colors) {
+      const array = toArray(colors);
+      if (array) {
+        this.depthHighlightBgColors = array;
+      }
+    },
+
+    setBaseFontColor(color) {
+      if (color) {
+        this.baseFontColor = color;
+      }
+    },
+
+    setHighlightFontColor(color) {
+      if (color) {
+        this.highlightFontColor = color;
+      }
+    },
+
+    setAvailableWidth(width) {
+      if (typeof width === 'number') {
+        this.availableWidth = `${width}px`;
+        return;
+      }
+      if (width) {
+        this.availableWidth = width;
+      }
+    },
+
+    setHorizontalAlign(mode) {
+      const mapped = horizontalMap[mode];
+      if (mapped) {
+        this.horizontalAlign = mapped;
+      }
+    },
+
+    setVerticalAlign(mode) {
+      const mapped = verticalMap[mode];
+      if (mapped) {
+        this.verticalAlign = mapped;
+      }
+    },
+
+    // ===================== 내부 데이터 빌드 =====================
+
+    getStableId(control) {
+      const key = control.key || control.label || 'control';
+      if (!this.idMap[key]) {
+        this.idMap[key] = `${key}-${Math.random().toString(36).slice(2, 8)}`;
+      }
+      return this.idMap[key];
+    },
+
+    // activeControls / availableControls 재구성 (value/controlTemplates 변경 시)
+    buildControls() {
+      const valueArray = Array.isArray(this.value) ? this.value : [];
+      const templateArray = Array.isArray(this.controlTemplates) ? this.controlTemplates : [];
+
+      const usedKeys = new Set(
+        valueArray
+          .map(control => control.key)
+          .filter(key => key != null)
+      );
+
+      this.activeControls = valueArray.map(control => ({
+        ...control,
+        id: control.id || this.getStableId(control)
+      }));
+
+      this.availableControls = templateArray
+        .filter(template => !usedKeys.has(template.key))
+        .map(template => ({
+          ...template,
+          id: template.id || this.getStableId(template)
+        }));
+
+      this.ensureInitialColorBySelection();
+    },
+
+    emitChain() {
+      const cloned = this.activeControls.map(control => {
+        const copiedControl = { ...control };
+
+        if (Array.isArray(copiedControl.selectedValues)) {
+          copiedControl.selectedValues = copiedControl.selectedValues.slice();
+        }
+
+        delete copiedControl.id;
+        return copiedControl;
+      });
+
+      this.$emit('input', cloned);
+      this.$emit('change', cloned);
+    },
+
+    // ===================== ColorBy 관련 =====================
+
+    ensureInitialColorBySelection() {
+      if (!this.useColorBy) {
+        if (this.colorBySelectedKey !== null) {
+          this.colorBySelectedKey = null;
+          this.$emit('color-by-change', { key: null, control: null });
+        }
+        return;
+      }
+
+      if (!this.activeControls.length) {
+        if (this.colorBySelectedKey !== null) {
+          this.colorBySelectedKey = null;
+          this.$emit('color-by-change', { key: null, control: null });
+        }
+        return;
+      }
+
+      const previousKey = this.colorBySelectedKey;
+
+      if (
+        previousKey &&
+        this.activeControls.some(control => control.key === previousKey)
+      ) {
+        return;
+      }
+
+      const nextControl = this.activeControls[0];
+      const nextKey = nextControl ? nextControl.key : null;
+
+      this.colorBySelectedKey = nextKey;
+
+      if (previousKey !== nextKey) {
+        this.$emit('color-by-change', {
+          key: nextKey,
+          control: nextControl
+        });
+      }
+    },
+
+    onColorByChange(element) {
+      const nextKey = element && element.key != null ? element.key : null;
+
+      this.colorBySelectedKey = nextKey;
+
+      this.$emit('color-by-change', {
+        key: nextKey,
+        control: element
+      });
+    },
+
+    // ===================== 드래그/드롭 유틸 =====================
+
+    // 오른쪽 -> 왼쪽 활성 영역으로 "추가 시도"인지 판단
+    isTryingToAddIntoActive(event) {
+      const isDroppingIntoActive =
+        event.to && event.to.classList && event.to.classList.contains('control-chain__draggable');
+
+      const isCrossListMove = event.from !== event.to;
+
+      // 왼쪽 내부 이동이거나, 다른 영역이면 허용(추가 시도가 아님)
+      if (!isDroppingIntoActive || !isCrossListMove) {
+        return false;
+      }
+
+      return true;
+    },
+
+    // ===================== 드래그/드롭 이벤트 =====================
+
+    onDragMove(event) {
+      if (this.maxActiveControls == null) {
+        return true;
+      }
+
+      if (!this.isTryingToAddIntoActive(event)) {
+        return true;
+      }
+
+      const canAdd = this.activeControls.length < this.maxActiveControls;
+
+      this.isAddBlockedByLimit = this.isAddBlockedByLimit || !canAdd;
+
+      return canAdd;
+    },
+
+    onDragEnd() {
+      if (this.maxActiveControls == null) {
+        this.isAddBlockedByLimit = false;
+        this.scheduleMeasureAvailableDropHeight();
+        return;
+      }
+
+      if (this.isAddBlockedByLimit) {
+        this.$emit('max-active-controls-reached', {
+          max: this.maxActiveControls
+        });
+      }
+
+      this.isAddBlockedByLimit = false;
+
+      this.scheduleMeasureAvailableDropHeight();
+    },
+
+    onActiveChange(event) {
+      this.emitChain();
+
+      if (event.added) {
+        this.$emit('control-added', {
+          control: event.added.element,
+          index: event.added.newIndex
+        });
+      }
+
+      if (event.moved) {
+        this.$emit('control-depth-change', {
+          control: event.moved.element,
+          oldIndex: event.moved.oldIndex,
+          newIndex: event.moved.newIndex
+        });
+      }
+
+      if (event.removed) {
+        this.$emit('control-removed', {
+          control: event.removed.element,
+          index: event.removed.oldIndex
+        });
+      }
+
+      this.ensureInitialColorBySelection();
+      this.scheduleMeasureAvailableDropHeight();
+    },
+
+    removeControlById(controlId) {
+      const removedIndex = this.activeControls.findIndex(control => control.id === controlId);
+      if (removedIndex < 0) {
+        return;
+      }
+
+      const removedControl = this.activeControls.splice(removedIndex, 1)[0];
+      this.availableControls.push(removedControl);
+
+      if (this.hoveredControlId === controlId) {
+        this.hoveredControlId = null;
+      }
+      if (this.showCloseControlId === controlId) {
+        this.showCloseControlId = null;
+      }
+
+      this.emitChain();
+      this.$emit('control-removed', {
+        control: removedControl,
+        index: removedIndex
+      });
+
+      this.ensureInitialColorBySelection();
+      this.scheduleMeasureAvailableDropHeight();
+    },
+
+    onControlMouseEnter(element) {
+      this.hoveredControlId = element.id;
+      this.showCloseControlId = element.id;
+    },
+
+    onControlMouseLeave(element) {
+      if (this.hoveredControlId === element.id) {
+        this.hoveredControlId = null;
+      }
+      if (this.showCloseControlId === element.id) {
+        this.showCloseControlId = null;
+      }
+    },
+
+    // ===================== 선택 변경 이벤트 =====================
+
+    onSingleSelectChange(element, index, value) {
+      if (element.selectedValue === value) {
+        return;
+      }
+
+      element.selectedValue = value;
+      this.emitChain();
+      this.$emit('control-selection-change', {
+        control: element,
+        index,
+        type: 'single',
+        value
+      });
+    },
+
+    onMultiSelectChange(element, index, values) {
+      const nextValues = Array.isArray(values) ? values.slice() : [];
+      const previousValues = Array.isArray(element.selectedValues) ? element.selectedValues : [];
+
+      const isSame =
+        previousValues.length === nextValues.length &&
+        previousValues.every((item, position) => item === nextValues[position]);
+
+      if (isSame) {
+        return;
+      }
+
+      element.selectedValues = nextValues;
+      this.emitChain();
+      this.$emit('control-selection-change', {
+        control: element,
+        index,
+        type: 'multi',
+        values: nextValues
+      });
+    },
+
+    // ===================== 스타일 헬퍼 =====================
+
+    hasBody(element) {
+      if (element.type === 'single' || element.type === 'multi') {
+        return Array.isArray(element.items) && element.items.length > 0;
+      }
+      if (element.type === 'label') {
+        return true;
+      }
+      return false;
+    },
+
+    getTextStyle(element, isActiveArea) {
+      const isHovered = this.hoveredControlId === element.id;
+      const color =
+        isActiveArea && isHovered
+          ? this.highlightFontColor
+          : this.baseFontColor;
+
+      return { color };
+    },
+
+    getContentStyle(index, element) {
+      const style = {};
+
+      const maxWidth = element.maxWidth ?? this.defaultMaxWidth;
+      const minWidth = element.minWidth ?? this.defaultMinWidth;
+
+      style.maxWidth = typeof maxWidth === 'number' ? `${maxWidth}px` : maxWidth;
+      style.minWidth = typeof minWidth === 'number' ? `${minWidth}px` : minWidth;
+
+      const isHovered = this.hoveredControlId === element.id;
+      const isColorBySelected =
+        this.useColorBy && element.key === this.colorBySelectedKey;
+
+      if (isHovered) {
+        const backgroundIndex = index % this.depthHighlightBgColors.length;
+        style.backgroundColor = this.depthHighlightBgColors[backgroundIndex];
+
+        // ColorBy 선택된 컨트롤은 hover 시 depth borderColor 적용 안 함
+        if (!isColorBySelected) {
+          const borderIndex = index % this.depthHighlightColors.length;
+          style.borderColor = this.depthHighlightColors[borderIndex];
+        }
+      }
+
+      if (isColorBySelected) {
+        style.boxShadow = '0 0 0 1px #1E5FCB';
+      }
+
+      return style;
+    },
+
+    // ===================== 높이 측정 =====================
+
+    onWindowResize() {
+      this.scheduleMeasureAvailableDropHeight();
+    },
+
+    scheduleMeasureAvailableDropHeight() {
+      if (this.isMeasuringScheduled) {
+        return;
+      }
+
+      this.isMeasuringScheduled = true;
+
+      this.$nextTick(() => {
+        this.isMeasuringScheduled = false;
+        this.measureAvailableDropHeight();
+      });
+    },
+
+    measureAvailableDropHeight() {
+      const activeAreaEl = this.$refs.activeArea;
+      if (!activeAreaEl) {
+        this.availableDropHeightPx = null;
+        return;
+      }
+
+      const activeHeight = activeAreaEl.offsetHeight;
+
+      const titleEl = this.$refs.availableTitle;
+      const titleHeight = titleEl ? titleEl.offsetHeight : 0;
+
+      const nextHeight = Math.max(activeHeight - titleHeight, 0);
+
+      this.availableDropHeightPx = nextHeight;
+    }
+  },
+
+  created() {
+    this.buildControls();
+  }
+};
+</script>
+
+<style scoped>
+.control-chain {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  background: #fafafa;
+  border: 1px solid #e5e5e5;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.control-chain--available-right {
+  flex-direction: row;
+}
+.control-chain--available-left {
+  flex-direction: row-reverse;
+}
+
+/* 활성 체인 영역 */
+.control-chain__active {
+  position: relative;
+  box-sizing: border-box;
+}
+
+.control-chain__draggable {
+  width: 100%;
+}
+
+/* drop zone hint (long dashed red outline) */
+.control-chain__active::after,
+.control-chain__available-list-wrapper::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 12px;
+  pointer-events: none;
+  z-index: 2;
+  background:
+    repeating-linear-gradient(90deg, #ef4444 0 14px, transparent 14px 22px) 0 0 / 100% 2px
+      no-repeat,
+    repeating-linear-gradient(90deg, #ef4444 0 14px, transparent 14px 22px) 0 100% / 100% 2px
+      no-repeat,
+    repeating-linear-gradient(0deg, #ef4444 0 14px, transparent 14px 22px) 0 0 / 2px 100%
+      no-repeat,
+    repeating-linear-gradient(0deg, #ef4444 0 14px, transparent 14px 22px) 100% 0 / 2px 100%
+      no-repeat;
+}
+
+/* 사용 가능한 컨트롤 영역 */
+.control-chain__available {
+  box-sizing: border-box;
+}
+
+.control-chain__available-title {
+  margin-bottom: 8px;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.control-chain__available-list-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.control-chain__available-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  flex: 1 1 auto;
+  position: relative;
+  z-index: 0;
+}
+
+/* 오른쪽 목록 비어있을 때 안내(드롭 방해 X)
+   height 미지정 시에도 고정 min-height를 주지 않음 */
+.control-chain__available-item + .control-chain__available-item {
+  margin-top: 4px;
+}
+
+/* 활성 체인 아이템 */
+.control-chain__item {
+  display: flex;
+  align-items: center;
+}
+
+.control-chain__separator {
+  margin-right: 4px;
+}
+
+/* 드래그 중인 아이템은 >> 숨김, 드롭 예상(ghost)은 다시 보이게 */
+.control-chain__chosen .control-chain__separator {
+  display: none !important;
+}
+.control-chain__ghost .control-chain__separator {
+  display: inline !important;
+}
+
+/* 컨트롤 박스 */
+.control-chain__content {
+  border: 1px solid #e4e4e4;
+  padding: 6px 8px;
+  background: #ffffff;
+  min-height: 44px;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    box-shadow 0.15s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 헤더: 드래그 핸들 + 타이틀 + X 버튼 */
+.control-chain__header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  align-items: center;
+}
+
+.control-chain__header-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.control-chain__title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.control-chain__close-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  width: 12px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.control-chain__drag-handle {
+  cursor: grab;
+  font-size: 12px;
+  width: 12px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.control-chain__drag-handle--small {
+  font-size: 11px;
+  width: 11px;
+}
+
+/* 바디: dropdown / label */
+.control-chain__body {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  min-height: 24px;
+}
+
+.control-chain__dropdown {
+  width: 100%;
+}
+
+/* 라벨 영역 */
+.control-chain__label-value {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 26px;
+  padding: 3px 6px;
+  background: #ffffff;
+  border: 1px solid #d9d9d9;
+  box-sizing: border-box;
+}
+
+/* ColorBy 라인 */
+.control-chain__color-by-row {
+  margin-top: 4px;
+}
+
+.control-chain__color-by-label {
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #555555;
+  user-select: none;
+  cursor: pointer;
+}
+
+.control-chain__color-by-radio {
+  margin: 0;
+  cursor: pointer;
+}
+
+/* 비어 있을 때 안내 문구 (드롭 방해 X) */
+.control-chain__empty {
+  font-size: 12px;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  width: 100%;
+  text-align: center;
+}
+
+/* 오른쪽 목록 아이템 */
+.control-chain__available-content {
+  border: 1px solid #e0e0e0;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #ffffff;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+.control-chain__available-content:hover {
+  background: #f7f7f7;
+  border-color: #d0d0d0;
+}
+
+.control-chain__available-label {
+  font-size: 12px;
+}
+</style>
+
+
+
+//이거 오른쪽 영역도 잘되는거임
