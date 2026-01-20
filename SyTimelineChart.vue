@@ -18,6 +18,7 @@
 
 <script>
 import * as echarts from 'echarts';
+import Text from 'zrender/lib/graphic/Text';
 
 const MARKER_LABEL_PADDING = [2, 6];
 const MARKER_LABEL_FONT_SIZE = 12;
@@ -730,7 +731,13 @@ export default {
           }
 
           const labelText = formatDateTime(markerTime);
-          const textRect = echarts.graphic.getTextRect(labelText, labelFont);
+          const textShape = new Text({
+            style: {
+              text: labelText,
+              font: labelFont
+            }
+          });
+          const textRect = textShape.getBoundingRect();
           const labelWidth =
             textRect.width +
             MARKER_LABEL_PADDING[1] * 2 +
