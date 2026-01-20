@@ -27,9 +27,31 @@ const MARKER_LABEL_BORDER_WIDTH = 1;
 const MARKER_LABEL_DISTANCE = 6;
 const MARKER_LABEL_POSITION = 'start';
 const MARKER_LABEL_ALIGN = 'left';
-const MARKER_LABEL_VERTICAL_ALIGN = 'middle';
+const MARKER_LABEL_VERTICAL_ALIGN = 'bottom';
+const MARKER_LABEL_ROTATE = 18;
 const MARKER_DELETE_RADIUS = 10;
-const MARKER_DELETE_GAP = 8;
+const MARKER_DELETE_GAP = 0;
+const MARKER_DELETE_OFFSET_X = -10;
+const MARKER_DELETE_OFFSET_Y = 25;
+const TOP_SLIDER_TOP = 16;
+const TOP_SLIDER_HEIGHT = 22;
+const TOP_SLIDER_GAP = 6;
+const TOP_LABEL_GAP = 52;
+const TOP_SLIDER_BOTTOM = TOP_SLIDER_TOP + TOP_SLIDER_HEIGHT + TOP_SLIDER_GAP;
+const BOTTOM_SLIDER_BOTTOM = 18;
+const BOTTOM_SLIDER_HEIGHT = 22;
+const GRID_LEFT = 110;
+const GRID_RIGHT = 62;
+const GRID_BOTTOM = 124;
+const MAIN_GRID_INDEX = 0;
+const PINNED_GRID_INDEX = 1;
+const LABEL_GRID_INDEX = 2;
+const CURSOR_GRID_INDEX = 3;
+const MAIN_AXIS_INDEX = 0;
+const PINNED_AXIS_INDEX = 1;
+const LABEL_AXIS_INDEX = 2;
+const CURSOR_AXIS_INDEX = 3;
+const SLIDER_AXIS_INDEX = 4;
 
 function pad2(value) {
   return String(value).padStart(2, '0');
@@ -43,6 +65,27 @@ function formatDateTime(value) {
     `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`,
     `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
   ].join(' ');
+}
+
+function formatAxisLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  return [
+    `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`,
+    `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+  ].join(' ');
+}
+
+function getRotatedSize(width, height, rotation) {
+  if (!rotation) return { width, height };
+  const radians = (Math.abs(rotation) * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return {
+    width: Math.abs(width * cos) + Math.abs(height * sin),
+    height: Math.abs(width * sin) + Math.abs(height * cos)
+  };
 }
 
 function toTimeValue(value) {
@@ -117,6 +160,11 @@ export default {
       markerButtons: [],
       categories: [],
       intervals: [],
+      pinnedCategory: null,
+      scrollCategories: [],
+      pinnedIntervals: [],
+      scrollIntervals: [],
+      selectedCategoryIndex: null,
       domainStart: 0,
       domainEnd: 0,
       viewStart: 0,
@@ -204,6 +252,21 @@ export default {
 
       this.categories = categories;
       this.intervals = intervals;
+      this.pinnedCategory = categories.length ? categories[0] : null;
+      this.scrollCategories = categories.slice(1);
+      this.pinnedIntervals = intervals
+        .filter((item) => item && item.value && item.value[0] === 0)
+        .map((item) => ({
+          ...item,
+          value: [0, item.value[1], item.value[2], item.value[3]]
+        }));
+      this.scrollIntervals = intervals
+        .filter((item) => item && item.value && item.value[0] > 0)
+        .map((item) => ({
+          ...item,
+          value: [item.value[0] - 1, item.value[1], item.value[2], item.value[3]]
+        }));
+      this.selectedCategoryIndex = null;
       this.domainStart = startTime;
       this.domainEnd = endTime;
 
@@ -218,35 +281,179 @@ export default {
 
       this.chart = echarts.init(el);
       this.chart.setOption(this.buildOption(), { notMerge: true });
+      this.updateGridLayout();
 
       this.chart.on('datazoom', this.onDataZoom);
+      this.chart.on('click', this.onChartClick);
 
       this.updateMarkerLines();
+      this.updateSelectionLines();
       this.updateMarkerButtons();
       this.syncTopSlider();
     },
     teardownChart() {
       if (!this.chart) return;
       this.chart.off('datazoom', this.onDataZoom);
+      this.chart.off('click', this.onChartClick);
       this.chart.dispose();
       this.chart = null;
     },
     resizeChart() {
       if (!this.chart) return;
       this.chart.resize();
+      this.updateGridLayout();
       this.updateMarkerButtons();
     },
-    buildOption() {
-      const gridTop = 76;
-      const gridBottom = 78;
-      const gridLeft = 110;
-      const gridRight = 42;
+    getLayoutMetrics() {
+      const sliderBottom = TOP_SLIDER_BOTTOM;
+      const gridBottom = GRID_BOTTOM;
+      const chartHeight = this.chart ? this.chart.getHeight() : 640;
+      const totalCategories = Math.max(this.categories.length, 1);
+      const labelHeight = Math.max(0, TOP_LABEL_GAP);
+      const usableHeight = Math.max(
+        0,
+        chartHeight - gridBottom - sliderBottom - labelHeight
+      );
+      const rowHeight = totalCategories ? usableHeight / totalCategories : usableHeight;
+      const pinnedHeight = rowHeight;
+      const labelTop = sliderBottom;
+      const pinnedTop = sliderBottom + labelHeight;
+      const mainTop = pinnedTop + pinnedHeight;
+
+      return {
+        sliderBottom,
+        gridBottom,
+        labelTop,
+        labelHeight,
+        pinnedHeight,
+        pinnedTop,
+        mainTop
+      };
+    },
+    updateGridLayout() {
+      if (!this.chart) return;
+      const layout = this.getLayoutMetrics();
+
+      this.chart.setOption({
+        grid: [
+          {
+            id: 'grid-main',
+            top: layout.mainTop,
+            bottom: layout.gridBottom,
+            left: GRID_LEFT,
+            right: GRID_RIGHT
+          },
+          {
+            id: 'grid-pinned',
+            top: layout.pinnedTop,
+            height: layout.pinnedHeight,
+            left: GRID_LEFT,
+            right: GRID_RIGHT
+          },
+          {
+            id: 'grid-label',
+            top: layout.labelTop,
+            height: layout.labelHeight,
+            left: GRID_LEFT,
+            right: GRID_RIGHT
+          },
+          {
+            id: 'grid-cursor',
+            top: layout.sliderBottom,
+            bottom: layout.gridBottom,
+            left: GRID_LEFT,
+            right: GRID_RIGHT
+          }
+        ],
+        dataZoom: [
+          {
+            id: 'dz_top',
+            top: TOP_SLIDER_TOP,
+            height: TOP_SLIDER_HEIGHT
+          },
+          {
+            id: 'dz_bottom',
+            bottom: BOTTOM_SLIDER_BOTTOM,
+            height: BOTTOM_SLIDER_HEIGHT
+          },
+          {
+            id: 'dz_y',
+            top: layout.mainTop,
+            bottom: layout.gridBottom
+          }
+        ]
+      });
+    },
+    onChartClick(params) {
+      if (!params || params.seriesType !== 'custom') return;
+      if (!params.value || typeof params.value[0] !== 'number') return;
+
+      let categoryIndex = null;
+      if (params.seriesId === 'sy-bars-pinned') {
+        categoryIndex = 0;
+      } else if (params.seriesId === 'sy-bars-main') {
+        categoryIndex = params.value[0] + 1;
+      }
+
+      if (categoryIndex == null) return;
+      this.selectedCategoryIndex = categoryIndex;
+      this.updateSelectionLines();
+    },
+    updateSelectionLines() {
+      if (!this.chart) return;
+
+      const selected = this.selectedCategoryIndex;
+      const mainData = [];
+      const pinnedData = [];
+
+      if (typeof selected === 'number') {
+        if (selected === 0) {
+          pinnedData.push({ yAxis: 0 });
+        } else if (selected > 0) {
+          mainData.push({ yAxis: selected - 1 });
+        }
+      }
+
+      this.chart.setOption({
+        series: [
+          {
+            id: 'sy-selection-main',
+            markLine: {
+              data: mainData
+            }
+          },
+          {
+            id: 'sy-selection-pinned',
+            markLine: {
+              data: pinnedData
+            }
+          }
+        ]
+      });
+    },
+    getClampedCursorRange() {
       const topMin = this.viewStart != null ? this.viewStart : this.domainStart;
       const topMax = this.viewEnd != null ? this.viewEnd : this.domainEnd;
       const cursorStart = Math.min(this.cursorStart, this.cursorEnd);
       const cursorEnd = Math.max(this.cursorStart, this.cursorEnd);
-      const topStart = clamp(cursorStart, topMin, topMax);
-      const topEnd = clamp(cursorEnd, topMin, topMax);
+      const clampedStart = clamp(cursorStart, topMin, topMax);
+      const clampedEnd = clamp(cursorEnd, topMin, topMax);
+
+      return {
+        topMin,
+        topMax,
+        start: clampedStart,
+        end: clampedEnd
+      };
+    },
+    buildOption() {
+      const layout = this.getLayoutMetrics();
+      const minuteInterval = 60 * 1000;
+      const cursorRange = this.getClampedCursorRange();
+      const topMin = cursorRange.topMin;
+      const topMax = cursorRange.topMax;
+      const topStart = cursorRange.start;
+      const topEnd = cursorRange.end;
 
       return {
         backgroundColor: '#ffffff',
@@ -268,11 +475,12 @@ export default {
           {
             id: 'dz_top',
             type: 'slider',
-            xAxisIndex: 1,
+            xAxisIndex: SLIDER_AXIS_INDEX,
             filterMode: 'weakFilter',
             showDataShadow: false,
-            top: 16,
-            height: 22,
+            brushSelect: false,
+            top: TOP_SLIDER_TOP,
+            height: TOP_SLIDER_HEIGHT,
             labelFormatter: '',
             startValue: topStart,
             endValue: topEnd
@@ -280,11 +488,12 @@ export default {
           {
             id: 'dz_bottom',
             type: 'slider',
-            xAxisIndex: 0,
+            xAxisIndex: [MAIN_AXIS_INDEX, PINNED_AXIS_INDEX],
             filterMode: 'weakFilter',
             showDataShadow: false,
-            bottom: 18,
-            height: 22,
+            brushSelect: false,
+            bottom: BOTTOM_SLIDER_BOTTOM,
+            height: BOTTOM_SLIDER_HEIGHT,
             labelFormatter: '',
             startValue: this.viewStart,
             endValue: this.viewEnd
@@ -292,24 +501,65 @@ export default {
           {
             id: 'dz_inside',
             type: 'inside',
-            xAxisIndex: 0,
+            xAxisIndex: [MAIN_AXIS_INDEX, PINNED_AXIS_INDEX],
             filterMode: 'weakFilter'
+          },
+          {
+            id: 'dz_y',
+            type: 'slider',
+            yAxisIndex: 0,
+            filterMode: 'weakFilter',
+            showDataShadow: false,
+            right: 8,
+            top: layout.mainTop,
+            bottom: layout.gridBottom,
+            width: 12
           }
         ],
-        grid: {
-          top: gridTop,
-          bottom: gridBottom,
-          left: gridLeft,
-          right: gridRight,
-          containLabel: false
-        },
+        grid: [
+          {
+            id: 'grid-main',
+            top: layout.mainTop,
+            bottom: layout.gridBottom,
+            left: GRID_LEFT,
+            right: GRID_RIGHT,
+            containLabel: false
+          },
+          {
+            id: 'grid-pinned',
+            top: layout.pinnedTop,
+            height: layout.pinnedHeight,
+            left: GRID_LEFT,
+            right: GRID_RIGHT,
+            containLabel: false
+          },
+          {
+            id: 'grid-label',
+            top: layout.labelTop,
+            height: layout.labelHeight,
+            left: GRID_LEFT,
+            right: GRID_RIGHT,
+            containLabel: false
+          },
+          {
+            id: 'grid-cursor',
+            top: layout.sliderBottom,
+            bottom: layout.gridBottom,
+            left: GRID_LEFT,
+            right: GRID_RIGHT,
+            containLabel: false
+          }
+        ],
         xAxis: [
           {
             id: 'x-main',
+            gridIndex: MAIN_GRID_INDEX,
             type: 'time',
             min: this.domainStart,
             max: this.domainEnd,
             scale: true,
+            minInterval: minuteInterval,
+            splitNumber: 24,
             axisLine: {
               lineStyle: {
                 color: '#cbd5e1'
@@ -317,7 +567,12 @@ export default {
             },
             axisLabel: {
               color: '#475569',
-              formatter: (value) => formatDateTime(value)
+              rotate: 90,
+              margin: 6,
+              inside: false,
+              hideOverlap: true,
+              interval: 0,
+              formatter: (value) => formatAxisLabel(value)
             },
             splitLine: {
               show: true,
@@ -327,7 +582,75 @@ export default {
             }
           },
           {
+            id: 'x-pinned',
+            gridIndex: PINNED_GRID_INDEX,
+            type: 'time',
+            min: this.domainStart,
+            max: this.domainEnd,
+            scale: true,
+            minInterval: minuteInterval,
+            splitNumber: 24,
+            show: false,
+            axisLine: {
+              show: false
+            },
+            axisTick: {
+              show: false
+            },
+            axisLabel: {
+              show: false
+            },
+            splitLine: {
+              show: false
+            }
+          },
+          {
+            id: 'x-label',
+            gridIndex: LABEL_GRID_INDEX,
+            type: 'time',
+            min: topMin,
+            max: topMax,
+            scale: true,
+            minInterval: minuteInterval,
+            splitNumber: 24,
+            show: false,
+            axisLine: {
+              show: false
+            },
+            axisTick: {
+              show: false
+            },
+            axisLabel: {
+              show: false
+            },
+            splitLine: {
+              show: false
+            }
+          },
+          {
             id: 'x-cursor',
+            gridIndex: CURSOR_GRID_INDEX,
+            type: 'time',
+            min: topMin,
+            max: topMax,
+            scale: true,
+            show: false,
+            axisLine: {
+              show: false
+            },
+            axisTick: {
+              show: false
+            },
+            axisLabel: {
+              show: false
+            },
+            splitLine: {
+              show: false
+            }
+          },
+          {
+            id: 'x-slider',
+            gridIndex: CURSOR_GRID_INDEX,
             type: 'time',
             min: topMin,
             max: topMax,
@@ -347,25 +670,85 @@ export default {
             }
           }
         ],
-        yAxis: {
-          type: 'category',
-          inverse: true,
-          data: this.categories,
-          axisTick: {
-            show: false
+        yAxis: [
+          {
+            id: 'y-main',
+            gridIndex: MAIN_GRID_INDEX,
+            type: 'category',
+            inverse: true,
+            data: this.scrollCategories,
+            axisTick: {
+              show: false
+            },
+            axisLine: {
+              show: false
+            },
+            axisLabel: {
+              color: '#475569'
+            }
           },
-          axisLine: {
-            show: false
+          {
+            id: 'y-pinned',
+            gridIndex: PINNED_GRID_INDEX,
+            type: 'category',
+            inverse: true,
+            data: this.pinnedCategory ? [this.pinnedCategory] : [],
+            axisTick: {
+              show: false
+            },
+            axisLine: {
+              show: false
+            },
+            axisLabel: {
+              color: '#475569'
+            }
           },
-          axisLabel: {
-            color: '#475569'
+          {
+            id: 'y-label',
+            gridIndex: LABEL_GRID_INDEX,
+            type: 'value',
+            min: 0,
+            max: 1,
+            axisLine: {
+              show: false
+            },
+            axisTick: {
+              show: false
+            },
+            axisLabel: {
+              show: false
+            },
+            splitLine: {
+              show: false
+            }
+          },
+          {
+            id: 'y-cursor',
+            gridIndex: CURSOR_GRID_INDEX,
+            type: 'value',
+            min: 0,
+            max: 1,
+            axisLine: {
+              show: false
+            },
+            axisTick: {
+              show: false
+            },
+            axisLabel: {
+              show: false
+            },
+            splitLine: {
+              show: false
+            }
           }
-        },
+        ],
         series: [
           {
-            id: 'sy-bars',
+            id: 'sy-bars-main',
             type: 'custom',
             renderItem,
+            xAxisIndex: MAIN_AXIS_INDEX,
+            yAxisIndex: MAIN_AXIS_INDEX,
             itemStyle: {
               opacity: 0.85
             },
@@ -373,13 +756,75 @@ export default {
               x: [1, 2],
               y: 0
             },
-            data: this.intervals
+            data: this.scrollIntervals
           },
           {
-            id: 'sy-markers',
+            id: 'sy-bars-pinned',
+            type: 'custom',
+            renderItem,
+            xAxisIndex: PINNED_AXIS_INDEX,
+            yAxisIndex: PINNED_AXIS_INDEX,
+            itemStyle: {
+              opacity: 0.85
+            },
+            encode: {
+              x: [1, 2],
+              y: 0
+            },
+            data: this.pinnedIntervals
+          },
+          {
+            id: 'sy-selection-main',
             type: 'scatter',
+            xAxisIndex: MAIN_AXIS_INDEX,
+            yAxisIndex: MAIN_AXIS_INDEX,
+            data: [],
+            silent: true,
+            markLine: {
+              symbol: ['none', 'none'],
+              z: 18,
+              lineStyle: {
+                width: 2,
+                color: '#f97316',
+                type: 'solid'
+              },
+              label: {
+                show: false
+              },
+              data: []
+            }
+          },
+          {
+            id: 'sy-selection-pinned',
+            type: 'scatter',
+            xAxisIndex: PINNED_AXIS_INDEX,
+            yAxisIndex: PINNED_AXIS_INDEX,
+            data: [],
+            silent: true,
+            markLine: {
+              symbol: ['none', 'none'],
+              z: 18,
+              lineStyle: {
+                width: 2,
+                color: '#f97316',
+                type: 'solid'
+              },
+              label: {
+                show: false
+              },
+              data: []
+            }
+          },
+          {
+            id: 'sy-markers-main',
+            type: 'scatter',
+            xAxisIndex: MAIN_AXIS_INDEX,
+            yAxisIndex: MAIN_AXIS_INDEX,
             data: [],
             silent: false,
+            emphasis: {
+              disabled: true
+            },
             markLine: {
               symbol: ['none', 'none'],
               precision: 0,
@@ -389,12 +834,72 @@ export default {
                 color: '#2563eb',
                 type: 'dashed'
               },
+              emphasis: {
+                disabled: true
+              },
+              label: {
+                show: false
+              },
+              data: []
+            }
+          },
+          {
+            id: 'sy-markers-pinned-lines',
+            type: 'scatter',
+            xAxisIndex: PINNED_AXIS_INDEX,
+            yAxisIndex: PINNED_AXIS_INDEX,
+            data: [],
+            silent: true,
+            emphasis: {
+              disabled: true
+            },
+            markLine: {
+              symbol: ['none', 'none'],
+              precision: 0,
+              z: 20,
+              lineStyle: {
+                width: 2,
+                color: '#2563eb',
+                type: 'dashed'
+              },
+              emphasis: {
+                disabled: true
+              },
+              label: {
+                show: false
+              },
+              data: []
+            }
+          },
+          {
+            id: 'sy-markers-labels',
+            type: 'scatter',
+            xAxisIndex: LABEL_AXIS_INDEX,
+            yAxisIndex: LABEL_AXIS_INDEX,
+            data: [],
+            silent: false,
+            emphasis: {
+              disabled: true
+            },
+            markLine: {
+              symbol: ['none', 'none'],
+              precision: 0,
+              z: 22,
+              lineStyle: {
+                width: 1,
+                color: 'rgba(37, 99, 235, 0.02)',
+                type: 'dashed'
+              },
+              emphasis: {
+                disabled: true
+              },
               label: {
                 show: true,
                 position: MARKER_LABEL_POSITION,
                 align: MARKER_LABEL_ALIGN,
                 verticalAlign: MARKER_LABEL_VERTICAL_ALIGN,
                 distance: MARKER_LABEL_DISTANCE,
+                rotate: MARKER_LABEL_ROTATE,
                 color: '#1d4ed8',
                 backgroundColor: 'rgba(37, 99, 235, 0.12)',
                 borderColor: 'rgba(37, 99, 235, 0.35)',
@@ -408,17 +913,14 @@ export default {
                   return formatDateTime(x);
                 }
               },
-              emphasis: {
-                lineStyle: {
-                  width: 2.5
-                }
-              },
               data: []
             }
           },
           {
-            id: 'sy-cursors',
+            id: 'sy-cursors-overlay',
             type: 'scatter',
+            xAxisIndex: CURSOR_AXIS_INDEX,
+            yAxisIndex: CURSOR_AXIS_INDEX,
             data: [],
             silent: true,
             markLine: {
@@ -433,8 +935,8 @@ export default {
                 show: false
               },
               data: [
-                { xAxis: this.cursorStart },
-                { xAxis: this.cursorEnd }
+                { xAxis: topStart },
+                { xAxis: topEnd }
               ]
             }
           }
@@ -480,7 +982,7 @@ export default {
           batch.end != null && span
             ? axisMin + (span * batch.end) / 100
             : fallbackEnd;
-        return { start, end };
+        return { start: Math.round(start), end: Math.round(end) };
       }
 
       if (!this.chart) {
@@ -508,7 +1010,7 @@ export default {
           dz.end != null && span
             ? axisMin + (span * dz.end) / 100
             : fallbackEnd;
-        return { start, end };
+        return { start: Math.round(start), end: Math.round(end) };
       }
 
       return { start: fallbackStart, end: fallbackEnd };
@@ -531,6 +1033,10 @@ export default {
       batches.forEach((batch) => {
         if (!batch) return;
         const zoomId = this.getDataZoomId(batch) || this.getDataZoomId(event);
+
+        if (zoomId === 'dz_y') {
+          return;
+        }
 
         if (zoomId === 'dz_top') {
           if (this.isSyncingTopSlider) return;
@@ -581,10 +1087,11 @@ export default {
         this.updateMarkerButtons();
       }
     },
-    getGridRect() {
+    getGridRect(gridIndex = MAIN_GRID_INDEX) {
       if (!this.chart) return null;
       const model = this.chart.getModel && this.chart.getModel();
-      const grid = model && model.getComponent && model.getComponent('grid', 0);
+      const grid =
+        model && model.getComponent && model.getComponent('grid', gridIndex);
       const coord = grid && grid.coordinateSystem;
       if (coord && coord.getRect) {
         const rect = coord.getRect();
@@ -599,7 +1106,7 @@ export default {
       }
 
       const option = this.chart.getOption();
-      const gridOption = option && option.grid && option.grid[0];
+      const gridOption = option && option.grid && option.grid[gridIndex];
       if (!gridOption) return null;
 
       const width = this.chart.getWidth();
@@ -608,17 +1115,27 @@ export default {
       const right = typeof gridOption.right === 'number' ? gridOption.right : 0;
       const top = typeof gridOption.top === 'number' ? gridOption.top : 0;
       const bottom = typeof gridOption.bottom === 'number' ? gridOption.bottom : 0;
+      const explicitWidth =
+        typeof gridOption.width === 'number' ? gridOption.width : null;
+      const explicitHeight =
+        typeof gridOption.height === 'number' ? gridOption.height : null;
 
       return {
         x: left,
         y: top,
-        width: Math.max(0, width - left - right),
-        height: Math.max(0, height - top - bottom)
+        width:
+          explicitWidth != null
+            ? explicitWidth
+            : Math.max(0, width - left - right),
+        height:
+          explicitHeight != null
+            ? explicitHeight
+            : Math.max(0, height - top - bottom)
       };
     },
-    getAxisPixelFromValue(value) {
+    getAxisPixelFromValue(value, xAxisIndex = MAIN_AXIS_INDEX) {
       if (!this.chart) return null;
-      const pixel = this.chart.convertToPixel({ xAxisIndex: 0 }, value);
+      const pixel = this.chart.convertToPixel({ xAxisIndex }, value);
       return Array.isArray(pixel) ? pixel[0] : pixel;
     },
     updateMarkerLines() {
@@ -634,7 +1151,19 @@ export default {
       this.chart.setOption({
         series: [
           {
-            id: 'sy-markers',
+            id: 'sy-markers-main',
+            markLine: {
+              data: markerLines
+            }
+          },
+          {
+            id: 'sy-markers-pinned-lines',
+            markLine: {
+              data: markerLines
+            }
+          },
+          {
+            id: 'sy-markers-labels',
             markLine: {
               data: markerLines
             }
@@ -644,15 +1173,16 @@ export default {
     },
     updateCursorLines() {
       if (!this.chart) return;
+      const cursorRange = this.getClampedCursorRange();
 
       this.chart.setOption({
         series: [
           {
-            id: 'sy-cursors',
+            id: 'sy-cursors-overlay',
             markLine: {
               data: [
-                { xAxis: this.cursorStart },
-                { xAxis: this.cursorEnd }
+                { xAxis: cursorRange.start },
+                { xAxis: cursorRange.end }
               ]
             }
           }
@@ -662,27 +1192,32 @@ export default {
     syncTopSlider() {
       if (!this.chart) return;
 
-      const topMin = this.viewStart != null ? this.viewStart : this.domainStart;
-      const topMax = this.viewEnd != null ? this.viewEnd : this.domainEnd;
-      const cursorStart = Math.min(this.cursorStart, this.cursorEnd);
-      const cursorEnd = Math.max(this.cursorStart, this.cursorEnd);
-      const topStart = clamp(cursorStart, topMin, topMax);
-      const topEnd = clamp(cursorEnd, topMin, topMax);
+      const cursorRange = this.getClampedCursorRange();
 
       this.isSyncingTopSlider = true;
       this.chart.setOption({
         xAxis: [
           {
+            id: 'x-label',
+            min: cursorRange.topMin,
+            max: cursorRange.topMax
+          },
+          {
             id: 'x-cursor',
-            min: topMin,
-            max: topMax
+            min: cursorRange.topMin,
+            max: cursorRange.topMax
+          },
+          {
+            id: 'x-slider',
+            min: cursorRange.topMin,
+            max: cursorRange.topMax
           }
         ],
         dataZoom: [
           {
             id: 'dz_top',
-            startValue: topStart,
-            endValue: topEnd
+            startValue: cursorRange.start,
+            endValue: cursorRange.end
           }
         ]
       });
@@ -700,10 +1235,11 @@ export default {
       const markers = (this.markers || []).filter(
         (marker) => marker && marker.time != null
       );
-      const gridRect = this.getGridRect();
+      const labelGridRect = this.getGridRect(LABEL_GRID_INDEX);
+      const labelAxisIndex = LABEL_AXIS_INDEX;
       const buttons = [];
 
-      if (markers.length && gridRect) {
+      if (markers.length && labelGridRect) {
         const labelFont = `${MARKER_LABEL_FONT_SIZE}px ${MARKER_LABEL_FONT_FAMILY}`;
         const chartWidth = this.chart.getWidth();
         const chartHeight = this.chart.getHeight();
@@ -711,22 +1247,25 @@ export default {
         const rightBound = chartWidth - MARKER_DELETE_RADIUS;
         const topBound = MARKER_DELETE_RADIUS;
         const bottomBound = chartHeight - MARKER_DELETE_RADIUS;
-        let labelAnchorY = gridRect.y;
+        let labelAnchorY = labelGridRect.y;
         const labelPosition = String(MARKER_LABEL_POSITION || '').toLowerCase();
 
         if (labelPosition.includes('end')) {
-          labelAnchorY = gridRect.y + gridRect.height;
+          labelAnchorY = labelGridRect.y + labelGridRect.height;
         } else if (labelPosition.includes('middle')) {
-          labelAnchorY = gridRect.y + gridRect.height / 2;
+          labelAnchorY = labelGridRect.y + labelGridRect.height / 2;
         }
 
         markers.forEach((marker) => {
           const markerTime = toTimeValue(marker.time);
           if (markerTime == null) return;
 
-          const lineX = this.getAxisPixelFromValue(markerTime);
+          const lineX = this.getAxisPixelFromValue(markerTime, labelAxisIndex);
           if (lineX == null || Number.isNaN(lineX)) return;
-          if (lineX < gridRect.x || lineX > gridRect.x + gridRect.width) {
+          if (
+            lineX < labelGridRect.x ||
+            lineX > labelGridRect.x + labelGridRect.width
+          ) {
             return;
           }
 
@@ -738,14 +1277,21 @@ export default {
             }
           });
           const textRect = textShape.getBoundingRect();
-          const labelWidth =
+          const baseLabelWidth =
             textRect.width +
             MARKER_LABEL_PADDING[1] * 2 +
             MARKER_LABEL_BORDER_WIDTH * 2;
-          const labelHeight =
+          const baseLabelHeight =
             textRect.height +
             MARKER_LABEL_PADDING[0] * 2 +
             MARKER_LABEL_BORDER_WIDTH * 2;
+          const rotatedSize = getRotatedSize(
+            baseLabelWidth,
+            baseLabelHeight,
+            MARKER_LABEL_ROTATE
+          );
+          const labelWidth = rotatedSize.width;
+          const labelHeight = rotatedSize.height;
           let rawLabelLeft = lineX + MARKER_LABEL_DISTANCE;
           if (MARKER_LABEL_ALIGN === 'right') {
             rawLabelLeft = lineX - MARKER_LABEL_DISTANCE - labelWidth;
@@ -753,50 +1299,52 @@ export default {
             rawLabelLeft = lineX - labelWidth / 2;
           }
           const maxLabelLeft = Math.max(
-            gridRect.x,
-            gridRect.x + gridRect.width - labelWidth
+            labelGridRect.x,
+            labelGridRect.x + labelGridRect.width - labelWidth
           );
-          const labelLeft = clamp(rawLabelLeft, gridRect.x, maxLabelLeft);
+          const labelLeft = clamp(rawLabelLeft, labelGridRect.x, maxLabelLeft);
+          const labelCenterX = labelLeft + labelWidth / 2;
           let labelCenterY = labelAnchorY;
           if (MARKER_LABEL_VERTICAL_ALIGN === 'top') {
             labelCenterY = labelAnchorY + labelHeight / 2;
           } else if (MARKER_LABEL_VERTICAL_ALIGN === 'bottom') {
             labelCenterY = labelAnchorY - labelHeight / 2;
           }
-          const labelTop = labelCenterY - labelHeight / 2;
-          const labelCenterX = labelLeft + labelWidth / 2;
-          const candidates = [
-            {
-              x:
-                labelLeft +
-                labelWidth +
-                MARKER_DELETE_GAP +
-                MARKER_DELETE_RADIUS,
-              y: labelCenterY
-            },
-            {
-              x: labelLeft - MARKER_DELETE_GAP - MARKER_DELETE_RADIUS,
-              y: labelCenterY
-            },
-            {
-              x: labelCenterX,
-              y: labelTop - MARKER_DELETE_GAP - MARKER_DELETE_RADIUS
-            },
-            {
-              x: labelCenterX,
-              y: labelTop + labelHeight + MARKER_DELETE_GAP + MARKER_DELETE_RADIUS
-            }
+          const angle = (MARKER_LABEL_ROTATE * Math.PI) / 180;
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
+          const halfBaseWidth = baseLabelWidth / 2;
+          const halfBaseHeight = baseLabelHeight / 2;
+          const corners = [
+            { x: halfBaseWidth, y: halfBaseHeight },
+            { x: halfBaseWidth, y: -halfBaseHeight },
+            { x: -halfBaseWidth, y: halfBaseHeight },
+            { x: -halfBaseWidth, y: -halfBaseHeight }
           ];
-          const picked =
-            candidates.find(
-              (pos) =>
-                pos.x >= leftBound &&
-                pos.x <= rightBound &&
-                pos.y >= topBound &&
-                pos.y <= bottomBound
-            ) || candidates[0];
-          const buttonX = clamp(picked.x, leftBound, rightBound);
-          const buttonY = clamp(picked.y, topBound, bottomBound);
+          let rightCornerX = 0;
+          let rightCornerY = 0;
+          let maxX = -Infinity;
+
+          corners.forEach((corner) => {
+            const rotatedX = corner.x * cos - corner.y * sin;
+            const rotatedY = corner.x * sin + corner.y * cos;
+            if (rotatedX > maxX) {
+              maxX = rotatedX;
+              rightCornerX = rotatedX;
+              rightCornerY = rotatedY;
+            }
+          });
+
+          const rightX = labelCenterX + rightCornerX;
+          const rightY = labelCenterY + rightCornerY;
+          const rawButtonX =
+            rightX +
+            MARKER_DELETE_GAP +
+            MARKER_DELETE_RADIUS +
+            MARKER_DELETE_OFFSET_X;
+          const rawButtonY = rightY + MARKER_DELETE_OFFSET_Y;
+          const buttonX = clamp(rawButtonX, leftBound, rightBound);
+          const buttonY = clamp(rawButtonY, topBound, bottomBound);
 
           buttons.push({
             id: marker.id,
@@ -817,6 +1365,9 @@ export default {
   position: relative;
   width: 100%;
   height: 640px;
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
 }
 
 .sy-chart {
