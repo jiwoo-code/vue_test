@@ -18,21 +18,20 @@
 
 <script>
 import * as echarts from 'echarts';
-import Text from 'zrender/lib/graphic/Text';
 
 const MARKER_LABEL_PADDING = [2, 6];
 const MARKER_LABEL_FONT_SIZE = 12;
 const MARKER_LABEL_FONT_FAMILY = 'sans-serif';
 const MARKER_LABEL_BORDER_WIDTH = 1;
 const MARKER_LABEL_DISTANCE = 6;
+const MARKER_LABEL_OFFSET_Y = -4;
 const MARKER_LABEL_POSITION = 'start';
 const MARKER_LABEL_ALIGN = 'left';
 const MARKER_LABEL_VERTICAL_ALIGN = 'bottom';
 const MARKER_LABEL_ROTATE = 18;
 const MARKER_DELETE_RADIUS = 10;
-const MARKER_DELETE_GAP = 0;
-const MARKER_DELETE_OFFSET_X = -10;
-const MARKER_DELETE_OFFSET_Y = 25;
+const MARKER_DELETE_OFFSET_X = 0;
+const MARKER_DELETE_OFFSET_Y = 0;
 const TOP_SLIDER_TOP = 16;
 const TOP_SLIDER_HEIGHT = 22;
 const TOP_SLIDER_GAP = 6;
@@ -75,17 +74,6 @@ function formatAxisLabel(value) {
     `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`,
     `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
   ].join(' ');
-}
-
-function getRotatedSize(width, height, rotation) {
-  if (!rotation) return { width, height };
-  const radians = (Math.abs(rotation) * Math.PI) / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-  return {
-    width: Math.abs(width * cos) + Math.abs(height * sin),
-    height: Math.abs(width * sin) + Math.abs(height * cos)
-  };
 }
 
 function toTimeValue(value) {
@@ -164,6 +152,9 @@ export default {
       scrollCategories: [],
       pinnedIntervals: [],
       scrollIntervals: [],
+      activeMarkerId: null,
+      suppressZrClick: false,
+      dragStart: null,
       selectedCategoryIndex: null,
       domainStart: 0,
       domainEnd: 0,
@@ -285,6 +276,14 @@ export default {
 
       this.chart.on('datazoom', this.onDataZoom);
       this.chart.on('click', this.onChartClick);
+      const zr = this.chart.getZr();
+      if (zr) {
+        zr.on('click', this.onZrClick);
+        zr.on('mousewheel', this.onChartWheel);
+        zr.on('mousedown', this.onZrMouseDown);
+        zr.on('mousemove', this.onZrMouseMove);
+        zr.on('mouseup', this.onZrMouseUp);
+      }
 
       this.updateMarkerLines();
       this.updateSelectionLines();
@@ -295,6 +294,14 @@ export default {
       if (!this.chart) return;
       this.chart.off('datazoom', this.onDataZoom);
       this.chart.off('click', this.onChartClick);
+      const zr = this.chart.getZr();
+      if (zr) {
+        zr.off('click', this.onZrClick);
+        zr.off('mousewheel', this.onChartWheel);
+        zr.off('mousedown', this.onZrMouseDown);
+        zr.off('mousemove', this.onZrMouseMove);
+        zr.off('mouseup', this.onZrMouseUp);
+      }
       this.chart.dispose();
       this.chart = null;
     },
@@ -385,6 +392,17 @@ export default {
       });
     },
     onChartClick(params) {
+      this.suppressZrClick = true;
+      const markerId = this.getMarkerIdFromEvent(params);
+      if (markerId != null) {
+        this.activeMarkerId =
+          this.activeMarkerId === markerId ? null : markerId;
+        this.updateMarkerButtons();
+        return;
+      }
+      if (this.activeMarkerId != null) {
+        this.clearActiveMarker();
+      }
       if (!params || params.seriesType !== 'custom') return;
       if (!params.value || typeof params.value[0] !== 'number') return;
 
@@ -398,6 +416,39 @@ export default {
       if (categoryIndex == null) return;
       this.selectedCategoryIndex = categoryIndex;
       this.updateSelectionLines();
+    },
+    onZrClick() {
+      if (this.suppressZrClick) {
+        this.suppressZrClick = false;
+        return;
+      }
+      this.clearActiveMarker();
+    },
+    onChartWheel() {
+      this.clearActiveMarker();
+    },
+    onZrMouseDown(event) {
+      if (this.activeMarkerId == null) return;
+      if (!event) return;
+      this.dragStart = { x: event.offsetX, y: event.offsetY };
+    },
+    onZrMouseMove(event) {
+      if (!this.dragStart || this.activeMarkerId == null) return;
+      if (!event) return;
+      const dx = event.offsetX - this.dragStart.x;
+      const dy = event.offsetY - this.dragStart.y;
+      if (dx * dx + dy * dy >= 16) {
+        this.dragStart = null;
+        this.clearActiveMarker();
+      }
+    },
+    onZrMouseUp() {
+      this.dragStart = null;
+    },
+    clearActiveMarker() {
+      if (this.activeMarkerId == null) return;
+      this.activeMarkerId = null;
+      this.updateMarkerButtons();
     },
     updateSelectionLines() {
       if (!this.chart) return;
@@ -430,6 +481,11 @@ export default {
           }
         ]
       });
+    },
+    getMarkerIdFromEvent(params) {
+      if (!params || params.componentType !== 'markLine') return null;
+      const data = params.data;
+      return data && data.markerId != null ? data.markerId : null;
     },
     getClampedCursorRange() {
       const topMin = this.viewStart != null ? this.viewStart : this.domainStart;
@@ -899,6 +955,7 @@ export default {
                 align: MARKER_LABEL_ALIGN,
                 verticalAlign: MARKER_LABEL_VERTICAL_ALIGN,
                 distance: MARKER_LABEL_DISTANCE,
+                offset: [0, MARKER_LABEL_OFFSET_Y],
                 rotate: MARKER_LABEL_ROTATE,
                 color: '#1d4ed8',
                 backgroundColor: 'rgba(37, 99, 235, 0.12)',
@@ -1232,117 +1289,59 @@ export default {
         return;
       }
 
+      if (this.activeMarkerId == null) {
+        this.markerButtons = [];
+        return;
+      }
+
       const markers = (this.markers || []).filter(
-        (marker) => marker && marker.time != null
+        (marker) =>
+          marker &&
+          marker.time != null &&
+          marker.id === this.activeMarkerId
       );
-      const labelGridRect = this.getGridRect(LABEL_GRID_INDEX);
-      const labelAxisIndex = LABEL_AXIS_INDEX;
+      const mainGridRect = this.getGridRect(MAIN_GRID_INDEX);
+      const pinnedGridRect = this.getGridRect(PINNED_GRID_INDEX);
       const buttons = [];
 
-      if (markers.length && labelGridRect) {
-        const labelFont = `${MARKER_LABEL_FONT_SIZE}px ${MARKER_LABEL_FONT_FAMILY}`;
+      if (!markers.length) {
+        this.activeMarkerId = null;
+        this.markerButtons = [];
+        return;
+      }
+
+      const gridRects = [mainGridRect, pinnedGridRect].filter(
+        (rect) => rect && rect.height > 0
+      );
+      const lineCenterY = gridRects.length
+        ? (Math.min(...gridRects.map((rect) => rect.y)) +
+            Math.max(...gridRects.map((rect) => rect.y + rect.height))) /
+          2
+        : null;
+
+      if (markers.length && mainGridRect && lineCenterY != null) {
         const chartWidth = this.chart.getWidth();
         const chartHeight = this.chart.getHeight();
         const leftBound = MARKER_DELETE_RADIUS;
         const rightBound = chartWidth - MARKER_DELETE_RADIUS;
         const topBound = MARKER_DELETE_RADIUS;
         const bottomBound = chartHeight - MARKER_DELETE_RADIUS;
-        let labelAnchorY = labelGridRect.y;
-        const labelPosition = String(MARKER_LABEL_POSITION || '').toLowerCase();
-
-        if (labelPosition.includes('end')) {
-          labelAnchorY = labelGridRect.y + labelGridRect.height;
-        } else if (labelPosition.includes('middle')) {
-          labelAnchorY = labelGridRect.y + labelGridRect.height / 2;
-        }
 
         markers.forEach((marker) => {
           const markerTime = toTimeValue(marker.time);
           if (markerTime == null) return;
 
-          const lineX = this.getAxisPixelFromValue(markerTime, labelAxisIndex);
+          const lineX = this.getAxisPixelFromValue(markerTime, MAIN_AXIS_INDEX);
           if (lineX == null || Number.isNaN(lineX)) return;
           if (
-            lineX < labelGridRect.x ||
-            lineX > labelGridRect.x + labelGridRect.width
+            lineX < mainGridRect.x ||
+            lineX > mainGridRect.x + mainGridRect.width
           ) {
             return;
           }
 
-          const labelText = formatDateTime(markerTime);
-          const textShape = new Text({
-            style: {
-              text: labelText,
-              font: labelFont
-            }
-          });
-          const textRect = textShape.getBoundingRect();
-          const baseLabelWidth =
-            textRect.width +
-            MARKER_LABEL_PADDING[1] * 2 +
-            MARKER_LABEL_BORDER_WIDTH * 2;
-          const baseLabelHeight =
-            textRect.height +
-            MARKER_LABEL_PADDING[0] * 2 +
-            MARKER_LABEL_BORDER_WIDTH * 2;
-          const rotatedSize = getRotatedSize(
-            baseLabelWidth,
-            baseLabelHeight,
-            MARKER_LABEL_ROTATE
-          );
-          const labelWidth = rotatedSize.width;
-          const labelHeight = rotatedSize.height;
-          let rawLabelLeft = lineX + MARKER_LABEL_DISTANCE;
-          if (MARKER_LABEL_ALIGN === 'right') {
-            rawLabelLeft = lineX - MARKER_LABEL_DISTANCE - labelWidth;
-          } else if (MARKER_LABEL_ALIGN === 'center') {
-            rawLabelLeft = lineX - labelWidth / 2;
-          }
-          const maxLabelLeft = Math.max(
-            labelGridRect.x,
-            labelGridRect.x + labelGridRect.width - labelWidth
-          );
-          const labelLeft = clamp(rawLabelLeft, labelGridRect.x, maxLabelLeft);
-          const labelCenterX = labelLeft + labelWidth / 2;
-          let labelCenterY = labelAnchorY;
-          if (MARKER_LABEL_VERTICAL_ALIGN === 'top') {
-            labelCenterY = labelAnchorY + labelHeight / 2;
-          } else if (MARKER_LABEL_VERTICAL_ALIGN === 'bottom') {
-            labelCenterY = labelAnchorY - labelHeight / 2;
-          }
-          const angle = (MARKER_LABEL_ROTATE * Math.PI) / 180;
-          const cos = Math.cos(angle);
-          const sin = Math.sin(angle);
-          const halfBaseWidth = baseLabelWidth / 2;
-          const halfBaseHeight = baseLabelHeight / 2;
-          const corners = [
-            { x: halfBaseWidth, y: halfBaseHeight },
-            { x: halfBaseWidth, y: -halfBaseHeight },
-            { x: -halfBaseWidth, y: halfBaseHeight },
-            { x: -halfBaseWidth, y: -halfBaseHeight }
-          ];
-          let rightCornerX = 0;
-          let rightCornerY = 0;
-          let maxX = -Infinity;
-
-          corners.forEach((corner) => {
-            const rotatedX = corner.x * cos - corner.y * sin;
-            const rotatedY = corner.x * sin + corner.y * cos;
-            if (rotatedX > maxX) {
-              maxX = rotatedX;
-              rightCornerX = rotatedX;
-              rightCornerY = rotatedY;
-            }
-          });
-
-          const rightX = labelCenterX + rightCornerX;
-          const rightY = labelCenterY + rightCornerY;
-          const rawButtonX =
-            rightX +
-            MARKER_DELETE_GAP +
-            MARKER_DELETE_RADIUS +
-            MARKER_DELETE_OFFSET_X;
-          const rawButtonY = rightY + MARKER_DELETE_OFFSET_Y;
+          const rawButtonX = lineX + MARKER_DELETE_OFFSET_X;
+          const rawButtonY = lineCenterY + MARKER_DELETE_OFFSET_Y;
           const buttonX = clamp(rawButtonX, leftBound, rightBound);
           const buttonY = clamp(rawButtonY, topBound, bottomBound);
 
