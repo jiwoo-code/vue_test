@@ -23,7 +23,11 @@
 
       <p v-if="error" class="error">{{ error }}</p>
 
-      <SyTimelineChart :markers="markers" @remove-marker="removeMarker" />
+      <SyTimelineChart
+        :markers="markers"
+        :timeline-data="timelineData"
+        @remove-marker="removeMarker"
+      />
     </section>
   </div>
 </template>
@@ -73,10 +77,94 @@ export default {
     return {
       markers: [],
       markerInput: formatDateTime(Date.now()),
-      error: ''
+      error: '',
+      timelineData: {}
     };
   },
+  created() {
+    this.timelineData = this.buildTimelineData();
+  },
   methods: {
+    buildTimelineData() {
+      const rng = this.createRng(Date.now());
+      const baseDate = new Date();
+      baseDate.setHours(0, 0, 0, 0);
+
+      const startTime = baseDate.getTime();
+      const span = 24 * 60 * 60 * 1000;
+      const endTime = startTime + span;
+
+      const categories = [
+        'category19',
+        'category17',
+        'category15',
+        'category13',
+        'category11',
+        'category9',
+        'category7',
+        'category5',
+        'category3',
+        'category1',
+        'categoryC',
+        'categoryA'
+      ];
+
+      const types = [
+        { name: 'Type A', color: '#7b9ce1' },
+        { name: 'Type B', color: '#bd6d6c' },
+        { name: 'Type C', color: '#75d874' },
+        { name: 'Type D', color: '#e0bc78' },
+        { name: 'Type E', color: '#dc77dc' },
+        { name: 'Type F', color: '#72b362' }
+      ];
+
+      const intervals = [];
+      let intervalId = 1;
+
+      categories.forEach((category, categoryIndex) => {
+        const count = 18 + Math.floor(rng() * 10);
+        for (let index = 0; index < count; index += 1) {
+          const typeItem = types[Math.floor(rng() * types.length)];
+          const start = startTime + Math.floor(rng() * (span - 60 * 1000));
+          const duration = 2 * 60 * 1000 + Math.floor(rng() * 90 * 60 * 1000);
+          const end = this.clamp(start + duration, startTime + 10 * 1000, endTime);
+
+          intervals.push({
+            id: intervalId,
+            name: typeItem.name,
+            value: [categoryIndex, start, end, end - start],
+            itemStyle: {
+              color: typeItem.color
+            }
+          });
+
+          intervalId += 1;
+        }
+      });
+
+      return {
+        categories,
+        intervals,
+        domainStart: startTime,
+        domainEnd: endTime,
+        viewStart: startTime + span * 0.22,
+        viewEnd: startTime + span * 0.42,
+        cursorStart: startTime + span * 0.28,
+        cursorEnd: startTime + span * 0.35
+      };
+    },
+    createRng(seed) {
+      let state = seed >>> 0;
+      return () => {
+        state ^= state << 13;
+        state ^= state >>> 17;
+        state ^= state << 5;
+        return (state >>> 0) / 4294967296;
+      };
+    },
+    clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    },
     addMarker() {
       this.error = '';
 
