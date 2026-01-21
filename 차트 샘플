@@ -9,6 +9,8 @@
         class="sy-marker-btn"
         type="button"
         :style="{ left: `${item.x}px`, top: `${item.y}px` }"
+        @mouseenter="onMarkerButtonMouseEnter"
+        @mouseleave="onMarkerButtonMouseLeave"
         @click="$emit('remove-marker', item.id)"
       >
         x
@@ -112,7 +114,10 @@ export default {
       // hover 기반 표시 상태
       activeMarkerId: null,
       hoverMarkerId: null,
-      hoverClearTimerId: null
+      hoverClearTimerId: null,
+
+      // 버튼 위로 이동해도 안 사라지도록 유지하는 상태
+      isHoveringMarkerButton: false
     };
   },
   computed: {
@@ -382,14 +387,42 @@ export default {
 
       this.hoverMarkerId = null;
 
+      // 점선에서 버튼으로 이동하는 경우(버튼 hover가 곧 들어옴)엔 유지해야 한다.
+      // 그래서 "버튼 위에 있는지"를 체크해서 버튼 hover 중이면 숨김 예약을 하지 않는다.
+      if (this.isHoveringMarkerButton) return;
+
       // 점선/요소 경계에서 잠깐 벗어날 때 깜빡임을 줄이기 위한 아주 짧은 지연
       this.clearHoverClearTimer();
       this.hoverClearTimerId = setTimeout(() => {
         this.hoverClearTimerId = null;
-        if (this.hoverMarkerId == null) {
-          this.clearActiveMarker();
-        }
+
+        if (this.hoverMarkerId != null) return;
+        if (this.isHoveringMarkerButton) return;
+
+        this.clearActiveMarker();
       }, 40);
+    },
+
+    onMarkerButtonMouseEnter() {
+      this.isHoveringMarkerButton = true;
+      this.clearHoverClearTimer();
+    },
+
+    onMarkerButtonMouseLeave() {
+      this.isHoveringMarkerButton = false;
+
+      // 버튼에서 나갔는데 점선 위도 아니면 이제 숨김
+      if (this.hoverMarkerId == null) {
+        this.clearHoverClearTimer();
+        this.hoverClearTimerId = setTimeout(() => {
+          this.hoverClearTimerId = null;
+
+          if (this.hoverMarkerId != null) return;
+          if (this.isHoveringMarkerButton) return;
+
+          this.clearActiveMarker();
+        }, 40);
+      }
     },
 
     getMarkerIdFromMarkLineEvent(params) {
@@ -996,7 +1029,6 @@ export default {
         return;
       }
 
-      // hover된 점선이 없으면 버튼도 없다.
       const activeMarkerId = this.activeMarkerId;
       if (activeMarkerId == null) {
         this.markerButtons = [];
