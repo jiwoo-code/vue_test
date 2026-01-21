@@ -151,6 +151,9 @@ export default {
   },
   watch: {
     markersSignature() {
+      // 마커가 삭제/재생성될 때 "hover 상태가 남는" 케이스를 방어
+      this.ensureActiveMarkerIsValid();
+
       this.updateMarkerLines();
       this.scheduleMarkerButtonsUpdate();
     },
@@ -387,20 +390,10 @@ export default {
 
       this.hoverMarkerId = null;
 
-      // 점선에서 버튼으로 이동하는 경우(버튼 hover가 곧 들어옴)엔 유지해야 한다.
-      // 그래서 "버튼 위에 있는지"를 체크해서 버튼 hover 중이면 숨김 예약을 하지 않는다.
+      // 점선에서 버튼으로 이동하는 경우 유지
       if (this.isHoveringMarkerButton) return;
 
-      // 점선/요소 경계에서 잠깐 벗어날 때 깜빡임을 줄이기 위한 아주 짧은 지연
-      this.clearHoverClearTimer();
-      this.hoverClearTimerId = setTimeout(() => {
-        this.hoverClearTimerId = null;
-
-        if (this.hoverMarkerId != null) return;
-        if (this.isHoveringMarkerButton) return;
-
-        this.clearActiveMarker();
-      }, 40);
+      this.scheduleClearActiveMarkerAfterDelay();
     },
 
     onMarkerButtonMouseEnter() {
@@ -413,16 +406,21 @@ export default {
 
       // 버튼에서 나갔는데 점선 위도 아니면 이제 숨김
       if (this.hoverMarkerId == null) {
-        this.clearHoverClearTimer();
-        this.hoverClearTimerId = setTimeout(() => {
-          this.hoverClearTimerId = null;
-
-          if (this.hoverMarkerId != null) return;
-          if (this.isHoveringMarkerButton) return;
-
-          this.clearActiveMarker();
-        }, 40);
+        this.scheduleClearActiveMarkerAfterDelay();
       }
+    },
+
+    scheduleClearActiveMarkerAfterDelay() {
+      this.clearHoverClearTimer();
+
+      this.hoverClearTimerId = setTimeout(() => {
+        this.hoverClearTimerId = null;
+
+        if (this.hoverMarkerId != null) return;
+        if (this.isHoveringMarkerButton) return;
+
+        this.clearActiveMarker();
+      }, 40);
     },
 
     getMarkerIdFromMarkLineEvent(params) {
@@ -439,8 +437,31 @@ export default {
 
     clearActiveMarker() {
       if (this.activeMarkerId == null) return;
+
       this.activeMarkerId = null;
+      this.hoverMarkerId = null;
+
+      // 버튼이 사라지는 순간 mouseleave가 안 뜰 수 있으니 상태도 같이 정리
+      this.isHoveringMarkerButton = false;
+
       this.scheduleMarkerButtonsUpdate();
+    },
+
+    // 마커 삭제/재생성 중 activeMarkerId가 유효하지 않으면 상태를 정리한다.
+    ensureActiveMarkerIsValid() {
+      const activeMarkerId = this.activeMarkerId;
+      if (activeMarkerId == null) return;
+
+      const markers = Array.isArray(this.markers) ? this.markers : [];
+      const exists = markers.some((marker) => marker && marker.id === activeMarkerId);
+
+      if (exists) return;
+
+      // 버튼 클릭으로 마커가 사라질 때 mouseleave가 생략될 수 있으므로 여기서 방어
+      this.activeMarkerId = null;
+      this.hoverMarkerId = null;
+      this.isHoveringMarkerButton = false;
+      this.clearHoverClearTimer();
     },
 
     onDataZoom(event) {
@@ -1026,12 +1047,14 @@ export default {
     updateMarkerButtons() {
       if (!this.chart) {
         this.markerButtons = [];
+        this.isHoveringMarkerButton = false;
         return;
       }
 
       const activeMarkerId = this.activeMarkerId;
       if (activeMarkerId == null) {
         this.markerButtons = [];
+        this.isHoveringMarkerButton = false;
         return;
       }
 
@@ -1043,7 +1066,9 @@ export default {
       });
 
       if (!activeMarkers.length) {
+        // 마커가 사라졌는데 버튼 hover 상태만 남는 케이스 방어
         this.markerButtons = [];
+        this.isHoveringMarkerButton = false;
         return;
       }
 
@@ -1052,6 +1077,7 @@ export default {
 
       if (!mainGridRect) {
         this.markerButtons = [];
+        this.isHoveringMarkerButton = false;
         return;
       }
 
@@ -1060,6 +1086,7 @@ export default {
 
       if (lineCenterY == null) {
         this.markerButtons = [];
+        this.isHoveringMarkerButton = false;
         return;
       }
 
@@ -1089,6 +1116,11 @@ export default {
 
         buttons.push({ id: marker.id, x, y });
       });
+
+      // 버튼이 하나도 안 만들어졌다면 hover 상태도 같이 정리
+      if (!buttons.length) {
+        this.isHoveringMarkerButton = false;
+      }
 
       this.markerButtons = buttons;
     },
