@@ -1,6 +1,7 @@
 <template>
   <div class="sy-chart-wrap">
     <div class="sy-chart" ref="chart"></div>
+
     <div class="sy-marker-overlay">
       <button
         v-for="item in markerButtons"
@@ -19,40 +20,64 @@
 <script>
 import * as echarts from 'echarts';
 
-// 스타일 상수 - 실제로 반복 사용되는 값들만 유지
-const CHART_STYLE = Object.freeze({
-  markerLabel: {
-    padding: [2, 6],
-    fontSize: 12,
-    borderWidth: 1,
-    distance: 6,
-    offsetY: -4,
-    rotate: 18,
-    color: '#1d4ed8',
-    backgroundColor: 'rgba(37, 99, 235, 0.12)',
-    borderColor: 'rgba(37, 99, 235, 0.35)'
-  },
-  markerButton: {
-    radius: 10,
-    offsetX: 0,
-    offsetY: 0
-  },
-  line: {
-    selection: { width: 2, color: '#f97316' },
-    marker: { width: 2, color: '#2563eb', type: 'dashed' },
-    cursor: { width: 2, color: '#ef4444' }
-  }
+/* =========================
+   상수 (테마/스타일/레이아웃/인덱스)
+   ========================= */
+const THEME = Object.freeze({
+  fontFamily: 'sans-serif',
+  axisLabelColor: '#475569',
+  axisLineColor: '#cbd5e1',
+  splitLineColor: '#e2e8f0',
+  markerBlue: '#1d4ed8',
+  markerBg: 'rgba(37, 99, 235, 0.12)',
+  markerBorder: 'rgba(37, 99, 235, 0.35)'
 });
 
-// 레이아웃 상수
+const LINE_STYLE = Object.freeze({
+  selection: { width: 2, color: '#f97316', type: 'solid' },
+  marker: { width: 2, color: '#2563eb', type: 'dashed' },
+  markerLabel: { width: 1, color: 'rgba(37, 99, 235, 0.02)', type: 'dashed' },
+  cursor: { width: 2, color: '#ef4444', type: 'solid' }
+});
+
+const MARKER_LABEL = Object.freeze({
+  padding: [2, 6],
+  fontSize: 12,
+  borderWidth: 1,
+  distance: 6,
+  offsetY: -4,
+  rotate: 18,
+  position: 'start',
+  align: 'left',
+  verticalAlign: 'bottom',
+  borderRadius: 6
+});
+
+const MARKER_BUTTON = Object.freeze({
+  radius: 10,
+  offsetX: 0,
+  offsetY: 0
+});
+
 const LAYOUT = Object.freeze({
   grid: { left: 110, right: 62, bottom: 124 },
   slider: { top: 16, height: 22, gap: 6, labelGap: 52, bottom: 18, bottomHeight: 22 }
 });
 
-// Grid/Axis 인덱스 - 여러 곳에서 참조되므로 유지
-const GRID_INDEX = { main: 0, pinned: 1, label: 2, cursor: 3 };
-const AXIS_INDEX = { main: 0, pinned: 1, label: 2, cursor: 3, slider: 4 };
+const GRID_INDEX = Object.freeze({
+  main: 0,
+  pinned: 1,
+  label: 2,
+  cursor: 3
+});
+
+const AXIS_INDEX = Object.freeze({
+  main: 0,
+  pinned: 1,
+  label: 2,
+  cursor: 3,
+  slider: 4
+});
 
 export default {
   name: 'SyTimelineChart',
@@ -63,56 +88,72 @@ export default {
   data() {
     return {
       chart: null,
+
       markerButtons: [],
+      markerButtonsRafId: null,
+
       categories: [],
       pinnedCategory: null,
       scrollCategories: [],
       pinnedIntervals: [],
       scrollIntervals: [],
-      activeMarkerId: null,
-      ignoreNextZrClick: false,
-      dragOrigin: null,
+
       selectedCategoryIndex: null,
+
       domainStart: 0,
       domainEnd: 0,
       viewStart: 0,
       viewEnd: 0,
       cursorStart: 0,
       cursorEnd: 0,
-      isSyncingTopSlider: false
+
+      isSyncingTopSlider: false,
+
+      // hover 기반 표시 상태
+      activeMarkerId: null,
+      hoverMarkerId: null,
+      hoverClearTimerId: null
     };
   },
   computed: {
-    activeMarkers() {
-      if (this.activeMarkerId == null) return [];
-      return this.markers.filter(m => m?.time != null && m.id === this.activeMarkerId);
-    },
-    clampedCursorRange() {
+    cursorRange() {
       const topMin = this.viewStart ?? this.domainStart;
       const topMax = this.viewEnd ?? this.domainEnd;
-      const start = Math.min(this.cursorStart, this.cursorEnd);
-      const end = Math.max(this.cursorStart, this.cursorEnd);
+
+      const startRaw = Math.min(this.cursorStart, this.cursorEnd);
+      const endRaw = Math.max(this.cursorStart, this.cursorEnd);
+
       return {
         topMin,
         topMax,
-        start: this.clamp(start, topMin, topMax),
-        end: this.clamp(end, topMin, topMax)
+        start: this.clamp(startRaw, topMin, topMax),
+        end: this.clamp(endRaw, topMin, topMax)
       };
+    },
+
+    // markers deep watch 대신, 변화 감지용 signature.
+    // id/time만 변하면 선/버튼 재계산이면 충분.
+    markersSignature() {
+      const markers = Array.isArray(this.markers) ? this.markers : [];
+      return markers
+        .map((marker) => {
+          if (!marker) return '';
+          const timeValue = this.toTimeValue(marker.time);
+          return `${marker.id}:${timeValue}`;
+        })
+        .join('|');
     }
   },
   watch: {
-    markers: {
-      deep: true,
-      handler() {
-        this.updateMarkerLines();
-        this.updateMarkerButtons();
-      }
+    markersSignature() {
+      this.updateMarkerLines();
+      this.scheduleMarkerButtonsUpdate();
     },
     timelineData: {
       deep: true,
       immediate: true,
-      handler(value) {
-        this.setData(value);
+      handler(payload) {
+        this.applyData(payload);
         this.refreshChart();
       }
     }
@@ -126,46 +167,62 @@ export default {
     this.teardownChart();
   },
   methods: {
-    // ============================================
-    // 데이터 초기화
-    // ============================================
-    setData(payload = {}) {
+    /* =========================
+       데이터 적용
+       ========================= */
+    applyData(payload = {}) {
       const categories = Array.isArray(payload.categories) ? payload.categories : [];
       const intervals = Array.isArray(payload.intervals) ? payload.intervals : [];
       const domain = this.resolveDomain(payload, intervals);
       const span = domain.end - domain.start;
 
       this.categories = categories;
-      this.pinnedCategory = categories[0] || null;
+      this.pinnedCategory = categories.length ? categories[0] : null;
       this.scrollCategories = categories.slice(1);
-      
-      // 인터벌 분리
-      this.pinnedIntervals = intervals
-        .filter(item => item?.value?.[0] === 0)
-        .map(item => ({ ...item, value: [0, item.value[1], item.value[2], item.value[3]] }));
-      
-      this.scrollIntervals = intervals
-        .filter(item => item?.value?.[0] > 0)
-        .map(item => ({ ...item, value: [item.value[0] - 1, item.value[1], item.value[2], item.value[3]] }));
 
-      this.selectedCategoryIndex = payload.selectedCategoryIndex ?? null;
+      this.pinnedIntervals = intervals
+        .filter((item) => item && item.value && item.value[0] === 0)
+        .map((item) => ({
+          ...item,
+          value: [0, item.value[1], item.value[2], item.value[3]]
+        }));
+
+      this.scrollIntervals = intervals
+        .filter((item) => item && item.value && item.value[0] > 0)
+        .map((item) => ({
+          ...item,
+          value: [item.value[0] - 1, item.value[1], item.value[2], item.value[3]]
+        }));
+
+      this.selectedCategoryIndex =
+        typeof payload.selectedCategoryIndex === 'number' ? payload.selectedCategoryIndex : null;
+
       this.domainStart = domain.start;
       this.domainEnd = domain.end;
 
-      // 기본 뷰/커서 범위 설정
-      const defaults = this.calculateDefaultRanges(domain.start, span);
+      const defaults = this.getDefaultRanges(domain.start, span);
+
       this.viewStart = this.normalizeTime(payload.viewStart, defaults.viewStart);
       this.viewEnd = this.normalizeTime(payload.viewEnd, defaults.viewEnd);
       this.cursorStart = this.normalizeTime(payload.cursorStart, defaults.cursorStart);
       this.cursorEnd = this.normalizeTime(payload.cursorEnd, defaults.cursorEnd);
     },
 
-    calculateDefaultRanges(start, span) {
+    getDefaultRanges(domainStart, span) {
+      if (span <= 0) {
+        return {
+          viewStart: domainStart,
+          viewEnd: domainStart,
+          cursorStart: domainStart,
+          cursorEnd: domainStart
+        };
+      }
+
       return {
-        viewStart: span > 0 ? start + span * 0.22 : start,
-        viewEnd: span > 0 ? start + span * 0.42 : start,
-        cursorStart: span > 0 ? start + span * 0.28 : start,
-        cursorEnd: span > 0 ? start + span * 0.35 : start
+        viewStart: domainStart + span * 0.22,
+        viewEnd: domainStart + span * 0.42,
+        cursorStart: domainStart + span * 0.28,
+        cursorEnd: domainStart + span * 0.35
       };
     },
 
@@ -181,48 +238,66 @@ export default {
     },
 
     getIntervalDomain(intervals) {
-      let min = null, max = null;
+      let min = null;
+      let max = null;
 
-      intervals.forEach(item => {
-        if (!item?.value) return;
+      intervals.forEach((item) => {
+        if (!item || !item.value) return;
+
         const start = this.toTimeValue(item.value[1]);
         const end = this.toTimeValue(item.value[2]);
+
         if (start != null) min = min == null ? start : Math.min(min, start);
         if (end != null) max = max == null ? end : Math.max(max, end);
       });
 
-      return min == null || max == null ? { start: 0, end: 0 } : { start: min, end: max };
+      if (min == null || max == null) return { start: 0, end: 0 };
+      return { start: min, end: max };
     },
 
-    // ============================================
-    // 차트 초기화 및 관리
-    // ============================================
+    /* =========================
+       차트 생명주기
+       ========================= */
     initChart() {
       const el = this.$refs.chart;
       if (!el) return;
 
       this.chart = echarts.init(el);
       this.chart.setOption(this.buildOption(), { notMerge: true });
-      this.updateGridLayout();
+
+      this.applyLayout();
       this.bindChartEvents();
+
       this.updateMarkerLines();
       this.updateSelectionLines();
-      this.updateMarkerButtons();
+      this.updateCursorLines();
+      this.scheduleMarkerButtonsUpdate();
       this.syncTopSlider();
     },
 
     refreshChart() {
       if (!this.chart) return;
+
       this.chart.setOption(this.buildOption(), { notMerge: true });
-      this.updateGridLayout();
+
+      this.applyLayout();
       this.updateMarkerLines();
       this.updateSelectionLines();
-      this.updateMarkerButtons();
+      this.updateCursorLines();
+      this.scheduleMarkerButtonsUpdate();
       this.syncTopSlider();
     },
 
     teardownChart() {
       if (!this.chart) return;
+
+      this.clearHoverClearTimer();
+
+      if (this.markerButtonsRafId != null) {
+        cancelAnimationFrame(this.markerButtonsRafId);
+        this.markerButtonsRafId = null;
+      }
+
       this.unbindChartEvents();
       this.chart.dispose();
       this.chart = null;
@@ -231,277 +306,372 @@ export default {
     resizeChart() {
       if (!this.chart) return;
       this.chart.resize();
-      this.updateGridLayout();
-      this.updateMarkerButtons();
+      this.applyLayout();
+      this.scheduleMarkerButtonsUpdate();
     },
 
-    // ============================================
-    // 이벤트 바인딩
-    // ============================================
+    /* =========================
+       이벤트 바인딩
+       ========================= */
     bindChartEvents() {
       if (!this.chart) return;
-      
+
       this.chart.on('datazoom', this.onDataZoom);
       this.chart.on('click', this.onChartClick);
-      
-      const zr = this.chart.getZr();
-      if (!zr) return;
-      
-      zr.on('click', this.onZrClick);
-      zr.on('mousewheel', this.onChartWheel);
-      zr.on('mousedown', this.onZrMouseDown);
-      zr.on('mousemove', this.onZrMouseMove);
-      zr.on('mouseup', this.onZrMouseUp);
+
+      // 마커(점선) hover 처리: 라벨 시리즈는 제외
+      this.chart.on('mouseover', this.onChartMouseOver);
+      this.chart.on('mouseout', this.onChartMouseOut);
     },
 
     unbindChartEvents() {
       if (!this.chart) return;
-      
+
       this.chart.off('datazoom', this.onDataZoom);
       this.chart.off('click', this.onChartClick);
-      
-      const zr = this.chart.getZr();
-      if (!zr) return;
-      
-      zr.off('click', this.onZrClick);
-      zr.off('mousewheel', this.onChartWheel);
-      zr.off('mousedown', this.onZrMouseDown);
-      zr.off('mousemove', this.onZrMouseMove);
-      zr.off('mouseup', this.onZrMouseUp);
+      this.chart.off('mouseover', this.onChartMouseOver);
+      this.chart.off('mouseout', this.onChartMouseOut);
     },
 
-    // ============================================
-    // 이벤트 핸들러
-    // ============================================
+    /* =========================
+       이벤트 핸들러
+       ========================= */
     onChartClick(params) {
-      this.ignoreNextZrClick = true;
-      
-      const markerId = this.getMarkerIdFromEvent(params);
-      if (markerId != null) {
-        this.activeMarkerId = this.activeMarkerId === markerId ? null : markerId;
-        this.updateMarkerButtons();
-        return;
-      }
+      // 마커 버튼 표시/숨김은 hover로만 관리한다.
+      // 클릭은 bar 선택만 처리.
+      if (!params || params.seriesType !== 'custom') return;
+      if (!params.value || typeof params.value[0] !== 'number') return;
 
-      if (this.activeMarkerId != null) {
-        this.clearActiveMarker();
-      }
+      const categoryIndex = this.getCategoryIndexFromBarClick(params);
+      if (categoryIndex == null) return;
 
-      if (params?.seriesType !== 'custom' || !params.value) return;
+      this.selectedCategoryIndex = categoryIndex;
+      this.updateSelectionLines();
+    },
 
-      let categoryIndex = null;
-      if (params.seriesId === 'sy-bars-pinned') {
-        categoryIndex = 0;
-      } else if (params.seriesId === 'sy-bars-main') {
-        categoryIndex = params.value[0] + 1;
-      }
+    getCategoryIndexFromBarClick(params) {
+      if (params.seriesId === 'sy-bars-pinned') return 0;
+      if (params.seriesId === 'sy-bars-main') return params.value[0] + 1;
+      return null;
+    },
 
-      if (categoryIndex != null) {
-        this.selectedCategoryIndex = categoryIndex;
-        this.updateSelectionLines();
+    onChartMouseOver(params) {
+      // 라벨 시리즈는 hover 대상에서 제외 (점선만)
+      if (params && params.seriesId === 'sy-markers-labels') return;
+
+      const markerId = this.getMarkerIdFromMarkLineEvent(params);
+      if (markerId == null) return;
+
+      this.clearHoverClearTimer();
+
+      this.hoverMarkerId = markerId;
+
+      if (this.activeMarkerId !== markerId) {
+        this.activeMarkerId = markerId;
+        this.scheduleMarkerButtonsUpdate();
       }
     },
 
-    onZrClick() {
-      if (this.ignoreNextZrClick) {
-        this.ignoreNextZrClick = false;
-        return;
-      }
-      this.clearActiveMarker();
+    onChartMouseOut(params) {
+      // 라벨 시리즈는 hover 대상에서 제외 (점선만)
+      if (params && params.seriesId === 'sy-markers-labels') return;
+
+      const markerId = this.getMarkerIdFromMarkLineEvent(params);
+      if (markerId == null) return;
+      if (this.hoverMarkerId !== markerId) return;
+
+      this.hoverMarkerId = null;
+
+      // 점선/요소 경계에서 잠깐 벗어날 때 깜빡임을 줄이기 위한 아주 짧은 지연
+      this.clearHoverClearTimer();
+      this.hoverClearTimerId = setTimeout(() => {
+        this.hoverClearTimerId = null;
+        if (this.hoverMarkerId == null) {
+          this.clearActiveMarker();
+        }
+      }, 40);
     },
 
-    onChartWheel() {
-      this.clearActiveMarker();
+    getMarkerIdFromMarkLineEvent(params) {
+      if (!params || params.componentType !== 'markLine') return null;
+      const data = params.data;
+      return data && data.markerId != null ? data.markerId : null;
     },
 
-    onZrMouseDown(event) {
-      if (this.activeMarkerId == null || !event) return;
-      this.dragOrigin = { x: event.offsetX, y: event.offsetY };
+    clearHoverClearTimer() {
+      if (this.hoverClearTimerId == null) return;
+      clearTimeout(this.hoverClearTimerId);
+      this.hoverClearTimerId = null;
     },
 
-    onZrMouseMove(event) {
-      if (!this.dragOrigin || this.activeMarkerId == null || !event) return;
-      
-      const dx = event.offsetX - this.dragOrigin.x;
-      const dy = event.offsetY - this.dragOrigin.y;
-      
-      if (dx * dx + dy * dy >= 16) {
-        this.dragOrigin = null;
-        this.clearActiveMarker();
-      }
-    },
-
-    onZrMouseUp() {
-      this.dragOrigin = null;
+    clearActiveMarker() {
+      if (this.activeMarkerId == null) return;
+      this.activeMarkerId = null;
+      this.scheduleMarkerButtonsUpdate();
     },
 
     onDataZoom(event) {
-      const batches = Array.isArray(event?.batch) && event.batch.length 
-        ? event.batch 
-        : event ? [event] : [];
-      
+      const batches = this.normalizeZoomBatches(event);
       if (!batches.length) return;
 
       let cursorUpdated = false;
       let viewUpdated = false;
-      const { topMin, topMax } = this.clampedCursorRange;
 
-      batches.forEach(batch => {
-        if (!batch) return;
+      const topMin = this.cursorRange.topMin;
+      const topMax = this.cursorRange.topMax;
+
+      batches.forEach((batch) => {
         const zoomId = this.getDataZoomId(batch) || this.getDataZoomId(event);
-
         if (zoomId === 'dz_y') return;
 
         if (zoomId === 'dz_top') {
           if (this.isSyncingTopSlider) return;
 
-          const { start, end } = this.getZoomFromEvent(
+          const zoom = this.getZoomFromEvent(
             { batch: [batch] },
-            { axisMin: topMin, axisMax: topMax, dataZoomId: 'dz_top', 
-              fallbackStart: this.cursorStart, fallbackEnd: this.cursorEnd }
+            {
+              axisMin: topMin,
+              axisMax: topMax,
+              dataZoomId: 'dz_top',
+              fallbackStart: this.cursorStart,
+              fallbackEnd: this.cursorEnd
+            }
           );
 
-          if (start != null) this.cursorStart = start;
-          if (end != null) this.cursorEnd = end;
+          if (zoom.start != null) this.cursorStart = zoom.start;
+          if (zoom.end != null) this.cursorEnd = zoom.end;
+
           cursorUpdated = true;
           return;
         }
 
-        const { start, end } = this.getZoomFromEvent(
+        const zoom = this.getZoomFromEvent(
           { batch: [batch] },
-          { axisMin: this.domainStart, axisMax: this.domainEnd, dataZoomId: zoomId || 'dz_bottom',
-            fallbackStart: this.viewStart, fallbackEnd: this.viewEnd }
+          {
+            axisMin: this.domainStart,
+            axisMax: this.domainEnd,
+            dataZoomId: zoomId || 'dz_bottom',
+            fallbackStart: this.viewStart,
+            fallbackEnd: this.viewEnd
+          }
         );
-        
-        this.viewStart = start;
-        this.viewEnd = end;
+
+        this.viewStart = zoom.start;
+        this.viewEnd = zoom.end;
         viewUpdated = true;
       });
 
       if (cursorUpdated) this.updateCursorLines();
       if (viewUpdated) this.syncTopSlider();
-      if (viewUpdated || cursorUpdated) this.updateMarkerButtons();
+
+      if (cursorUpdated || viewUpdated) {
+        this.scheduleMarkerButtonsUpdate();
+      }
     },
 
-    // ============================================
-    // 레이아웃 계산
-    // ============================================
-    getLayoutMetrics() {
-      const chartHeight = this.chart?.getHeight() || 640;
-      const totalCategories = Math.max(this.categories.length, 1);
-      const sliderBottom = LAYOUT.slider.top + LAYOUT.slider.height + LAYOUT.slider.gap;
-      const usableHeight = Math.max(0, chartHeight - LAYOUT.grid.bottom - sliderBottom - LAYOUT.slider.labelGap);
-      const rowHeight = totalCategories ? usableHeight / totalCategories : usableHeight;
-      
-      return {
-        sliderBottom,
-        gridBottom: LAYOUT.grid.bottom,
-        labelTop: sliderBottom,
-        labelHeight: Math.max(0, LAYOUT.slider.labelGap),
-        pinnedHeight: rowHeight,
-        pinnedTop: sliderBottom + LAYOUT.slider.labelGap,
-        mainTop: sliderBottom + LAYOUT.slider.labelGap + rowHeight
-      };
+    normalizeZoomBatches(event) {
+      if (!event) return [];
+      if (Array.isArray(event.batch) && event.batch.length) return event.batch;
+      return [event];
     },
 
-    updateGridLayout() {
-      if (!this.chart) return;
-      const layout = this.getLayoutMetrics();
+    /* =========================
+       (2) 마커 버튼 업데이트 스케줄러
+       ========================= */
+    scheduleMarkerButtonsUpdate() {
+      // ~~한 이유로 예약 실행:
+      // dataZoom/resize 등 이벤트가 연속으로 들어올 때 updateMarkerButtons가 여러 번 호출되면 비용이 커져서,
+      // requestAnimationFrame으로 한 프레임에 한 번만 실행되도록 묶는다.
+      if (this.markerButtonsRafId != null) return;
 
-      this.chart.setOption({
-        grid: this.buildGridOptions(layout),
-        dataZoom: [
-          { id: 'dz_top', top: LAYOUT.slider.top, height: LAYOUT.slider.height },
-          { id: 'dz_bottom', bottom: LAYOUT.slider.bottom, height: LAYOUT.slider.bottomHeight },
-          { id: 'dz_y', top: layout.mainTop, bottom: layout.gridBottom }
-        ]
+      this.markerButtonsRafId = requestAnimationFrame(() => {
+        this.markerButtonsRafId = null;
+        this.updateMarkerButtons();
       });
     },
 
-    buildGridOptions(layout) {
-      return [
-        { id: 'grid-main', top: layout.mainTop, bottom: layout.gridBottom, ...LAYOUT.grid, containLabel: false },
-        { id: 'grid-pinned', top: layout.pinnedTop, height: layout.pinnedHeight, left: LAYOUT.grid.left, right: LAYOUT.grid.right, containLabel: false },
-        { id: 'grid-label', top: layout.labelTop, height: layout.labelHeight, left: LAYOUT.grid.left, right: LAYOUT.grid.right, containLabel: false },
-        { id: 'grid-cursor', top: layout.sliderBottom, bottom: layout.gridBottom, left: LAYOUT.grid.left, right: LAYOUT.grid.right, containLabel: false }
-      ];
-    },
-
-    // ============================================
-    // 차트 옵션 빌드
-    // ============================================
+    /* =========================
+       옵션 빌드
+       ========================= */
     buildOption() {
       const layout = this.getLayoutMetrics();
-      const cursorRange = this.clampedCursorRange;
+      const zoomLayout = this.getDataZoomLayout(layout);
 
       return {
         backgroundColor: '#ffffff',
         animation: false,
         tooltip: { show: false },
-        dataZoom: this.buildDataZoomOptions(layout, cursorRange),
         grid: this.buildGridOptions(layout),
-        xAxis: this.buildXAxisOptions(cursorRange),
+        dataZoom: this.buildDataZoomOptions(zoomLayout),
+        xAxis: this.buildXAxisOptions(this.cursorRange),
         yAxis: this.buildYAxisOptions(),
-        series: this.buildSeriesOptions(cursorRange)
+        series: this.buildSeriesOptions(this.cursorRange)
       };
     },
 
-    buildDataZoomOptions(layout, cursorRange) {
+    buildDataZoomOptions(zoomLayout) {
       return [
-        { id: 'dz_top', type: 'slider', xAxisIndex: AXIS_INDEX.slider, filterMode: 'weakFilter',
-          showDataShadow: false, brushSelect: false, top: LAYOUT.slider.top, height: LAYOUT.slider.height,
-          labelFormatter: '', startValue: cursorRange.start, endValue: cursorRange.end },
-        { id: 'dz_bottom', type: 'slider', xAxisIndex: [AXIS_INDEX.main, AXIS_INDEX.pinned],
-          filterMode: 'weakFilter', showDataShadow: false, brushSelect: false,
-          bottom: LAYOUT.slider.bottom, height: LAYOUT.slider.bottomHeight,
-          labelFormatter: '', startValue: this.viewStart, endValue: this.viewEnd },
-        { id: 'dz_inside', type: 'inside', xAxisIndex: [AXIS_INDEX.main, AXIS_INDEX.pinned], filterMode: 'weakFilter' },
-        { id: 'dz_y', type: 'slider', yAxisIndex: 0, filterMode: 'weakFilter',
-          showDataShadow: false, right: 8, top: layout.mainTop, bottom: layout.gridBottom, width: 12 }
+        {
+          id: 'dz_top',
+          type: 'slider',
+          xAxisIndex: AXIS_INDEX.slider,
+          filterMode: 'weakFilter',
+          showDataShadow: false,
+          brushSelect: false,
+          ...zoomLayout.top,
+          labelFormatter: '',
+          startValue: this.cursorRange.start,
+          endValue: this.cursorRange.end
+        },
+        {
+          id: 'dz_bottom',
+          type: 'slider',
+          xAxisIndex: [AXIS_INDEX.main, AXIS_INDEX.pinned],
+          filterMode: 'weakFilter',
+          showDataShadow: false,
+          brushSelect: false,
+          ...zoomLayout.bottom,
+          labelFormatter: '',
+          startValue: this.viewStart,
+          endValue: this.viewEnd
+        },
+        {
+          id: 'dz_inside',
+          type: 'inside',
+          xAxisIndex: [AXIS_INDEX.main, AXIS_INDEX.pinned],
+          filterMode: 'weakFilter'
+        },
+        {
+          id: 'dz_y',
+          type: 'slider',
+          yAxisIndex: 0,
+          filterMode: 'weakFilter',
+          showDataShadow: false,
+          right: 8,
+          ...zoomLayout.y,
+          width: 12
+        }
       ];
     },
 
     buildXAxisOptions(cursorRange) {
       const minuteInterval = 60 * 1000;
-      const baseAxis = {
-        type: 'time', min: this.domainStart, max: this.domainEnd, scale: true,
-        minInterval: minuteInterval, splitNumber: 24
-      };
 
       return [
-        { id: 'x-main', gridIndex: GRID_INDEX.main, ...baseAxis,
-          axisLine: { lineStyle: { color: '#cbd5e1' } },
-          axisLabel: { color: '#475569', rotate: 90, margin: 6, hideOverlap: true, interval: 0,
-            formatter: this.formatAxisLabel },
-          splitLine: { show: true, lineStyle: { color: '#e2e8f0' } } },
-        this.buildHiddenTimeAxis({ id: 'x-pinned', gridIndex: GRID_INDEX.pinned, ...baseAxis }),
-        this.buildHiddenTimeAxis({ id: 'x-label', gridIndex: GRID_INDEX.label, 
-          min: cursorRange.topMin, max: cursorRange.topMax, minInterval: minuteInterval, splitNumber: 24 }),
-        this.buildHiddenTimeAxis({ id: 'x-cursor', gridIndex: GRID_INDEX.cursor, 
-          min: cursorRange.topMin, max: cursorRange.topMax }),
-        this.buildHiddenTimeAxis({ id: 'x-slider', gridIndex: GRID_INDEX.cursor, 
-          min: cursorRange.topMin, max: cursorRange.topMax })
+        {
+          id: 'x-main',
+          gridIndex: GRID_INDEX.main,
+          type: 'time',
+          min: this.domainStart,
+          max: this.domainEnd,
+          scale: true,
+          minInterval: minuteInterval,
+          splitNumber: 24,
+          axisLine: { lineStyle: { color: THEME.axisLineColor } },
+          axisLabel: {
+            color: THEME.axisLabelColor,
+            rotate: 90,
+            margin: 6,
+            hideOverlap: true,
+            interval: 0,
+            formatter: (value) => this.formatAxisLabel(value)
+          },
+          splitLine: { show: true, lineStyle: { color: THEME.splitLineColor } }
+        },
+        this.buildHiddenTimeAxis({
+          id: 'x-pinned',
+          gridIndex: GRID_INDEX.pinned,
+          min: this.domainStart,
+          max: this.domainEnd,
+          minInterval: minuteInterval,
+          splitNumber: 24
+        }),
+        this.buildHiddenTimeAxis({
+          id: 'x-label',
+          gridIndex: GRID_INDEX.label,
+          min: cursorRange.topMin,
+          max: cursorRange.topMax,
+          minInterval: minuteInterval,
+          splitNumber: 24
+        }),
+        this.buildHiddenTimeAxis({
+          id: 'x-cursor',
+          gridIndex: GRID_INDEX.cursor,
+          min: cursorRange.topMin,
+          max: cursorRange.topMax
+        }),
+        this.buildHiddenTimeAxis({
+          id: 'x-slider',
+          gridIndex: GRID_INDEX.cursor,
+          min: cursorRange.topMin,
+          max: cursorRange.topMax
+        })
       ];
     },
 
     buildYAxisOptions() {
       return [
-        this.buildCategoryAxis({ id: 'y-main', gridIndex: GRID_INDEX.main, data: this.scrollCategories }),
-        this.buildCategoryAxis({ id: 'y-pinned', gridIndex: GRID_INDEX.pinned, 
-          data: this.pinnedCategory ? [this.pinnedCategory] : [] }),
-        this.buildHiddenValueAxis({ id: 'y-label', gridIndex: GRID_INDEX.label, min: 0, max: 1 }),
-        this.buildHiddenValueAxis({ id: 'y-cursor', gridIndex: GRID_INDEX.cursor, min: 0, max: 1 })
+        this.buildCategoryAxis({
+          id: 'y-main',
+          gridIndex: GRID_INDEX.main,
+          data: this.scrollCategories
+        }),
+        this.buildCategoryAxis({
+          id: 'y-pinned',
+          gridIndex: GRID_INDEX.pinned,
+          data: this.pinnedCategory ? [this.pinnedCategory] : []
+        }),
+        this.buildHiddenValueAxis({
+          id: 'y-label',
+          gridIndex: GRID_INDEX.label,
+          min: 0,
+          max: 1
+        }),
+        this.buildHiddenValueAxis({
+          id: 'y-cursor',
+          gridIndex: GRID_INDEX.cursor,
+          min: 0,
+          max: 1
+        })
       ];
     },
 
     buildSeriesOptions(cursorRange) {
       return [
-        this.buildBarSeries({ id: 'sy-bars-main', xAxisIndex: AXIS_INDEX.main, yAxisIndex: AXIS_INDEX.main, data: this.scrollIntervals }),
-        this.buildBarSeries({ id: 'sy-bars-pinned', xAxisIndex: AXIS_INDEX.pinned, yAxisIndex: AXIS_INDEX.pinned, data: this.pinnedIntervals }),
-        this.buildSelectionSeries({ id: 'sy-selection-main', xAxisIndex: AXIS_INDEX.main, yAxisIndex: AXIS_INDEX.main }),
-        this.buildSelectionSeries({ id: 'sy-selection-pinned', xAxisIndex: AXIS_INDEX.pinned, yAxisIndex: AXIS_INDEX.pinned }),
-        this.buildMarkerLineSeries({ id: 'sy-markers-main', xAxisIndex: AXIS_INDEX.main, yAxisIndex: AXIS_INDEX.main, silent: false }),
-        this.buildMarkerLineSeries({ id: 'sy-markers-pinned-lines', xAxisIndex: AXIS_INDEX.pinned, yAxisIndex: AXIS_INDEX.pinned, silent: true }),
+        this.buildBarSeries({
+          id: 'sy-bars-main',
+          xAxisIndex: AXIS_INDEX.main,
+          yAxisIndex: AXIS_INDEX.main,
+          data: this.scrollIntervals
+        }),
+        this.buildBarSeries({
+          id: 'sy-bars-pinned',
+          xAxisIndex: AXIS_INDEX.pinned,
+          yAxisIndex: AXIS_INDEX.pinned,
+          data: this.pinnedIntervals
+        }),
+        this.buildSelectionSeries({
+          id: 'sy-selection-main',
+          xAxisIndex: AXIS_INDEX.main,
+          yAxisIndex: AXIS_INDEX.main
+        }),
+        this.buildSelectionSeries({
+          id: 'sy-selection-pinned',
+          xAxisIndex: AXIS_INDEX.pinned,
+          yAxisIndex: AXIS_INDEX.pinned
+        }),
+        this.buildMarkerLineSeries({
+          id: 'sy-markers-main',
+          xAxisIndex: AXIS_INDEX.main,
+          yAxisIndex: AXIS_INDEX.main,
+          silent: false
+        }),
+        this.buildMarkerLineSeries({
+          id: 'sy-markers-pinned-lines',
+          xAxisIndex: AXIS_INDEX.pinned,
+          yAxisIndex: AXIS_INDEX.pinned,
+          silent: true
+        }),
         this.buildMarkerLabelSeries(),
         this.buildCursorOverlaySeries(cursorRange)
       ];
@@ -509,101 +679,14 @@ export default {
 
     buildBarSeries({ id, xAxisIndex, yAxisIndex, data }) {
       return {
-        id, type: 'custom', renderItem: this.renderItem, xAxisIndex, yAxisIndex,
-        itemStyle: { opacity: 0.85 }, encode: { x: [1, 2], y: 0 }, data
-      };
-    },
-
-    buildSelectionSeries({ id, xAxisIndex, yAxisIndex }) {
-      return {
-        id, type: 'scatter', xAxisIndex, yAxisIndex, data: [], silent: true,
-        markLine: {
-          symbol: ['none', 'none'], z: 18,
-          lineStyle: { ...CHART_STYLE.line.selection, type: 'solid' },
-          label: { show: false }, data: []
-        }
-      };
-    },
-
-    buildMarkerLineSeries({ id, xAxisIndex, yAxisIndex, silent }) {
-      return {
-        id, type: 'scatter', xAxisIndex, yAxisIndex, data: [], silent,
-        emphasis: { disabled: true },
-        markLine: {
-          symbol: ['none', 'none'], precision: 0, z: 20,
-          lineStyle: CHART_STYLE.line.marker,
-          emphasis: { disabled: true }, label: { show: false }, data: []
-        }
-      };
-    },
-
-    buildMarkerLabelSeries() {
-      return {
-        id: 'sy-markers-labels', type: 'scatter',
-        xAxisIndex: AXIS_INDEX.label, yAxisIndex: AXIS_INDEX.label,
-        data: [], silent: false, emphasis: { disabled: true },
-        markLine: {
-          symbol: ['none', 'none'], precision: 0, z: 22,
-          lineStyle: { width: 1, color: 'rgba(37, 99, 235, 0.02)', type: 'dashed' },
-          emphasis: { disabled: true },
-          label: {
-            show: true, position: 'start', align: 'left', verticalAlign: 'bottom',
-            distance: CHART_STYLE.markerLabel.distance,
-            offset: [0, CHART_STYLE.markerLabel.offsetY],
-            rotate: CHART_STYLE.markerLabel.rotate,
-            color: CHART_STYLE.markerLabel.color,
-            backgroundColor: CHART_STYLE.markerLabel.backgroundColor,
-            borderColor: CHART_STYLE.markerLabel.borderColor,
-            borderWidth: CHART_STYLE.markerLabel.borderWidth,
-            padding: CHART_STYLE.markerLabel.padding,
-            borderRadius: 6,
-            fontSize: CHART_STYLE.markerLabel.fontSize,
-            fontFamily: 'sans-serif',
-            formatter: (params) => this.formatDateTime(params?.data?.xAxis)
-          },
-          data: []
-        }
-      };
-    },
-
-    buildCursorOverlaySeries(cursorRange) {
-      return {
-        id: 'sy-cursors-overlay', type: 'scatter',
-        xAxisIndex: AXIS_INDEX.cursor, yAxisIndex: AXIS_INDEX.cursor,
-        data: [], silent: true,
-        markLine: {
-          symbol: ['none', 'none'], z: 15,
-          lineStyle: { ...CHART_STYLE.line.cursor, type: 'solid' },
-          label: { show: false },
-          data: [{ xAxis: cursorRange.start }, { xAxis: cursorRange.end }]
-        }
-      };
-    },
-
-    buildHiddenTimeAxis({ id, gridIndex, min, max, minInterval, splitNumber }) {
-      const axis = {
-        id, gridIndex, type: 'time', min, max, scale: true, show: false,
-        axisLine: { show: false }, axisTick: { show: false },
-        axisLabel: { show: false }, splitLine: { show: false }
-      };
-      if (minInterval != null) axis.minInterval = minInterval;
-      if (splitNumber != null) axis.splitNumber = splitNumber;
-      return axis;
-    },
-
-    buildHiddenValueAxis({ id, gridIndex, min, max }) {
-      return {
-        id, gridIndex, type: 'value', min, max,
-        axisLine: { show: false }, axisTick: { show: false },
-        axisLabel: { show: false }, splitLine: { show: false }
-      };
-    },
-
-    buildCategoryAxis({ id, gridIndex, data }) {
-      return {
-        id, gridIndex, type: 'category', inverse: true, data,
-        axisTick: { show: false }, axisLine: { show: false },
-        axisLabel: { color: '#475569' }
+        id,
+        type: 'custom',
+        renderItem: this.renderItem,
+        xAxisIndex,
+        yAxisIndex,
+        itemStyle: { opacity: 0.85 },
+        encode: { x: [1, 2], y: 0 },
+        data
       };
     },
 
@@ -615,24 +698,240 @@ export default {
 
       const rectShape = echarts.graphic.clipRectByRect(
         { x: start[0], y: start[1] - height / 2, width: end[0] - start[0], height },
-        { x: params.coordSys.x, y: params.coordSys.y, 
-          width: params.coordSys.width, height: params.coordSys.height }
+        { x: params.coordSys.x, y: params.coordSys.y, width: params.coordSys.width, height: params.coordSys.height }
       );
 
       return rectShape && {
-        type: 'rect', transition: ['shape'], shape: rectShape, style: api.style()
+        type: 'rect',
+        transition: ['shape'],
+        shape: rectShape,
+        style: api.style()
       };
     },
 
-    // ============================================
-    // 마커 및 선택 업데이트
-    // ============================================
+    buildSelectionSeries({ id, xAxisIndex, yAxisIndex }) {
+      return {
+        id,
+        type: 'scatter',
+        xAxisIndex,
+        yAxisIndex,
+        data: [],
+        silent: true,
+        markLine: {
+          symbol: ['none', 'none'],
+          z: 18,
+          lineStyle: { ...LINE_STYLE.selection },
+          label: { show: false },
+          data: []
+        }
+      };
+    },
+
+    buildMarkerLineSeries({ id, xAxisIndex, yAxisIndex, silent }) {
+      return {
+        id,
+        type: 'scatter',
+        xAxisIndex,
+        yAxisIndex,
+        data: [],
+        silent,
+        emphasis: { disabled: true },
+        markLine: {
+          symbol: ['none', 'none'],
+          precision: 0,
+          z: 20,
+          lineStyle: { ...LINE_STYLE.marker },
+          emphasis: { disabled: true },
+          label: { show: false },
+          data: []
+        }
+      };
+    },
+
+    buildMarkerLabelSeries() {
+      return {
+        id: 'sy-markers-labels',
+        type: 'scatter',
+        xAxisIndex: AXIS_INDEX.label,
+        yAxisIndex: AXIS_INDEX.label,
+        data: [],
+        silent: false,
+        emphasis: { disabled: true },
+        markLine: {
+          symbol: ['none', 'none'],
+          precision: 0,
+          z: 22,
+          lineStyle: { ...LINE_STYLE.markerLabel },
+          emphasis: { disabled: true },
+          label: {
+            show: true,
+            position: MARKER_LABEL.position,
+            align: MARKER_LABEL.align,
+            verticalAlign: MARKER_LABEL.verticalAlign,
+            distance: MARKER_LABEL.distance,
+            offset: [0, MARKER_LABEL.offsetY],
+            rotate: MARKER_LABEL.rotate,
+            color: THEME.markerBlue,
+            backgroundColor: THEME.markerBg,
+            borderColor: THEME.markerBorder,
+            borderWidth: MARKER_LABEL.borderWidth,
+            padding: MARKER_LABEL.padding,
+            borderRadius: MARKER_LABEL.borderRadius,
+            fontSize: MARKER_LABEL.fontSize,
+            fontFamily: THEME.fontFamily,
+            formatter: (params) => {
+              const data = params && params.data;
+              const x = data && data.xAxis;
+              return this.formatDateTime(x);
+            }
+          },
+          data: []
+        }
+      };
+    },
+
+    buildCursorOverlaySeries(cursorRange) {
+      return {
+        id: 'sy-cursors-overlay',
+        type: 'scatter',
+        xAxisIndex: AXIS_INDEX.cursor,
+        yAxisIndex: AXIS_INDEX.cursor,
+        data: [],
+        silent: true,
+        markLine: {
+          symbol: ['none', 'none'],
+          z: 15,
+          lineStyle: { ...LINE_STYLE.cursor },
+          label: { show: false },
+          data: [{ xAxis: cursorRange.start }, { xAxis: cursorRange.end }]
+        }
+      };
+    },
+
+    buildHiddenTimeAxis({ id, gridIndex, min, max, minInterval, splitNumber }) {
+      const axis = {
+        id,
+        gridIndex,
+        type: 'time',
+        min,
+        max,
+        scale: true,
+        show: false,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false }
+      };
+
+      if (minInterval != null) axis.minInterval = minInterval;
+      if (splitNumber != null) axis.splitNumber = splitNumber;
+
+      return axis;
+    },
+
+    buildHiddenValueAxis({ id, gridIndex, min, max }) {
+      return {
+        id,
+        gridIndex,
+        type: 'value',
+        min,
+        max,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false }
+      };
+    },
+
+    buildCategoryAxis({ id, gridIndex, data }) {
+      return {
+        id,
+        gridIndex,
+        type: 'category',
+        inverse: true,
+        data,
+        axisTick: { show: false },
+        axisLine: { show: false },
+        axisLabel: { color: THEME.axisLabelColor }
+      };
+    },
+
+    /* =========================
+       레이아웃 적용
+       ========================= */
+    applyLayout() {
+      if (!this.chart) return;
+
+      const layout = this.getLayoutMetrics();
+      const zoomLayout = this.getDataZoomLayout(layout);
+
+      this.chart.setOption({
+        grid: this.buildGridOptions(layout),
+        dataZoom: [
+          { id: 'dz_top', ...zoomLayout.top },
+          { id: 'dz_bottom', ...zoomLayout.bottom },
+          { id: 'dz_y', ...zoomLayout.y }
+        ]
+      });
+    },
+
+    getLayoutMetrics() {
+      const chartHeight = this.chart ? this.chart.getHeight() : 640;
+      const totalCategories = Math.max(this.categories.length, 1);
+
+      const sliderBottom = LAYOUT.slider.top + LAYOUT.slider.height + LAYOUT.slider.gap;
+      const labelHeight = Math.max(0, LAYOUT.slider.labelGap);
+
+      const usableHeight = Math.max(0, chartHeight - LAYOUT.grid.bottom - sliderBottom - labelHeight);
+      const rowHeight = totalCategories ? usableHeight / totalCategories : usableHeight;
+
+      const pinnedHeight = rowHeight;
+      const labelTop = sliderBottom;
+      const pinnedTop = sliderBottom + labelHeight;
+      const mainTop = pinnedTop + pinnedHeight;
+
+      return {
+        sliderBottom,
+        gridBottom: LAYOUT.grid.bottom,
+        labelTop,
+        labelHeight,
+        pinnedHeight,
+        pinnedTop,
+        mainTop
+      };
+    },
+
+    getDataZoomLayout(layout) {
+      return {
+        top: { top: LAYOUT.slider.top, height: LAYOUT.slider.height },
+        bottom: { bottom: LAYOUT.slider.bottom, height: LAYOUT.slider.bottomHeight },
+        y: { top: layout.mainTop, bottom: layout.gridBottom }
+      };
+    },
+
+    buildGridOptions(layout) {
+      return [
+        { id: 'grid-main', top: layout.mainTop, bottom: layout.gridBottom, left: LAYOUT.grid.left, right: LAYOUT.grid.right, containLabel: false },
+        { id: 'grid-pinned', top: layout.pinnedTop, height: layout.pinnedHeight, left: LAYOUT.grid.left, right: LAYOUT.grid.right, containLabel: false },
+        { id: 'grid-label', top: layout.labelTop, height: layout.labelHeight, left: LAYOUT.grid.left, right: LAYOUT.grid.right, containLabel: false },
+        { id: 'grid-cursor', top: layout.sliderBottom, bottom: layout.gridBottom, left: LAYOUT.grid.left, right: LAYOUT.grid.right, containLabel: false }
+      ];
+    },
+
+    /* =========================
+       마커/선택/커서 업데이트
+       ========================= */
     updateSelectionLines() {
       if (!this.chart) return;
 
       const selected = this.selectedCategoryIndex;
-      const mainData = selected > 0 ? [{ yAxis: selected - 1 }] : [];
-      const pinnedData = selected === 0 ? [{ yAxis: 0 }] : [];
+      const mainData = [];
+      const pinnedData = [];
+
+      if (typeof selected === 'number') {
+        if (selected === 0) pinnedData.push({ yAxis: 0 });
+        if (selected > 0) mainData.push({ yAxis: selected - 1 });
+      }
 
       this.chart.setOption({
         series: [
@@ -645,9 +944,10 @@ export default {
     updateMarkerLines() {
       if (!this.chart) return;
 
-      const markerLines = this.markers
-        .filter(m => m?.time != null)
-        .map(m => ({ xAxis: m.time, markerId: m.id }));
+      const markers = Array.isArray(this.markers) ? this.markers : [];
+      const markerLines = markers
+        .filter((marker) => marker && marker.time != null)
+        .map((marker) => ({ xAxis: marker.time, markerId: marker.id }));
 
       this.chart.setOption({
         series: [
@@ -660,29 +960,34 @@ export default {
 
     updateCursorLines() {
       if (!this.chart) return;
-      const { start, end } = this.clampedCursorRange;
 
       this.chart.setOption({
-        series: [{ id: 'sy-cursors-overlay', markLine: { data: [{ xAxis: start }, { xAxis: end }] } }]
+        series: [
+          {
+            id: 'sy-cursors-overlay',
+            markLine: { data: [{ xAxis: this.cursorRange.start }, { xAxis: this.cursorRange.end }] }
+          }
+        ]
       });
     },
 
     syncTopSlider() {
       if (!this.chart) return;
 
-      const cursorRange = this.clampedCursorRange;
       this.isSyncingTopSlider = true;
 
       this.chart.setOption({
         xAxis: [
-          { id: 'x-label', min: cursorRange.topMin, max: cursorRange.topMax },
-          { id: 'x-cursor', min: cursorRange.topMin, max: cursorRange.topMax },
-          { id: 'x-slider', min: cursorRange.topMin, max: cursorRange.topMax }
+          { id: 'x-label', min: this.cursorRange.topMin, max: this.cursorRange.topMax },
+          { id: 'x-cursor', min: this.cursorRange.topMin, max: this.cursorRange.topMax },
+          { id: 'x-slider', min: this.cursorRange.topMin, max: this.cursorRange.topMax }
         ],
-        dataZoom: [{ id: 'dz_top', startValue: cursorRange.start, endValue: cursorRange.end }]
+        dataZoom: [{ id: 'dz_top', startValue: this.cursorRange.start, endValue: this.cursorRange.end }]
       });
 
-      setTimeout(() => { this.isSyncingTopSlider = false; }, 0);
+      setTimeout(() => {
+        this.isSyncingTopSlider = false;
+      }, 0);
     },
 
     updateMarkerButtons() {
@@ -691,25 +996,35 @@ export default {
         return;
       }
 
-      const markers = this.activeMarkers;
-      if (!markers.length) {
-        this.activeMarkerId = null;
+      // hover된 점선이 없으면 버튼도 없다.
+      const activeMarkerId = this.activeMarkerId;
+      if (activeMarkerId == null) {
+        this.markerButtons = [];
+        return;
+      }
+
+      const markers = Array.isArray(this.markers) ? this.markers : [];
+      const activeMarkers = markers.filter((marker) => {
+        if (!marker) return false;
+        if (marker.time == null) return false;
+        return marker.id === activeMarkerId;
+      });
+
+      if (!activeMarkers.length) {
         this.markerButtons = [];
         return;
       }
 
       const mainGridRect = this.getGridRect(GRID_INDEX.main);
       const pinnedGridRect = this.getGridRect(GRID_INDEX.pinned);
-      
+
       if (!mainGridRect) {
         this.markerButtons = [];
         return;
       }
 
-      const gridRects = [mainGridRect, pinnedGridRect].filter(r => r?.height > 0);
-      const lineCenterY = gridRects.length
-        ? (Math.min(...gridRects.map(r => r.y)) + Math.max(...gridRects.map(r => r.y + r.height))) / 2
-        : null;
+      const gridRects = [mainGridRect, pinnedGridRect].filter((rect) => rect && rect.height > 0);
+      const lineCenterY = this.getLineCenterY(gridRects);
 
       if (lineCenterY == null) {
         this.markerButtons = [];
@@ -718,74 +1033,107 @@ export default {
 
       const chartWidth = this.chart.getWidth();
       const chartHeight = this.chart.getHeight();
-      const { radius, offsetX, offsetY } = CHART_STYLE.markerButton;
+
       const bounds = {
-        left: radius, right: chartWidth - radius,
-        top: radius, bottom: chartHeight - radius
+        left: MARKER_BUTTON.radius,
+        right: chartWidth - MARKER_BUTTON.radius,
+        top: MARKER_BUTTON.radius,
+        bottom: chartHeight - MARKER_BUTTON.radius
       };
 
-      this.markerButtons = markers
-        .map(marker => {
-          const markerTime = this.toTimeValue(marker.time);
-          if (markerTime == null) return null;
+      const buttons = [];
 
-          const lineX = this.getAxisPixelFromValue(markerTime, AXIS_INDEX.main);
-          if (lineX == null || Number.isNaN(lineX)) return null;
-          if (lineX < mainGridRect.x || lineX > mainGridRect.x + mainGridRect.width) return null;
+      activeMarkers.forEach((marker) => {
+        const markerTime = this.toTimeValue(marker.time);
+        if (markerTime == null) return;
 
-          const rawX = lineX + offsetX;
-          const rawY = lineCenterY + offsetY;
+        const lineX = this.getAxisPixelFromValue(markerTime, AXIS_INDEX.main);
+        if (lineX == null || Number.isNaN(lineX)) return;
 
-          return {
-            id: marker.id,
-            x: this.clamp(rawX, bounds.left, bounds.right),
-            y: this.clamp(rawY, bounds.top, bounds.bottom)
-          };
-        })
-        .filter(Boolean);
+        if (lineX < mainGridRect.x || lineX > mainGridRect.x + mainGridRect.width) return;
+
+        const x = this.clamp(lineX + MARKER_BUTTON.offsetX, bounds.left, bounds.right);
+        const y = this.clamp(lineCenterY + MARKER_BUTTON.offsetY, bounds.top, bounds.bottom);
+
+        buttons.push({ id: marker.id, x, y });
+      });
+
+      this.markerButtons = buttons;
     },
 
-    clearActiveMarker() {
-      if (this.activeMarkerId == null) return;
-      this.activeMarkerId = null;
-      this.updateMarkerButtons();
+    getLineCenterY(gridRects) {
+      if (!gridRects.length) return null;
+      const topY = Math.min(...gridRects.map((rect) => rect.y));
+      const bottomY = Math.max(...gridRects.map((rect) => rect.y + rect.height));
+      return (topY + bottomY) / 2;
     },
 
-    // ============================================
-    // 유틸리티 함수
-    // ============================================
-    getMarkerIdFromEvent(params) {
-      return params?.componentType === 'markLine' && params.data?.markerId != null 
-        ? params.data.markerId 
-        : null;
+    getGridRect(gridIndex = GRID_INDEX.main) {
+      if (!this.chart) return null;
+
+      const model = this.chart.getModel && this.chart.getModel();
+      const grid = model && model.getComponent && model.getComponent('grid', gridIndex);
+      const coord = grid && grid.coordinateSystem;
+
+      if (coord && coord.getRect) {
+        const rect = coord.getRect();
+        if (rect) {
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+        }
+      }
+
+      const option = this.chart.getOption();
+      const gridOption = option && option.grid && option.grid[gridIndex];
+      if (!gridOption) return null;
+
+      const chartWidth = this.chart.getWidth();
+      const chartHeight = this.chart.getHeight();
+
+      const left = typeof gridOption.left === 'number' ? gridOption.left : 0;
+      const right = typeof gridOption.right === 'number' ? gridOption.right : 0;
+      const top = typeof gridOption.top === 'number' ? gridOption.top : 0;
+      const bottom = typeof gridOption.bottom === 'number' ? gridOption.bottom : 0;
+
+      const explicitWidth = typeof gridOption.width === 'number' ? gridOption.width : null;
+      const explicitHeight = typeof gridOption.height === 'number' ? gridOption.height : null;
+
+      return {
+        x: left,
+        y: top,
+        width: explicitWidth ?? Math.max(0, chartWidth - left - right),
+        height: explicitHeight ?? Math.max(0, chartHeight - top - bottom)
+      };
+    },
+
+    getAxisPixelFromValue(value, xAxisIndex = AXIS_INDEX.main) {
+      if (!this.chart) return null;
+      const pixel = this.chart.convertToPixel({ xAxisIndex }, value);
+      return Array.isArray(pixel) ? pixel[0] : pixel;
     },
 
     getDataZoomId(item) {
       if (!item) return null;
       if (item.dataZoomId) return item.dataZoomId;
-      
+
       if (typeof item.dataZoomIndex === 'number' && this.chart) {
         const option = this.chart.getOption();
-        const dataZoom = option?.dataZoom;
+        const dataZoom = option && option.dataZoom;
         const dz = Array.isArray(dataZoom) ? dataZoom[item.dataZoomIndex] : null;
-        return dz?.id || null;
+        return dz && dz.id ? dz.id : null;
       }
-      
+
       return null;
     },
 
     getZoomFromEvent(event, options = {}) {
-      const {
-        axisMin = this.domainStart,
-        axisMax = this.domainEnd,
-        dataZoomId = 'dz_bottom',
-        fallbackStart = this.viewStart,
-        fallbackEnd = this.viewEnd
-      } = options;
+      const axisMin = options.axisMin ?? this.domainStart;
+      const axisMax = options.axisMax ?? this.domainEnd;
+      const dataZoomId = options.dataZoomId ?? 'dz_bottom';
+      const fallbackStart = options.fallbackStart ?? this.viewStart;
+      const fallbackEnd = options.fallbackEnd ?? this.viewEnd;
 
-      const batch = event?.batch?.[0];
+      const batch = event && event.batch && event.batch[0];
 
-      // startValue/endValue가 있는 경우
       if (batch && (batch.startValue != null || batch.endValue != null)) {
         return {
           start: batch.startValue ?? fallbackStart,
@@ -793,25 +1141,24 @@ export default {
         };
       }
 
-      // 퍼센트 기반 start/end
       if (batch && (batch.start != null || batch.end != null)) {
         const span = axisMax - axisMin;
-        const start = batch.start != null && span
-          ? axisMin + (span * batch.start) / 100
-          : fallbackStart;
-        const end = batch.end != null && span
-          ? axisMin + (span * batch.end) / 100
-          : fallbackEnd;
+
+        const start =
+          batch.start != null && span ? axisMin + (span * batch.start) / 100 : fallbackStart;
+        const end =
+          batch.end != null && span ? axisMin + (span * batch.end) / 100 : fallbackEnd;
+
         return { start: Math.round(start), end: Math.round(end) };
       }
 
-      // 차트 옵션에서 가져오기
       if (!this.chart) return { start: fallbackStart, end: fallbackEnd };
 
       const option = this.chart.getOption();
-      const dataZoom = option?.dataZoom;
+      const dataZoom = option && option.dataZoom;
+
       const dz = Array.isArray(dataZoom)
-        ? dataZoom.find(item => item?.id === dataZoomId)
+        ? dataZoom.find((item) => item && item.id === dataZoomId)
         : null;
 
       if (dz && (dz.startValue != null || dz.endValue != null)) {
@@ -823,59 +1170,16 @@ export default {
 
       if (dz && (dz.start != null || dz.end != null)) {
         const span = axisMax - axisMin;
-        const start = dz.start != null && span
-          ? axisMin + (span * dz.start) / 100
-          : fallbackStart;
-        const end = dz.end != null && span
-          ? axisMin + (span * dz.end) / 100
-          : fallbackEnd;
+
+        const start =
+          dz.start != null && span ? axisMin + (span * dz.start) / 100 : fallbackStart;
+        const end =
+          dz.end != null && span ? axisMin + (span * dz.end) / 100 : fallbackEnd;
+
         return { start: Math.round(start), end: Math.round(end) };
       }
 
       return { start: fallbackStart, end: fallbackEnd };
-    },
-
-    getGridRect(gridIndex = GRID_INDEX.main) {
-      if (!this.chart) return null;
-
-      // ECharts 모델에서 직접 가져오기 시도
-      const model = this.chart.getModel?.();
-      const grid = model?.getComponent?.('grid', gridIndex);
-      const coord = grid?.coordinateSystem;
-      
-      if (coord?.getRect) {
-        const rect = coord.getRect();
-        if (rect) {
-          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-        }
-      }
-
-      // 옵션에서 계산
-      const option = this.chart.getOption();
-      const gridOption = option?.grid?.[gridIndex];
-      if (!gridOption) return null;
-
-      const width = this.chart.getWidth();
-      const height = this.chart.getHeight();
-      const left = typeof gridOption.left === 'number' ? gridOption.left : 0;
-      const right = typeof gridOption.right === 'number' ? gridOption.right : 0;
-      const top = typeof gridOption.top === 'number' ? gridOption.top : 0;
-      const bottom = typeof gridOption.bottom === 'number' ? gridOption.bottom : 0;
-      const explicitWidth = typeof gridOption.width === 'number' ? gridOption.width : null;
-      const explicitHeight = typeof gridOption.height === 'number' ? gridOption.height : null;
-
-      return {
-        x: left,
-        y: top,
-        width: explicitWidth ?? Math.max(0, width - left - right),
-        height: explicitHeight ?? Math.max(0, height - top - bottom)
-      };
-    },
-
-    getAxisPixelFromValue(value, xAxisIndex = AXIS_INDEX.main) {
-      if (!this.chart) return null;
-      const pixel = this.chart.convertToPixel({ xAxisIndex }, value);
-      return Array.isArray(pixel) ? pixel[0] : pixel;
     },
 
     normalizeTime(value, fallback) {
@@ -890,16 +1194,12 @@ export default {
     toTimeValue(value) {
       if (value == null) return null;
       if (typeof value === 'number') return value;
-      
-      // ECharts 파서 시도
-      if (echarts?.number?.parseDate) {
+
+      if (echarts && echarts.number && typeof echarts.number.parseDate === 'function') {
         const parsed = echarts.number.parseDate(value);
-        if (parsed && !Number.isNaN(parsed.getTime())) {
-          return parsed.getTime();
-        }
+        if (parsed && !Number.isNaN(parsed.getTime())) return parsed.getTime();
       }
-      
-      // Date 객체로 파싱
+
       const time = new Date(value).getTime();
       return Number.isNaN(time) ? null : time;
     },
@@ -908,14 +1208,20 @@ export default {
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return '';
 
-      return `${this.pad2(date.getMonth() + 1)}-${this.pad2(date.getDate())} ${this.pad2(date.getHours())}:${this.pad2(date.getMinutes())}`;
+      return [
+        `${this.pad2(date.getMonth() + 1)}-${this.pad2(date.getDate())}`,
+        `${this.pad2(date.getHours())}:${this.pad2(date.getMinutes())}`
+      ].join(' ');
     },
 
     formatDateTime(value) {
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return '';
 
-      return `${date.getFullYear()}-${this.pad2(date.getMonth() + 1)}-${this.pad2(date.getDate())} ${this.pad2(date.getHours())}:${this.pad2(date.getMinutes())}:${this.pad2(date.getSeconds())}`;
+      return [
+        `${date.getFullYear()}-${this.pad2(date.getMonth() + 1)}-${this.pad2(date.getDate())}`,
+        `${this.pad2(date.getHours())}:${this.pad2(date.getMinutes())}:${this.pad2(date.getSeconds())}`
+      ].join(' ');
     },
 
     pad2(value) {
