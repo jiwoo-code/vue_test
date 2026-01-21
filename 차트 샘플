@@ -2,6 +2,19 @@
   <div class="sy-chart-wrap">
     <div class="sy-chart" ref="chart"></div>
 
+    <!-- 상단 슬라이드 -->
+    <div
+      v-if="topSliderRange.visible"
+      class="sy-top-slider-range"
+      :style="{
+        left: `${topSliderRange.x}px`,
+        top: `${topSliderRange.y}px`,
+        maxWidth: `${topSliderRange.maxWidth}px`
+      }"
+    >
+      {{ topSliderRange.text }}
+    </div>
+
     <div class="sy-marker-overlay">
       <button
         v-for="item in markerButtons"
@@ -22,48 +35,20 @@
 <script>
 import * as echarts from 'echarts';
 
-/* =========================
-   상수 (테마/스타일/레이아웃/인덱스)
-   ========================= */
-const THEME = Object.freeze({
-  fontFamily: 'sans-serif',
-  axisLabelColor: '#475569',
-  axisLineColor: '#cbd5e1',
-  splitLineColor: '#e2e8f0',
-  markerBlue: '#1d4ed8',
-  markerBg: 'rgba(37, 99, 235, 0.12)',
-  markerBorder: 'rgba(37, 99, 235, 0.35)'
-});
-
-const LINE_STYLE = Object.freeze({
-  selection: { width: 2, color: '#f97316', type: 'solid' },
-  marker: { width: 2, color: '#2563eb', type: 'dashed' },
-  markerLabel: { width: 1, color: 'rgba(37, 99, 235, 0.02)', type: 'dashed' },
-  cursor: { width: 2, color: '#ef4444', type: 'solid' }
-});
-
-const MARKER_LABEL = Object.freeze({
-  padding: [2, 6],
-  fontSize: 12,
-  borderWidth: 1,
-  distance: 6,
-  offsetY: -4,
-  rotate: 18,
-  position: 'start',
-  align: 'left',
-  verticalAlign: 'bottom',
-  borderRadius: 6
-});
-
-const MARKER_BUTTON = Object.freeze({
-  radius: 10,
-  offsetX: 0,
-  offsetY: 0
-});
+// =====================
+// 스타일 / 레이아웃 상수
+// =====================
 
 const LAYOUT = Object.freeze({
   grid: { left: 110, right: 62, bottom: 124 },
-  slider: { top: 16, height: 22, gap: 6, labelGap: 52, bottom: 18, bottomHeight: 22 }
+  slider: {
+    top: 16,
+    height: 22,
+    gap: 6,
+    labelGap: 52,
+    bottom: 18,
+    bottomHeight: 22
+  }
 });
 
 const GRID_INDEX = Object.freeze({
@@ -81,27 +66,50 @@ const AXIS_INDEX = Object.freeze({
   slider: 4
 });
 
+const MARKER_BUTTON = Object.freeze({
+  radius: 10,
+  offsetX: 0,
+  offsetY: 0
+});
+
+// =====================
+// 컴포넌트
+// =====================
+
 export default {
   name: 'SyTimelineChart',
+
   props: {
     markers: { type: Array, default: () => [] },
     timelineData: { type: Object, default: () => ({}) }
   },
+
   data() {
     return {
       chart: null,
 
+      // 마커 삭제 버튼
       markerButtons: [],
       markerButtonsRafId: null,
 
+      // 상단 슬라이더 범위 표시
+      topSliderRange: {
+        visible: false,
+        text: '',
+        x: 0,
+        y: 0,
+        maxWidth: 0
+      },
+
+      // 데이터 상태
       categories: [],
       pinnedCategory: null,
       scrollCategories: [],
       pinnedIntervals: [],
       scrollIntervals: [],
 
+      // 선택 / 범위 상태
       selectedCategoryIndex: null,
-
       domainStart: 0,
       domainEnd: 0,
       viewStart: 0,
@@ -109,17 +117,17 @@ export default {
       cursorStart: 0,
       cursorEnd: 0,
 
+      // 슬라이더 동기화 플래그
       isSyncingTopSlider: false,
 
-      // hover 기반 표시 상태
+      // 마커 hover 상태
       activeMarkerId: null,
       hoverMarkerId: null,
       hoverClearTimerId: null,
-
-      // 버튼 위로 이동해도 안 사라지도록 유지하는 상태
       isHoveringMarkerButton: false
     };
   },
+
   computed: {
     cursorRange() {
       const topMin = this.viewStart ?? this.domainStart;
@@ -136,27 +144,21 @@ export default {
       };
     },
 
-    // markers deep watch 대신, 변화 감지용 signature.
-    // id/time만 변하면 선/버튼 재계산이면 충분.
+    // deep watch 대신 사용하는 시그니처
     markersSignature() {
-      const markers = Array.isArray(this.markers) ? this.markers : [];
-      return markers
-        .map((marker) => {
-          if (!marker) return '';
-          const timeValue = this.toTimeValue(marker.time);
-          return `${marker.id}:${timeValue}`;
-        })
+      return this.markers
+        .map((m) => `${m?.id}:${this.toTimeValue(m?.time)}`)
         .join('|');
     }
   },
+
   watch: {
     markersSignature() {
-      // 마커가 삭제/재생성될 때 "hover 상태가 남는" 케이스를 방어
       this.ensureActiveMarkerIsValid();
-
       this.updateMarkerLines();
       this.scheduleMarkerButtonsUpdate();
     },
+
     timelineData: {
       deep: true,
       immediate: true,
@@ -166,44 +168,52 @@ export default {
       }
     }
   },
+
   mounted() {
     this.initChart();
     window.addEventListener('resize', this.resizeChart, { passive: true });
   },
+
   beforeDestroy() {
     window.removeEventListener('resize', this.resizeChart);
     this.teardownChart();
   },
+
   methods: {
-    /* =========================
-       데이터 적용
-       ========================= */
+    // =====================
+    // 데이터 초기화
+    // =====================
+
+    /**
+     * payload를 내부 상태로 정규화
+     */
     applyData(payload = {}) {
       const categories = Array.isArray(payload.categories) ? payload.categories : [];
       const intervals = Array.isArray(payload.intervals) ? payload.intervals : [];
+
       const domain = this.resolveDomain(payload, intervals);
       const span = domain.end - domain.start;
 
       this.categories = categories;
-      this.pinnedCategory = categories.length ? categories[0] : null;
+      this.pinnedCategory = categories[0] ?? null;
       this.scrollCategories = categories.slice(1);
 
+      // pinned / scroll 인터벌 분리
       this.pinnedIntervals = intervals
-        .filter((item) => item && item.value && item.value[0] === 0)
+        .filter((item) => item?.value?.[0] === 0)
         .map((item) => ({
           ...item,
           value: [0, item.value[1], item.value[2], item.value[3]]
         }));
 
       this.scrollIntervals = intervals
-        .filter((item) => item && item.value && item.value[0] > 0)
+        .filter((item) => item?.value?.[0] > 0)
         .map((item) => ({
           ...item,
           value: [item.value[0] - 1, item.value[1], item.value[2], item.value[3]]
         }));
 
-      this.selectedCategoryIndex =
-        typeof payload.selectedCategoryIndex === 'number' ? payload.selectedCategoryIndex : null;
+      this.selectedCategoryIndex = payload.selectedCategoryIndex ?? null;
 
       this.domainStart = domain.start;
       this.domainEnd = domain.end;
@@ -216,24 +226,30 @@ export default {
       this.cursorEnd = this.normalizeTime(payload.cursorEnd, defaults.cursorEnd);
     },
 
-    getDefaultRanges(domainStart, span) {
+    /**
+     * 기본 view / cursor 범위 계산
+     */
+    getDefaultRanges(start, span) {
       if (span <= 0) {
         return {
-          viewStart: domainStart,
-          viewEnd: domainStart,
-          cursorStart: domainStart,
-          cursorEnd: domainStart
+          viewStart: start,
+          viewEnd: start,
+          cursorStart: start,
+          cursorEnd: start
         };
       }
 
       return {
-        viewStart: domainStart + span * 0.22,
-        viewEnd: domainStart + span * 0.42,
-        cursorStart: domainStart + span * 0.28,
-        cursorEnd: domainStart + span * 0.35
+        viewStart: start + span * 0.22,
+        viewEnd: start + span * 0.42,
+        cursorStart: start + span * 0.28,
+        cursorEnd: start + span * 0.35
       };
     },
 
+    /**
+     * domain 범위 계산
+     */
     resolveDomain(payload, intervals) {
       const providedStart = this.toTimeValue(payload.domainStart);
       const providedEnd = this.toTimeValue(payload.domainEnd);
@@ -250,7 +266,7 @@ export default {
       let max = null;
 
       intervals.forEach((item) => {
-        if (!item || !item.value) return;
+        if (!item?.value) return;
 
         const start = this.toTimeValue(item.value[1]);
         const end = this.toTimeValue(item.value[2]);
@@ -259,13 +275,13 @@ export default {
         if (end != null) max = max == null ? end : Math.max(max, end);
       });
 
-      if (min == null || max == null) return { start: 0, end: 0 };
-      return { start: min, end: max };
+      return min == null || max == null ? { start: 0, end: 0 } : { start: min, end: max };
     },
 
-    /* =========================
-       차트 생명주기
-       ========================= */
+    // =====================
+    // 차트 생명주기
+    // =====================
+
     initChart() {
       const el = this.$refs.chart;
       if (!el) return;
@@ -279,8 +295,10 @@ export default {
       this.updateMarkerLines();
       this.updateSelectionLines();
       this.updateCursorLines();
+
       this.scheduleMarkerButtonsUpdate();
       this.syncTopSlider();
+      this.updateTopSliderRangeOverlay();
     },
 
     refreshChart() {
@@ -292,8 +310,10 @@ export default {
       this.updateMarkerLines();
       this.updateSelectionLines();
       this.updateCursorLines();
+
       this.scheduleMarkerButtonsUpdate();
       this.syncTopSlider();
+      this.updateTopSliderRangeOverlay();
     },
 
     teardownChart() {
@@ -313,65 +333,55 @@ export default {
 
     resizeChart() {
       if (!this.chart) return;
+
       this.chart.resize();
       this.applyLayout();
       this.scheduleMarkerButtonsUpdate();
+      this.updateTopSliderRangeOverlay();
     },
 
-    /* =========================
-       이벤트 바인딩
-       ========================= */
-    bindChartEvents() {
-      if (!this.chart) return;
+    // =====================
+    // 차트 이벤트
+    // =====================
 
+    bindChartEvents() {
       this.chart.on('datazoom', this.onDataZoom);
       this.chart.on('click', this.onChartClick);
-
-      // 마커(점선) hover 처리: 라벨 시리즈는 제외
       this.chart.on('mouseover', this.onChartMouseOver);
       this.chart.on('mouseout', this.onChartMouseOut);
     },
 
     unbindChartEvents() {
-      if (!this.chart) return;
-
       this.chart.off('datazoom', this.onDataZoom);
       this.chart.off('click', this.onChartClick);
       this.chart.off('mouseover', this.onChartMouseOver);
       this.chart.off('mouseout', this.onChartMouseOut);
     },
 
-    /* =========================
-       이벤트 핸들러
-       ========================= */
     onChartClick(params) {
-      // 마커 버튼 표시/숨김은 hover로만 관리한다.
-      // 클릭은 bar 선택만 처리.
-      if (!params || params.seriesType !== 'custom') return;
-      if (!params.value || typeof params.value[0] !== 'number') return;
+      if (params?.seriesType !== 'custom') return;
 
-      const categoryIndex = this.getCategoryIndexFromBarClick(params);
+      const categoryIndex =
+        params.seriesId === 'sy-bars-pinned'
+          ? 0
+          : params.seriesId === 'sy-bars-main'
+            ? params.value?.[0] + 1
+            : null;
+
       if (categoryIndex == null) return;
 
       this.selectedCategoryIndex = categoryIndex;
       this.updateSelectionLines();
     },
 
-    getCategoryIndexFromBarClick(params) {
-      if (params.seriesId === 'sy-bars-pinned') return 0;
-      if (params.seriesId === 'sy-bars-main') return params.value[0] + 1;
-      return null;
-    },
-
     onChartMouseOver(params) {
-      // 라벨 시리즈는 hover 대상에서 제외 (점선만)
-      if (params && params.seriesId === 'sy-markers-labels') return;
+      // 라벨 제외
+      if (params?.seriesId === 'sy-markers-labels') return;
 
       const markerId = this.getMarkerIdFromMarkLineEvent(params);
       if (markerId == null) return;
 
       this.clearHoverClearTimer();
-
       this.hoverMarkerId = markerId;
 
       if (this.activeMarkerId !== markerId) {
@@ -381,20 +391,76 @@ export default {
     },
 
     onChartMouseOut(params) {
-      // 라벨 시리즈는 hover 대상에서 제외 (점선만)
-      if (params && params.seriesId === 'sy-markers-labels') return;
+      if (params?.seriesId === 'sy-markers-labels') return;
 
       const markerId = this.getMarkerIdFromMarkLineEvent(params);
-      if (markerId == null) return;
-      if (this.hoverMarkerId !== markerId) return;
+      if (markerId == null || this.hoverMarkerId !== markerId) return;
 
       this.hoverMarkerId = null;
 
-      // 점선에서 버튼으로 이동하는 경우 유지
-      if (this.isHoveringMarkerButton) return;
-
-      this.scheduleClearActiveMarkerAfterDelay();
+      if (!this.isHoveringMarkerButton) {
+        this.scheduleClearActiveMarkerAfterDelay();
+      }
     },
+
+    onDataZoom(event) {
+      const batches = Array.isArray(event?.batch) ? event.batch : [event];
+
+      let cursorUpdated = false;
+      let viewUpdated = false;
+
+      batches.forEach((batch) => {
+        const zoomId = this.getDataZoomId(batch);
+
+        if (zoomId === 'dz_top' && !this.isSyncingTopSlider) {
+          const zoom = this.getZoomFromEvent(
+            { batch: [batch] },
+            {
+              axisMin: this.cursorRange.topMin,
+              axisMax: this.cursorRange.topMax,
+              dataZoomId: 'dz_top',
+              fallbackStart: this.cursorStart,
+              fallbackEnd: this.cursorEnd
+            }
+          );
+
+          this.cursorStart = zoom.start;
+          this.cursorEnd = zoom.end;
+          cursorUpdated = true;
+          return;
+        }
+
+        if (zoomId !== 'dz_y') {
+          const zoom = this.getZoomFromEvent(
+            { batch: [batch] },
+            {
+              axisMin: this.domainStart,
+              axisMax: this.domainEnd,
+              dataZoomId: zoomId,
+              fallbackStart: this.viewStart,
+              fallbackEnd: this.viewEnd
+            }
+          );
+
+          this.viewStart = zoom.start;
+          this.viewEnd = zoom.end;
+          viewUpdated = true;
+        }
+      });
+
+      // 변경 반영
+      if (cursorUpdated) this.updateCursorLines();
+      if (viewUpdated) this.syncTopSlider();
+
+      if (cursorUpdated || viewUpdated) {
+        this.scheduleMarkerButtonsUpdate();
+        this.updateTopSliderRangeOverlay();
+      }
+    },
+
+    // =====================
+    // 마커 버튼 hover 처리
+    // =====================
 
     onMarkerButtonMouseEnter() {
       this.isHoveringMarkerButton = true;
@@ -404,7 +470,6 @@ export default {
     onMarkerButtonMouseLeave() {
       this.isHoveringMarkerButton = false;
 
-      // 버튼에서 나갔는데 점선 위도 아니면 이제 숨김
       if (this.hoverMarkerId == null) {
         this.scheduleClearActiveMarkerAfterDelay();
       }
@@ -414,128 +479,47 @@ export default {
       this.clearHoverClearTimer();
 
       this.hoverClearTimerId = setTimeout(() => {
-        this.hoverClearTimerId = null;
-
-        if (this.hoverMarkerId != null) return;
-        if (this.isHoveringMarkerButton) return;
-
-        this.clearActiveMarker();
+        if (this.hoverMarkerId == null && !this.isHoveringMarkerButton) {
+          this.clearActiveMarker();
+        }
       }, 40);
     },
 
-    getMarkerIdFromMarkLineEvent(params) {
-      if (!params || params.componentType !== 'markLine') return null;
-      const data = params.data;
-      return data && data.markerId != null ? data.markerId : null;
-    },
-
     clearHoverClearTimer() {
-      if (this.hoverClearTimerId == null) return;
-      clearTimeout(this.hoverClearTimerId);
-      this.hoverClearTimerId = null;
-    },
-
-    clearActiveMarker() {
-      if (this.activeMarkerId == null) return;
-
-      this.activeMarkerId = null;
-      this.hoverMarkerId = null;
-
-      // 버튼이 사라지는 순간 mouseleave가 안 뜰 수 있으니 상태도 같이 정리
-      this.isHoveringMarkerButton = false;
-
-      this.scheduleMarkerButtonsUpdate();
-    },
-
-    // 마커 삭제/재생성 중 activeMarkerId가 유효하지 않으면 상태를 정리한다.
-    ensureActiveMarkerIsValid() {
-      const activeMarkerId = this.activeMarkerId;
-      if (activeMarkerId == null) return;
-
-      const markers = Array.isArray(this.markers) ? this.markers : [];
-      const exists = markers.some((marker) => marker && marker.id === activeMarkerId);
-
-      if (exists) return;
-
-      // 버튼 클릭으로 마커가 사라질 때 mouseleave가 생략될 수 있으므로 여기서 방어
-      this.activeMarkerId = null;
-      this.hoverMarkerId = null;
-      this.isHoveringMarkerButton = false;
-      this.clearHoverClearTimer();
-    },
-
-    onDataZoom(event) {
-      const batches = this.normalizeZoomBatches(event);
-      if (!batches.length) return;
-
-      let cursorUpdated = false;
-      let viewUpdated = false;
-
-      const topMin = this.cursorRange.topMin;
-      const topMax = this.cursorRange.topMax;
-
-      batches.forEach((batch) => {
-        const zoomId = this.getDataZoomId(batch) || this.getDataZoomId(event);
-        if (zoomId === 'dz_y') return;
-
-        if (zoomId === 'dz_top') {
-          if (this.isSyncingTopSlider) return;
-
-          const zoom = this.getZoomFromEvent(
-            { batch: [batch] },
-            {
-              axisMin: topMin,
-              axisMax: topMax,
-              dataZoomId: 'dz_top',
-              fallbackStart: this.cursorStart,
-              fallbackEnd: this.cursorEnd
-            }
-          );
-
-          if (zoom.start != null) this.cursorStart = zoom.start;
-          if (zoom.end != null) this.cursorEnd = zoom.end;
-
-          cursorUpdated = true;
-          return;
-        }
-
-        const zoom = this.getZoomFromEvent(
-          { batch: [batch] },
-          {
-            axisMin: this.domainStart,
-            axisMax: this.domainEnd,
-            dataZoomId: zoomId || 'dz_bottom',
-            fallbackStart: this.viewStart,
-            fallbackEnd: this.viewEnd
-          }
-        );
-
-        this.viewStart = zoom.start;
-        this.viewEnd = zoom.end;
-        viewUpdated = true;
-      });
-
-      if (cursorUpdated) this.updateCursorLines();
-      if (viewUpdated) this.syncTopSlider();
-
-      if (cursorUpdated || viewUpdated) {
-        this.scheduleMarkerButtonsUpdate();
+      if (this.hoverClearTimerId != null) {
+        clearTimeout(this.hoverClearTimerId);
+        this.hoverClearTimerId = null;
       }
     },
 
-    normalizeZoomBatches(event) {
-      if (!event) return [];
-      if (Array.isArray(event.batch) && event.batch.length) return event.batch;
-      return [event];
+    clearActiveMarker() {
+      this.activeMarkerId = null;
+      this.hoverMarkerId = null;
+      this.isHoveringMarkerButton = false;
+      this.scheduleMarkerButtonsUpdate();
     },
 
-    /* =========================
-       (2) 마커 버튼 업데이트 스케줄러
-       ========================= */
+    ensureActiveMarkerIsValid() {
+      if (this.activeMarkerId == null) return;
+
+      const exists = this.markers.some((m) => m?.id === this.activeMarkerId);
+      if (!exists) {
+        this.clearActiveMarker();
+      }
+    },
+
+    getMarkerIdFromMarkLineEvent(params) {
+      return params?.componentType === 'markLine' ? params.data?.markerId : null;
+    },
+
+    // =====================
+    // 마커 버튼 위치 계산
+    // =====================
+
+    /**
+     * dataZoom / resize 시 과도 호출 방지를 위한 예약 실행
+     */
     scheduleMarkerButtonsUpdate() {
-      // ~~한 이유로 예약 실행:
-      // dataZoom/resize 등 이벤트가 연속으로 들어올 때 updateMarkerButtons가 여러 번 호출되면 비용이 커져서,
-      // requestAnimationFrame으로 한 프레임에 한 번만 실행되도록 묶는다.
       if (this.markerButtonsRafId != null) return;
 
       this.markerButtonsRafId = requestAnimationFrame(() => {
@@ -544,490 +528,46 @@ export default {
       });
     },
 
-    /* =========================
-       옵션 빌드
-       ========================= */
-    buildOption() {
-      const layout = this.getLayoutMetrics();
-      const zoomLayout = this.getDataZoomLayout(layout);
-
-      return {
-        backgroundColor: '#ffffff',
-        animation: false,
-        tooltip: { show: false },
-        grid: this.buildGridOptions(layout),
-        dataZoom: this.buildDataZoomOptions(zoomLayout),
-        xAxis: this.buildXAxisOptions(this.cursorRange),
-        yAxis: this.buildYAxisOptions(),
-        series: this.buildSeriesOptions(this.cursorRange)
-      };
-    },
-
-    buildDataZoomOptions(zoomLayout) {
-      return [
-        {
-          id: 'dz_top',
-          type: 'slider',
-          xAxisIndex: AXIS_INDEX.slider,
-          filterMode: 'weakFilter',
-          showDataShadow: false,
-          brushSelect: false,
-          ...zoomLayout.top,
-          labelFormatter: '',
-          startValue: this.cursorRange.start,
-          endValue: this.cursorRange.end
-        },
-        {
-          id: 'dz_bottom',
-          type: 'slider',
-          xAxisIndex: [AXIS_INDEX.main, AXIS_INDEX.pinned],
-          filterMode: 'weakFilter',
-          showDataShadow: false,
-          brushSelect: false,
-          ...zoomLayout.bottom,
-          labelFormatter: '',
-          startValue: this.viewStart,
-          endValue: this.viewEnd
-        },
-        {
-          id: 'dz_inside',
-          type: 'inside',
-          xAxisIndex: [AXIS_INDEX.main, AXIS_INDEX.pinned],
-          filterMode: 'weakFilter'
-        },
-        {
-          id: 'dz_y',
-          type: 'slider',
-          yAxisIndex: 0,
-          filterMode: 'weakFilter',
-          showDataShadow: false,
-          right: 8,
-          ...zoomLayout.y,
-          width: 12
-        }
-      ];
-    },
-
-    buildXAxisOptions(cursorRange) {
-      const minuteInterval = 60 * 1000;
-
-      return [
-        {
-          id: 'x-main',
-          gridIndex: GRID_INDEX.main,
-          type: 'time',
-          min: this.domainStart,
-          max: this.domainEnd,
-          scale: true,
-          minInterval: minuteInterval,
-          splitNumber: 24,
-          axisLine: { lineStyle: { color: THEME.axisLineColor } },
-          axisLabel: {
-            color: THEME.axisLabelColor,
-            rotate: 90,
-            margin: 6,
-            hideOverlap: true,
-            interval: 0,
-            formatter: (value) => this.formatAxisLabel(value)
-          },
-          splitLine: { show: true, lineStyle: { color: THEME.splitLineColor } }
-        },
-        this.buildHiddenTimeAxis({
-          id: 'x-pinned',
-          gridIndex: GRID_INDEX.pinned,
-          min: this.domainStart,
-          max: this.domainEnd,
-          minInterval: minuteInterval,
-          splitNumber: 24
-        }),
-        this.buildHiddenTimeAxis({
-          id: 'x-label',
-          gridIndex: GRID_INDEX.label,
-          min: cursorRange.topMin,
-          max: cursorRange.topMax,
-          minInterval: minuteInterval,
-          splitNumber: 24
-        }),
-        this.buildHiddenTimeAxis({
-          id: 'x-cursor',
-          gridIndex: GRID_INDEX.cursor,
-          min: cursorRange.topMin,
-          max: cursorRange.topMax
-        }),
-        this.buildHiddenTimeAxis({
-          id: 'x-slider',
-          gridIndex: GRID_INDEX.cursor,
-          min: cursorRange.topMin,
-          max: cursorRange.topMax
-        })
-      ];
-    },
-
-    buildYAxisOptions() {
-      return [
-        this.buildCategoryAxis({
-          id: 'y-main',
-          gridIndex: GRID_INDEX.main,
-          data: this.scrollCategories
-        }),
-        this.buildCategoryAxis({
-          id: 'y-pinned',
-          gridIndex: GRID_INDEX.pinned,
-          data: this.pinnedCategory ? [this.pinnedCategory] : []
-        }),
-        this.buildHiddenValueAxis({
-          id: 'y-label',
-          gridIndex: GRID_INDEX.label,
-          min: 0,
-          max: 1
-        }),
-        this.buildHiddenValueAxis({
-          id: 'y-cursor',
-          gridIndex: GRID_INDEX.cursor,
-          min: 0,
-          max: 1
-        })
-      ];
-    },
-
-    buildSeriesOptions(cursorRange) {
-      return [
-        this.buildBarSeries({
-          id: 'sy-bars-main',
-          xAxisIndex: AXIS_INDEX.main,
-          yAxisIndex: AXIS_INDEX.main,
-          data: this.scrollIntervals
-        }),
-        this.buildBarSeries({
-          id: 'sy-bars-pinned',
-          xAxisIndex: AXIS_INDEX.pinned,
-          yAxisIndex: AXIS_INDEX.pinned,
-          data: this.pinnedIntervals
-        }),
-        this.buildSelectionSeries({
-          id: 'sy-selection-main',
-          xAxisIndex: AXIS_INDEX.main,
-          yAxisIndex: AXIS_INDEX.main
-        }),
-        this.buildSelectionSeries({
-          id: 'sy-selection-pinned',
-          xAxisIndex: AXIS_INDEX.pinned,
-          yAxisIndex: AXIS_INDEX.pinned
-        }),
-        this.buildMarkerLineSeries({
-          id: 'sy-markers-main',
-          xAxisIndex: AXIS_INDEX.main,
-          yAxisIndex: AXIS_INDEX.main,
-          silent: false
-        }),
-        this.buildMarkerLineSeries({
-          id: 'sy-markers-pinned-lines',
-          xAxisIndex: AXIS_INDEX.pinned,
-          yAxisIndex: AXIS_INDEX.pinned,
-          silent: true
-        }),
-        this.buildMarkerLabelSeries(),
-        this.buildCursorOverlaySeries(cursorRange)
-      ];
-    },
-
-    buildBarSeries({ id, xAxisIndex, yAxisIndex, data }) {
-      return {
-        id,
-        type: 'custom',
-        renderItem: this.renderItem,
-        xAxisIndex,
-        yAxisIndex,
-        itemStyle: { opacity: 0.85 },
-        encode: { x: [1, 2], y: 0 },
-        data
-      };
-    },
-
-    renderItem(params, api) {
-      const categoryIndex = api.value(0);
-      const start = api.coord([api.value(1), categoryIndex]);
-      const end = api.coord([api.value(2), categoryIndex]);
-      const height = api.size([0, 1])[1] * 0.6;
-
-      const rectShape = echarts.graphic.clipRectByRect(
-        { x: start[0], y: start[1] - height / 2, width: end[0] - start[0], height },
-        { x: params.coordSys.x, y: params.coordSys.y, width: params.coordSys.width, height: params.coordSys.height }
-      );
-
-      return rectShape && {
-        type: 'rect',
-        transition: ['shape'],
-        shape: rectShape,
-        style: api.style()
-      };
-    },
-
-    buildSelectionSeries({ id, xAxisIndex, yAxisIndex }) {
-      return {
-        id,
-        type: 'scatter',
-        xAxisIndex,
-        yAxisIndex,
-        data: [],
-        silent: true,
-        markLine: {
-          symbol: ['none', 'none'],
-          z: 18,
-          lineStyle: { ...LINE_STYLE.selection },
-          label: { show: false },
-          data: []
-        }
-      };
-    },
-
-    buildMarkerLineSeries({ id, xAxisIndex, yAxisIndex, silent }) {
-      return {
-        id,
-        type: 'scatter',
-        xAxisIndex,
-        yAxisIndex,
-        data: [],
-        silent,
-        emphasis: { disabled: true },
-        markLine: {
-          symbol: ['none', 'none'],
-          precision: 0,
-          z: 20,
-          lineStyle: { ...LINE_STYLE.marker },
-          emphasis: { disabled: true },
-          label: { show: false },
-          data: []
-        }
-      };
-    },
-
-    buildMarkerLabelSeries() {
-      return {
-        id: 'sy-markers-labels',
-        type: 'scatter',
-        xAxisIndex: AXIS_INDEX.label,
-        yAxisIndex: AXIS_INDEX.label,
-        data: [],
-        silent: false,
-        emphasis: { disabled: true },
-        markLine: {
-          symbol: ['none', 'none'],
-          precision: 0,
-          z: 22,
-          lineStyle: { ...LINE_STYLE.markerLabel },
-          emphasis: { disabled: true },
-          label: {
-            show: true,
-            position: MARKER_LABEL.position,
-            align: MARKER_LABEL.align,
-            verticalAlign: MARKER_LABEL.verticalAlign,
-            distance: MARKER_LABEL.distance,
-            offset: [0, MARKER_LABEL.offsetY],
-            rotate: MARKER_LABEL.rotate,
-            color: THEME.markerBlue,
-            backgroundColor: THEME.markerBg,
-            borderColor: THEME.markerBorder,
-            borderWidth: MARKER_LABEL.borderWidth,
-            padding: MARKER_LABEL.padding,
-            borderRadius: MARKER_LABEL.borderRadius,
-            fontSize: MARKER_LABEL.fontSize,
-            fontFamily: THEME.fontFamily,
-            formatter: (params) => {
-              const data = params && params.data;
-              const x = data && data.xAxis;
-              return this.formatDateTime(x);
-            }
-          },
-          data: []
-        }
-      };
-    },
-
-    buildCursorOverlaySeries(cursorRange) {
-      return {
-        id: 'sy-cursors-overlay',
-        type: 'scatter',
-        xAxisIndex: AXIS_INDEX.cursor,
-        yAxisIndex: AXIS_INDEX.cursor,
-        data: [],
-        silent: true,
-        markLine: {
-          symbol: ['none', 'none'],
-          z: 15,
-          lineStyle: { ...LINE_STYLE.cursor },
-          label: { show: false },
-          data: [{ xAxis: cursorRange.start }, { xAxis: cursorRange.end }]
-        }
-      };
-    },
-
-    buildHiddenTimeAxis({ id, gridIndex, min, max, minInterval, splitNumber }) {
-      const axis = {
-        id,
-        gridIndex,
-        type: 'time',
-        min,
-        max,
-        scale: true,
-        show: false,
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: { show: false },
-        splitLine: { show: false }
-      };
-
-      if (minInterval != null) axis.minInterval = minInterval;
-      if (splitNumber != null) axis.splitNumber = splitNumber;
-
-      return axis;
-    },
-
-    buildHiddenValueAxis({ id, gridIndex, min, max }) {
-      return {
-        id,
-        gridIndex,
-        type: 'value',
-        min,
-        max,
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: { show: false },
-        splitLine: { show: false }
-      };
-    },
-
-    buildCategoryAxis({ id, gridIndex, data }) {
-      return {
-        id,
-        gridIndex,
-        type: 'category',
-        inverse: true,
-        data,
-        axisTick: { show: false },
-        axisLine: { show: false },
-        axisLabel: { color: THEME.axisLabelColor }
-      };
-    },
-
-    /* =========================
-       레이아웃 적용
-       ========================= */
-    applyLayout() {
-      if (!this.chart) return;
-
-      const layout = this.getLayoutMetrics();
-      const zoomLayout = this.getDataZoomLayout(layout);
-
-      this.chart.setOption({
-        grid: this.buildGridOptions(layout),
-        dataZoom: [
-          { id: 'dz_top', ...zoomLayout.top },
-          { id: 'dz_bottom', ...zoomLayout.bottom },
-          { id: 'dz_y', ...zoomLayout.y }
-        ]
-      });
-    },
-
-    getLayoutMetrics() {
-      const chartHeight = this.chart ? this.chart.getHeight() : 640;
-      const totalCategories = Math.max(this.categories.length, 1);
-
-      const sliderBottom = LAYOUT.slider.top + LAYOUT.slider.height + LAYOUT.slider.gap;
-      const labelHeight = Math.max(0, LAYOUT.slider.labelGap);
-
-      const usableHeight = Math.max(0, chartHeight - LAYOUT.grid.bottom - sliderBottom - labelHeight);
-      const rowHeight = totalCategories ? usableHeight / totalCategories : usableHeight;
-
-      const pinnedHeight = rowHeight;
-      const labelTop = sliderBottom;
-      const pinnedTop = sliderBottom + labelHeight;
-      const mainTop = pinnedTop + pinnedHeight;
-
-      return {
-        sliderBottom,
-        gridBottom: LAYOUT.grid.bottom,
-        labelTop,
-        labelHeight,
-        pinnedHeight,
-        pinnedTop,
-        mainTop
-      };
-    },
-
-    getDataZoomLayout(layout) {
-      return {
-        top: { top: LAYOUT.slider.top, height: LAYOUT.slider.height },
-        bottom: { bottom: LAYOUT.slider.bottom, height: LAYOUT.slider.bottomHeight },
-        y: { top: layout.mainTop, bottom: layout.gridBottom }
-      };
-    },
-
-    buildGridOptions(layout) {
-      return [
-        { id: 'grid-main', top: layout.mainTop, bottom: layout.gridBottom, left: LAYOUT.grid.left, right: LAYOUT.grid.right, containLabel: false },
-        { id: 'grid-pinned', top: layout.pinnedTop, height: layout.pinnedHeight, left: LAYOUT.grid.left, right: LAYOUT.grid.right, containLabel: false },
-        { id: 'grid-label', top: layout.labelTop, height: layout.labelHeight, left: LAYOUT.grid.left, right: LAYOUT.grid.right, containLabel: false },
-        { id: 'grid-cursor', top: layout.sliderBottom, bottom: layout.gridBottom, left: LAYOUT.grid.left, right: LAYOUT.grid.right, containLabel: false }
-      ];
-    },
-
-    /* =========================
-       마커/선택/커서 업데이트
-       ========================= */
-    updateSelectionLines() {
-      if (!this.chart) return;
-
-      const selected = this.selectedCategoryIndex;
-      const mainData = [];
-      const pinnedData = [];
-
-      if (typeof selected === 'number') {
-        if (selected === 0) pinnedData.push({ yAxis: 0 });
-        if (selected > 0) mainData.push({ yAxis: selected - 1 });
+    updateMarkerButtons() {
+      if (!this.chart || this.activeMarkerId == null) {
+        this.markerButtons = [];
+        return;
       }
 
-      this.chart.setOption({
-        series: [
-          { id: 'sy-selection-main', markLine: { data: mainData } },
-          { id: 'sy-selection-pinned', markLine: { data: pinnedData } }
-        ]
-      });
+      const mainGridRect = this.getGridRect(GRID_INDEX.main);
+      const pinnedGridRect = this.getGridRect(GRID_INDEX.pinned);
+      if (!mainGridRect) return;
+
+      const gridRects = [mainGridRect, pinnedGridRect].filter((r) => r?.height);
+      const lineCenterY =
+        (Math.min(...gridRects.map((r) => r.y)) +
+          Math.max(...gridRects.map((r) => r.y + r.height))) /
+        2;
+
+      const marker = this.markers.find((m) => m?.id === this.activeMarkerId);
+      if (!marker) return;
+
+      const x = this.getAxisPixelFromValue(this.toTimeValue(marker.time));
+      if (x == null) return;
+
+      this.markerButtons = [
+        {
+          id: marker.id,
+          x: this.clamp(x, MARKER_BUTTON.radius, this.chart.getWidth() - MARKER_BUTTON.radius),
+          y: this.clamp(
+            lineCenterY,
+            MARKER_BUTTON.radius,
+            this.chart.getHeight() - MARKER_BUTTON.radius
+          )
+        }
+      ];
     },
 
-    updateMarkerLines() {
-      if (!this.chart) return;
-
-      const markers = Array.isArray(this.markers) ? this.markers : [];
-      const markerLines = markers
-        .filter((marker) => marker && marker.time != null)
-        .map((marker) => ({ xAxis: marker.time, markerId: marker.id }));
-
-      this.chart.setOption({
-        series: [
-          { id: 'sy-markers-main', markLine: { data: markerLines } },
-          { id: 'sy-markers-pinned-lines', markLine: { data: markerLines } },
-          { id: 'sy-markers-labels', markLine: { data: markerLines } }
-        ]
-      });
-    },
-
-    updateCursorLines() {
-      if (!this.chart) return;
-
-      this.chart.setOption({
-        series: [
-          {
-            id: 'sy-cursors-overlay',
-            markLine: { data: [{ xAxis: this.cursorRange.start }, { xAxis: this.cursorRange.end }] }
-          }
-        ]
-      });
-    },
+    // =====================
+    // 상단 슬라이더 범위 표시
+    // =====================
 
     syncTopSlider() {
-      if (!this.chart) return;
-
       this.isSyncingTopSlider = true;
 
       this.chart.setOption({
@@ -1036,219 +576,96 @@ export default {
           { id: 'x-cursor', min: this.cursorRange.topMin, max: this.cursorRange.topMax },
           { id: 'x-slider', min: this.cursorRange.topMin, max: this.cursorRange.topMax }
         ],
-        dataZoom: [{ id: 'dz_top', startValue: this.cursorRange.start, endValue: this.cursorRange.end }]
+        dataZoom: [
+          { id: 'dz_top', startValue: this.cursorRange.start, endValue: this.cursorRange.end }
+        ]
       });
 
       setTimeout(() => {
         this.isSyncingTopSlider = false;
+        this.updateTopSliderRangeOverlay();
       }, 0);
     },
 
-    updateMarkerButtons() {
-      if (!this.chart) {
-        this.markerButtons = [];
-        this.isHoveringMarkerButton = false;
+    updateTopSliderRangeOverlay() {
+      const startX = this.getAxisPixelFromValue(this.cursorRange.start, AXIS_INDEX.slider);
+      const endX = this.getAxisPixelFromValue(this.cursorRange.end, AXIS_INDEX.slider);
+      if (startX == null || endX == null) return;
+
+      const left = Math.min(startX, endX);
+      const right = Math.max(startX, endX);
+      const width = right - left;
+
+      if (width < 70) {
+        this.topSliderRange.visible = false;
         return;
       }
 
-      const activeMarkerId = this.activeMarkerId;
-      if (activeMarkerId == null) {
-        this.markerButtons = [];
-        this.isHoveringMarkerButton = false;
-        return;
-      }
-
-      const markers = Array.isArray(this.markers) ? this.markers : [];
-      const activeMarkers = markers.filter((marker) => {
-        if (!marker) return false;
-        if (marker.time == null) return false;
-        return marker.id === activeMarkerId;
-      });
-
-      if (!activeMarkers.length) {
-        // 마커가 사라졌는데 버튼 hover 상태만 남는 케이스 방어
-        this.markerButtons = [];
-        this.isHoveringMarkerButton = false;
-        return;
-      }
-
-      const mainGridRect = this.getGridRect(GRID_INDEX.main);
-      const pinnedGridRect = this.getGridRect(GRID_INDEX.pinned);
-
-      if (!mainGridRect) {
-        this.markerButtons = [];
-        this.isHoveringMarkerButton = false;
-        return;
-      }
-
-      const gridRects = [mainGridRect, pinnedGridRect].filter((rect) => rect && rect.height > 0);
-      const lineCenterY = this.getLineCenterY(gridRects);
-
-      if (lineCenterY == null) {
-        this.markerButtons = [];
-        this.isHoveringMarkerButton = false;
-        return;
-      }
-
-      const chartWidth = this.chart.getWidth();
-      const chartHeight = this.chart.getHeight();
-
-      const bounds = {
-        left: MARKER_BUTTON.radius,
-        right: chartWidth - MARKER_BUTTON.radius,
-        top: MARKER_BUTTON.radius,
-        bottom: chartHeight - MARKER_BUTTON.radius
-      };
-
-      const buttons = [];
-
-      activeMarkers.forEach((marker) => {
-        const markerTime = this.toTimeValue(marker.time);
-        if (markerTime == null) return;
-
-        const lineX = this.getAxisPixelFromValue(markerTime, AXIS_INDEX.main);
-        if (lineX == null || Number.isNaN(lineX)) return;
-
-        if (lineX < mainGridRect.x || lineX > mainGridRect.x + mainGridRect.width) return;
-
-        const x = this.clamp(lineX + MARKER_BUTTON.offsetX, bounds.left, bounds.right);
-        const y = this.clamp(lineCenterY + MARKER_BUTTON.offsetY, bounds.top, bounds.bottom);
-
-        buttons.push({ id: marker.id, x, y });
-      });
-
-      // 버튼이 하나도 안 만들어졌다면 hover 상태도 같이 정리
-      if (!buttons.length) {
-        this.isHoveringMarkerButton = false;
-      }
-
-      this.markerButtons = buttons;
-    },
-
-    getLineCenterY(gridRects) {
-      if (!gridRects.length) return null;
-      const topY = Math.min(...gridRects.map((rect) => rect.y));
-      const bottomY = Math.max(...gridRects.map((rect) => rect.y + rect.height));
-      return (topY + bottomY) / 2;
-    },
-
-    getGridRect(gridIndex = GRID_INDEX.main) {
-      if (!this.chart) return null;
-
-      const model = this.chart.getModel && this.chart.getModel();
-      const grid = model && model.getComponent && model.getComponent('grid', gridIndex);
-      const coord = grid && grid.coordinateSystem;
-
-      if (coord && coord.getRect) {
-        const rect = coord.getRect();
-        if (rect) {
-          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-        }
-      }
-
-      const option = this.chart.getOption();
-      const gridOption = option && option.grid && option.grid[gridIndex];
-      if (!gridOption) return null;
-
-      const chartWidth = this.chart.getWidth();
-      const chartHeight = this.chart.getHeight();
-
-      const left = typeof gridOption.left === 'number' ? gridOption.left : 0;
-      const right = typeof gridOption.right === 'number' ? gridOption.right : 0;
-      const top = typeof gridOption.top === 'number' ? gridOption.top : 0;
-      const bottom = typeof gridOption.bottom === 'number' ? gridOption.bottom : 0;
-
-      const explicitWidth = typeof gridOption.width === 'number' ? gridOption.width : null;
-      const explicitHeight = typeof gridOption.height === 'number' ? gridOption.height : null;
-
-      return {
-        x: left,
-        y: top,
-        width: explicitWidth ?? Math.max(0, chartWidth - left - right),
-        height: explicitHeight ?? Math.max(0, chartHeight - top - bottom)
+      this.topSliderRange = {
+        visible: true,
+        text: this.formatRangeMs(Math.abs(this.cursorRange.end - this.cursorRange.start)),
+        x: (left + right) / 2,
+        y: LAYOUT.slider.top + LAYOUT.slider.height / 2,
+        maxWidth: width - 10
       };
     },
 
-    getAxisPixelFromValue(value, xAxisIndex = AXIS_INDEX.main) {
-      if (!this.chart) return null;
-      const pixel = this.chart.convertToPixel({ xAxisIndex }, value);
+    formatRangeMs(ms) {
+      const h = Math.floor(ms / 3600000);
+      const m = Math.floor((ms % 3600000) / 60000);
+      const s = Math.floor((ms % 60000) / 1000);
+      const msRemain = ms % 1000;
+
+      return `Time: ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(
+        s
+      ).padStart(2, '0')}.${String(msRemain).padStart(3, '0')}`;
+    },
+
+    // =====================
+    // 공통 유틸
+    // =====================
+
+    getAxisPixelFromValue(value, axisIndex = AXIS_INDEX.main) {
+      const pixel = this.chart.convertToPixel({ xAxisIndex: axisIndex }, value);
       return Array.isArray(pixel) ? pixel[0] : pixel;
     },
 
-    getDataZoomId(item) {
-      if (!item) return null;
-      if (item.dataZoomId) return item.dataZoomId;
-
-      if (typeof item.dataZoomIndex === 'number' && this.chart) {
-        const option = this.chart.getOption();
-        const dataZoom = option && option.dataZoom;
-        const dz = Array.isArray(dataZoom) ? dataZoom[item.dataZoomIndex] : null;
-        return dz && dz.id ? dz.id : null;
-      }
-
-      return null;
+    getGridRect(index) {
+      const grid = this.chart.getModel().getComponent('grid', index);
+      return grid?.coordinateSystem?.getRect() ?? null;
     },
 
-    getZoomFromEvent(event, options = {}) {
-      const axisMin = options.axisMin ?? this.domainStart;
-      const axisMax = options.axisMax ?? this.domainEnd;
-      const dataZoomId = options.dataZoomId ?? 'dz_bottom';
-      const fallbackStart = options.fallbackStart ?? this.viewStart;
-      const fallbackEnd = options.fallbackEnd ?? this.viewEnd;
+    getDataZoomId(item) {
+      if (item?.dataZoomId) return item.dataZoomId;
+      return this.chart?.getOption().dataZoom?.[item?.dataZoomIndex]?.id ?? null;
+    },
 
-      const batch = event && event.batch && event.batch[0];
+    getZoomFromEvent(event, options) {
+      const batch = event.batch?.[0];
+      const span = options.axisMax - options.axisMin;
 
-      if (batch && (batch.startValue != null || batch.endValue != null)) {
+      if (batch?.startValue != null || batch?.endValue != null) {
         return {
-          start: batch.startValue ?? fallbackStart,
-          end: batch.endValue ?? fallbackEnd
+          start: batch.startValue ?? options.fallbackStart,
+          end: batch.endValue ?? options.fallbackEnd
         };
       }
 
-      if (batch && (batch.start != null || batch.end != null)) {
-        const span = axisMax - axisMin;
-
-        const start =
-          batch.start != null && span ? axisMin + (span * batch.start) / 100 : fallbackStart;
-        const end =
-          batch.end != null && span ? axisMin + (span * batch.end) / 100 : fallbackEnd;
-
-        return { start: Math.round(start), end: Math.round(end) };
-      }
-
-      if (!this.chart) return { start: fallbackStart, end: fallbackEnd };
-
-      const option = this.chart.getOption();
-      const dataZoom = option && option.dataZoom;
-
-      const dz = Array.isArray(dataZoom)
-        ? dataZoom.find((item) => item && item.id === dataZoomId)
-        : null;
-
-      if (dz && (dz.startValue != null || dz.endValue != null)) {
+      if (batch?.start != null || batch?.end != null) {
         return {
-          start: dz.startValue ?? fallbackStart,
-          end: dz.endValue ?? fallbackEnd
+          start: options.axisMin + (span * batch.start) / 100,
+          end: options.axisMin + (span * batch.end) / 100
         };
       }
 
-      if (dz && (dz.start != null || dz.end != null)) {
-        const span = axisMax - axisMin;
-
-        const start =
-          dz.start != null && span ? axisMin + (span * dz.start) / 100 : fallbackStart;
-        const end =
-          dz.end != null && span ? axisMin + (span * dz.end) / 100 : fallbackEnd;
-
-        return { start: Math.round(start), end: Math.round(end) };
-      }
-
-      return { start: fallbackStart, end: fallbackEnd };
+      return {
+        start: options.fallbackStart,
+        end: options.fallbackEnd
+      };
     },
 
     normalizeTime(value, fallback) {
-      const parsed = this.toTimeValue(value);
-      return parsed ?? fallback;
+      return this.toTimeValue(value) ?? fallback;
     },
 
     clamp(value, min, max) {
@@ -1256,40 +673,9 @@ export default {
     },
 
     toTimeValue(value) {
-      if (value == null) return null;
       if (typeof value === 'number') return value;
-
-      if (echarts && echarts.number && typeof echarts.number.parseDate === 'function') {
-        const parsed = echarts.number.parseDate(value);
-        if (parsed && !Number.isNaN(parsed.getTime())) return parsed.getTime();
-      }
-
-      const time = new Date(value).getTime();
-      return Number.isNaN(time) ? null : time;
-    },
-
-    formatAxisLabel(value) {
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return '';
-
-      return [
-        `${this.pad2(date.getMonth() + 1)}-${this.pad2(date.getDate())}`,
-        `${this.pad2(date.getHours())}:${this.pad2(date.getMinutes())}`
-      ].join(' ');
-    },
-
-    formatDateTime(value) {
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return '';
-
-      return [
-        `${date.getFullYear()}-${this.pad2(date.getMonth() + 1)}-${this.pad2(date.getDate())}`,
-        `${this.pad2(date.getHours())}:${this.pad2(date.getMinutes())}:${this.pad2(date.getSeconds())}`
-      ].join(' ');
-    },
-
-    pad2(value) {
-      return String(value).padStart(2, '0');
+      const parsed = echarts.number?.parseDate?.(value);
+      return parsed?.getTime?.() ?? new Date(value).getTime();
     }
   }
 };
@@ -1300,26 +686,30 @@ export default {
   position: relative;
   width: 100%;
   height: 640px;
-  user-select: none;
-  -webkit-user-select: none;
-  -ms-user-select: none;
 }
 
 .sy-chart {
   width: 100%;
   height: 100%;
   border-radius: 14px;
-  overflow: hidden;
-  background: #ffffff;
   border: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.sy-top-slider-range {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  padding: 2px 8px;
+  background: rgba(15, 23, 42, 0.35);
+  color: #fff;
+  border-radius: 10px;
+  font-size: 12px;
 }
 
 .sy-marker-overlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  border-radius: 14px;
-  overflow: hidden;
 }
 
 .sy-marker-btn {
@@ -1327,16 +717,9 @@ export default {
   transform: translate(-50%, -50%);
   width: 20px;
   height: 20px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
   background: #1d4ed8;
-  color: #ffffff;
-  font: bold 12px sans-serif;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  cursor: pointer;
+  color: #fff;
   pointer-events: auto;
 }
 </style>
