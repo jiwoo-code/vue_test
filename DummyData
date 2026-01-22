@@ -1,0 +1,253 @@
+const ERLOG_EQP_IDS = ['EQP-01'];
+
+const ERLOG_LAYERS = [
+  'WN120P26_HMC',
+  'VT430N18',
+  'LN908X24B',
+  'PT88A7',
+  'RX200K3',
+  'AA104P1',
+  'QC700B9',
+  'GN450_3X',
+  'HMC12P2',
+  'WQ120P26',
+  'TN450X2',
+  'LC333B9',
+  'MX120P2',
+  'ZN330A8'
+];
+
+const ERLOG_DEVICES = [
+  'ABCD',
+  'EFGH',
+  'IJKL',
+  'MNOP',
+  'QRST',
+  'UVWX',
+  'YZAB',
+  'CDEF',
+  'GHIJ',
+  'KLMN',
+  'OPQR',
+  'STUV',
+  'WXYZ'
+];
+
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function pad3(value) {
+  return String(value).padStart(3, '0');
+}
+
+function pad4(value) {
+  return String(value).padStart(4, '0');
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function toLetters(value, length) {
+  let num = Math.abs(value);
+  let result = '';
+  for (let i = 0; i < length; i += 1) {
+    result = String.fromCharCode(65 + (num % 26)) + result;
+    num = Math.floor(num / 26);
+  }
+  return result;
+}
+
+function formatDateTime(date) {
+  return [
+    `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`,
+    `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(
+      date.getSeconds()
+    )}.${pad3(date.getMilliseconds())}`
+  ].join(' ');
+}
+
+function buildLotId(serial, yearTwo, weekTwo) {
+  const letters = toLetters(serial, 3);
+  const digits = pad3(serial % 1000);
+  const dot = serial % 2;
+  const suffix =
+    `${toLetters(serial + 7, 2)}${pad3(serial)}${toLetters(serial + 11, 2)}${
+      serial % 10
+    }`.slice(0, 8);
+  return `${letters}${digits}.${dot}_${yearTwo}${weekTwo}_0_${suffix}`;
+}
+
+function resolveBucket(randomValue) {
+  if (randomValue < 0.68) return 'blue';
+  if (randomValue < 0.92) return 'yellow';
+  return 'red';
+}
+
+function buildErLogDummyData() {
+  const items = [];
+  const baseDate = new Date(2026, 0, 15, 0, 0, 0, 0);
+  const days = 1;
+  const lotsPerEqpPerDay = 36;
+  let serial = 101;
+  let randState = 0x9e3779b9;
+
+  const nextRand = () => {
+    randState ^= randState << 13;
+    randState ^= randState >>> 17;
+    randState ^= randState << 5;
+    return (randState >>> 0) / 4294967296;
+  };
+
+  for (let day = 0; day < days; day += 1) {
+    for (let eqpIndex = 0; eqpIndex < ERLOG_EQP_IDS.length; eqpIndex += 1) {
+      const dayMinutes = 24 * 60;
+      const minGap = 2;
+      const maxGap = 4;
+      const minDuration = 32;
+      const maxDuration = 40;
+      let currentMinute = 4 + eqpIndex * 2;
+      for (let lotIndex = 0; lotIndex < lotsPerEqpPerDay; lotIndex += 1) {
+        const lotsRemaining = lotsPerEqpPerDay - lotIndex;
+        const remaining =
+          dayMinutes - currentMinute - lotsRemaining * minGap;
+        let durationMinutes = Math.floor(remaining / lotsRemaining);
+        durationMinutes = clamp(
+          durationMinutes + ((lotIndex + serial) % 5) - 2,
+          minDuration,
+          maxDuration
+        );
+        if (currentMinute + durationMinutes + minGap > dayMinutes) {
+          durationMinutes = Math.max(
+            minDuration,
+            dayMinutes - currentMinute - minGap
+          );
+        }
+        const gapMinutes =
+          minGap + ((lotIndex + serial) % (maxGap - minGap + 1));
+        const start = new Date(baseDate.getTime());
+        start.setDate(baseDate.getDate() + day);
+        start.setMinutes(currentMinute);
+        start.setSeconds((serial * 7) % 60);
+        start.setMilliseconds((serial * 13) % 1000);
+
+        const finish = new Date(start.getTime() + durationMinutes * 60 * 1000);
+        const bucket = resolveBucket(nextRand());
+        const avgSyCount =
+          bucket === 'yellow'
+            ? 45 + (serial % 18)
+            : 63 + (serial % 15);
+        const rejectWafer = bucket === 'red' ? 1 + (serial % 3) : 0;
+
+        items.push({
+          eqpId: ERLOG_EQP_IDS[eqpIndex],
+          lotId: buildLotId(serial, '26', pad2(3 + day)),
+          layer: ERLOG_LAYERS[(serial + eqpIndex) % ERLOG_LAYERS.length],
+          device: ERLOG_DEVICES[(serial + lotIndex) % ERLOG_DEVICES.length],
+          lotStart: formatDateTime(start),
+          lotFinish: formatDateTime(finish),
+          lotSize: 2 + (serial % 24),
+          rejectWafer,
+          avgSyCount
+        });
+
+        currentMinute += durationMinutes;
+        if (lotIndex < lotsPerEqpPerDay - 1) {
+          currentMinute += gapMinutes;
+        }
+
+        serial += 1;
+      }
+    }
+  }
+
+  return items;
+}
+
+const erLogDummyData = buildErLogDummyData();
+
+const BASE_CATEGORIES = Array.from({ length: 50 }, (_, index) => {
+  const value = 50 - index;
+  return `EQP-${String(value).padStart(2, '0')}`;
+});
+
+const TASK_TYPES = [
+  { name: 'Type A', color: '#7b9ce1' },
+  { name: 'Type B', color: '#bd6d6c' },
+  { name: 'Type C', color: '#75d874' },
+  { name: 'Type D', color: '#e0bc78' },
+  { name: 'Type E', color: '#dc77dc' },
+  { name: 'Type F', color: '#72b362' }
+];
+
+function buildCategories(lot) {
+  const categories = BASE_CATEGORIES.slice();
+  if (!lot || !lot.eqpId) return categories;
+
+  const filtered = categories.filter((item) => item !== lot.eqpId);
+  return [lot.eqpId, ...filtered].slice(0, categories.length);
+}
+
+function createRng(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) / 4294967296;
+  };
+}
+
+function buildIntervals(categories, startTime, endTime, rng) {
+  const span = endTime - startTime;
+  const intervals = [];
+  let intervalId = 1;
+
+  categories.forEach((_, categoryIndex) => {
+    const count = 6 + Math.floor(rng() * 6);
+    for (let index = 0; index < count; index += 1) {
+      const typeItem = TASK_TYPES[Math.floor(rng() * TASK_TYPES.length)];
+      const start =
+        startTime + Math.floor(rng() * Math.max(span - 60 * 1000, 1));
+      const duration =
+        2 * 60 * 1000 + Math.floor(rng() * 40 * 60 * 1000);
+      const end = Math.min(endTime, Math.max(start + duration, startTime));
+
+      intervals.push({
+        id: intervalId,
+        name: typeItem.name,
+        value: [categoryIndex, start, end, end - start],
+        itemStyle: {
+          color: typeItem.color
+        }
+      });
+
+      intervalId += 1;
+    }
+  });
+
+  return intervals;
+}
+
+function buildSyTimelineDummyData(options = {}) {
+  const lot = options.lot || null;
+  const startTime = Number.isFinite(options.startTime)
+    ? options.startTime
+    : Date.now() - 6 * 60 * 60 * 1000;
+  const endTime = Number.isFinite(options.endTime)
+    ? options.endTime
+    : Date.now() + 6 * 60 * 60 * 1000;
+  const seed = options.seed != null ? options.seed : Date.now();
+
+  const categories = buildCategories(lot);
+  const rng = createRng(seed);
+  const intervals = buildIntervals(categories, startTime, endTime, rng);
+
+  return {
+    categories,
+    intervals
+  };
+}
+
+export { erLogDummyData, buildSyTimelineDummyData };
