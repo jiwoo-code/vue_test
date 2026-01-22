@@ -1,0 +1,254 @@
+<template>
+  <div class="sy-detail-tab">
+    <div class="detail-header">
+      <div>
+        <h3>SY Timeline Detail</h3>
+        <p class="lede" v-if="selectedLot">Lot ID: {{ selectedLot.lotId }}</p>
+        <p class="lede" v-else>Select a lot from the main tab.</p>
+      </div>
+      <div v-if="selectedLot" class="detail-meta">
+        <div>EQP: {{ selectedLot.eqpId }}</div>
+        <div>Layer: {{ selectedLot.layer }}</div>
+        <div>Device: {{ selectedLot.device }}</div>
+      </div>
+    </div>
+
+    <div v-if="selectedLot" class="toolbar">
+      <label class="field">
+        Marker time (yyyy-MM-dd HH:mm:ss)
+        <input v-model="markerInput" type="text" placeholder="yyyy-MM-dd HH:mm:ss" />
+      </label>
+
+      <button type="button" class="btn" @click="addMarker">Add marker</button>
+      <button type="button" class="btn ghost" :disabled="markers.length === 0" @click="clearMarkers">
+        Clear all
+      </button>
+    </div>
+
+    <p v-if="error" class="error">{{ error }}</p>
+
+    <div v-if="!selectedLot" class="empty">No detail data yet.</div>
+    <SyTimelineChart
+      v-else
+      :markers="markers"
+      :timeline-data="timelineData"
+      @remove-marker="removeMarker"
+    />
+  </div>
+</template>
+
+<script>
+import SyTimelineChart from './SyTimelineChart.vue';
+
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  return [
+    `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`,
+    `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
+  ].join(' ');
+}
+
+function parseDateTime(text) {
+  const normalized = String(text || '').trim().replace('T', ' ');
+  const match = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(
+    normalized
+  );
+  if (!match) return null;
+
+  const [, year, month, day, hour, minute, second = '0'] = match;
+  const date = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second)
+  );
+
+  if (Number.isNaN(date.getTime())) return null;
+  return date.getTime();
+}
+
+export default {
+  name: 'DetailTab',
+  components: {
+    SyTimelineChart
+  },
+  props: {
+    detailContext: {
+      type: Object,
+      default: null
+    },
+    buildTimelineData: {
+      type: Function,
+      default: null
+    }
+  },
+  data() {
+    return {
+      markers: [],
+      markerInput: formatDateTime(Date.now()),
+      error: '',
+      timelineData: {}
+    };
+  },
+  computed: {
+    selectedLot() {
+      return this.detailContext && this.detailContext.lot
+        ? this.detailContext.lot
+        : null;
+    }
+  },
+  watch: {
+    detailContext: {
+      deep: true,
+      immediate: true,
+      handler() {
+        this.refreshTimeline();
+      }
+    }
+  },
+  methods: {
+    refreshTimeline() {
+      this.error = '';
+      if (typeof this.buildTimelineData === 'function') {
+        this.timelineData = this.buildTimelineData(this.detailContext || {});
+      } else {
+        this.timelineData = {};
+      }
+
+      if (this.detailContext && this.detailContext.clickedTime != null) {
+        this.markerInput = formatDateTime(this.detailContext.clickedTime);
+      }
+
+      this.markers = [];
+    },
+    addMarker() {
+      this.error = '';
+
+      const time = parseDateTime(this.markerInput);
+      if (time == null) {
+        this.error = 'Time format should be yyyy-MM-dd HH:mm:ss.';
+        return;
+      }
+
+      const id = `marker-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const next = [...this.markers, { id, time }];
+      next.sort((a, b) => a.time - b.time);
+      this.markers = next;
+    },
+    removeMarker(markerId) {
+      this.markers = this.markers.filter((item) => item.id !== markerId);
+    },
+    clearMarkers() {
+      this.markers = [];
+    }
+  }
+};
+</script>
+
+<style scoped>
+.sy-detail-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+h3 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.lede {
+  margin: 0;
+  color: #cbd5f5;
+  opacity: 0.9;
+}
+
+.detail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #e2e8f0;
+}
+
+.toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  min-width: 280px;
+  flex: 1;
+  color: #e2e8f0;
+}
+
+input[type='text'] {
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e2e8f0;
+  padding: 8px 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.btn {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+}
+
+.btn:hover:enabled {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.btn.ghost {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.error {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 13px;
+}
+
+.empty {
+  padding: 18px 16px;
+  border: 1px dashed rgba(148, 163, 184, 0.4);
+  border-radius: 12px;
+  color: #94a3b8;
+}
+</style>
