@@ -8,6 +8,8 @@
         class="sy-marker-btn"
         type="button"
         :style="{ left: `${item.x}px`, top: `${item.y}px` }"
+        @mouseenter="onMarkerButtonEnter(item.id)"
+        @mouseleave="onMarkerButtonLeave"
         @click="$emit('remove-marker', item.id)"
       >
         x
@@ -32,13 +34,32 @@ const CHART_CONFIG = Object.freeze({
     verticalAlign: 'bottom',
     rotate: 18,
     color: '#1d4ed8',
-    backgroundColor: 'rgba(37, 99, 235, 0.12)',
+    backgroundColor: '#dbeafe',
     borderColor: 'rgba(37, 99, 235, 0.35)'
   },
   markerDelete: {
     radius: 10,
     offsetX: 0,
     offsetY: 0
+  },
+  markerHoverThreshold: 10,
+  markerLabelRightRatio: 0.7,
+  markerLabelThemes: {
+    event: {
+      textColor: '#1d4ed8',
+      backgroundColor: '#dbeafe',
+      borderColor: '#2563eb'
+    },
+    warning: {
+      textColor: '#92400e',
+      backgroundColor: '#fef3c7',
+      borderColor: '#f59e0b'
+    },
+    error: {
+      textColor: '#b91c1c',
+      backgroundColor: '#fee2e2',
+      borderColor: '#ef4444'
+    }
   },
   slider: {
     top: 16,
@@ -106,9 +127,11 @@ export default {
       scrollCategories: [],
       pinnedIntervals: [],
       scrollIntervals: [],
-      activeMarkerId: null,
-      ignoreNextZrClick: false,
-      dragOrigin: null,
+      hoveredMarkerId: null,
+      hoverClearTimer: null,
+      isHoveringMarkerLine: false,
+      isHoveringMarkerLabel: false,
+      isHoveringMarkerButton: false,
       selectedCategoryIndex: null,
       domainStart: 0,
       domainEnd: 0,
@@ -116,7 +139,8 @@ export default {
       viewEnd: 0,
       cursorStart: 0,
       cursorEnd: 0,
-      isSyncingTopSlider: false
+      isSyncingTopSlider: false,
+      layoutCache: null
     };
   },
   watch: {
@@ -145,6 +169,9 @@ export default {
     this.teardownChart();
   },
   methods: {
+    // =====================
+    // 차트 라이프사이클
+    // =====================
     setData(payload = {}) {
       const categories = Array.isArray(payload.categories) ? payload.categories : [];
       const intervals = Array.isArray(payload.intervals) ? payload.intervals : [];
@@ -195,7 +222,10 @@ export default {
       if (!el) return;
 
       this.chart = echarts.init(el);
-      this.chart.setOption(this.buildOption(), { notMerge: true });
+      this.applyOptionPatch(this.buildOption(), {
+        notMerge: true,
+        lazyUpdate: false
+      });
       this.updateGridLayout();
 
       this.bindChartEvents();
@@ -207,7 +237,10 @@ export default {
     },
     refreshChart() {
       if (!this.chart) return;
-      this.chart.setOption(this.buildOption(), { notMerge: true });
+      this.applyOptionPatch(this.buildOption(), {
+        notMerge: true,
+        lazyUpdate: false
+      });
       this.updateGridLayout();
       this.updateMarkerLines();
       this.updateSelectionLines();
@@ -216,33 +249,37 @@ export default {
     },
     teardownChart() {
       if (!this.chart) return;
+      this.cancelHoverClear();
       this.unbindChartEvents();
       this.chart.dispose();
       this.chart = null;
     },
+    // =====================
+    // 이벤트 바인딩
+    // =====================
     bindChartEvents() {
       if (!this.chart) return;
       this.chart.on('datazoom', this.onDataZoom);
       this.chart.on('click', this.onChartClick);
+      this.chart.on('mouseover', this.onChartMouseOver);
+      this.chart.on('mouseout', this.onChartMouseOut);
       const zr = this.chart.getZr();
       if (!zr) return;
-      zr.on('click', this.onZrClick);
       zr.on('mousewheel', this.onChartWheel);
-      zr.on('mousedown', this.onZrMouseDown);
       zr.on('mousemove', this.onZrMouseMove);
-      zr.on('mouseup', this.onZrMouseUp);
+      zr.on('globalout', this.onZrGlobalOut);
     },
     unbindChartEvents() {
       if (!this.chart) return;
       this.chart.off('datazoom', this.onDataZoom);
       this.chart.off('click', this.onChartClick);
+      this.chart.off('mouseover', this.onChartMouseOver);
+      this.chart.off('mouseout', this.onChartMouseOut);
       const zr = this.chart.getZr();
       if (!zr) return;
-      zr.off('click', this.onZrClick);
       zr.off('mousewheel', this.onChartWheel);
-      zr.off('mousedown', this.onZrMouseDown);
       zr.off('mousemove', this.onZrMouseMove);
-      zr.off('mouseup', this.onZrMouseUp);
+      zr.off('globalout', this.onZrGlobalOut);
     },
     resizeChart() {
       if (!this.chart) return;
@@ -250,6 +287,9 @@ export default {
       this.updateGridLayout();
       this.updateMarkerButtons();
     },
+    // =====================
+    // 레이아웃/스크롤
+    // =====================
     getLayoutMetrics() {
       const { grid, slider } = CHART_CONFIG;
       const sliderBottom = slider.top + slider.height + slider.gap;
@@ -297,6 +337,44 @@ export default {
         }
       };
     },
+    applyOptionPatch(option, config) {
+      if (!this.chart) return;
+      const settings = {
+        notMerge: false,
+        lazyUpdate: true
+      };
+      if (config) {
+        Object.assign(settings, config);
+      }
+      this.chart.setOption(option, settings);
+    },
+    hasLayoutChanged(layout) {
+      const keys = [
+        'sliderBottom',
+        'gridBottom',
+        'labelTop',
+        'labelHeight',
+        'pinnedHeight',
+        'pinnedTop',
+        'mainTop'
+      ];
+      const cache = this.layoutCache;
+
+      if (!cache) {
+        this.layoutCache = { ...layout };
+        return true;
+      }
+
+      for (let index = 0; index < keys.length; index += 1) {
+        const key = keys[index];
+        if (cache[key] !== layout[key]) {
+          this.layoutCache = { ...layout };
+          return true;
+        }
+      }
+
+      return false;
+    },
     getYAxisScrollWindow() {
       const total = this.scrollCategories.length;
       if (!total) {
@@ -330,7 +408,7 @@ export default {
       const option = this.chart.getOption();
       const dataZoom = option && option.dataZoom;
       if (!Array.isArray(dataZoom)) return null;
-      return dataZoom.find((item) => item && item.id === id) || null;
+      return dataZoom.find((item) => item && item.id === id) ?? null;
     },
     scrollYAxis(event) {
       if (!this.chart || !event) return;
@@ -408,9 +486,11 @@ export default {
     updateGridLayout() {
       if (!this.chart) return;
       const layout = this.getLayoutMetrics();
+      if (!this.hasLayoutChanged(layout)) return;
       const dataZoomLayout = this.getDataZoomLayout(layout);
 
-      this.chart.setOption({
+      this.applyOptionPatch(
+        {
         grid: this.buildGridOptions(layout),
         dataZoom: [
           {
@@ -426,20 +506,16 @@ export default {
             ...dataZoomLayout.y
           }
         ]
-      });
+      },
+        {
+          lazyUpdate: false
+        }
+      );
     },
+    // =====================
+    // 차트 인터랙션
+    // =====================
     onChartClick(params) {
-      this.ignoreNextZrClick = true;
-      const markerId = this.getMarkerIdFromEvent(params);
-      if (markerId != null) {
-        this.activeMarkerId =
-          this.activeMarkerId === markerId ? null : markerId;
-        this.updateMarkerButtons();
-        return;
-      }
-      if (this.activeMarkerId != null) {
-        this.clearActiveMarker();
-      }
       if (!params || params.seriesType !== 'custom') return;
       if (!params.value || typeof params.value[0] !== 'number') return;
 
@@ -454,40 +530,155 @@ export default {
       this.selectedCategoryIndex = categoryIndex;
       this.updateSelectionLines();
     },
-    onZrClick() {
-      if (this.ignoreNextZrClick) {
-        this.ignoreNextZrClick = false;
-        return;
-      }
-      this.clearActiveMarker();
+    onChartMouseOver(params) {
+      const markerId = this.getMarkerIdFromEvent(params);
+      if (markerId == null) return;
+      this.isHoveringMarkerLabel = true;
+      this.cancelHoverClear();
+      this.setHoveredMarker(markerId);
+    },
+    onChartMouseOut(params) {
+      const markerId = this.getMarkerIdFromEvent(params);
+      if (markerId == null) return;
+      this.isHoveringMarkerLabel = false;
+      this.scheduleHoverClear();
     },
     onChartWheel(event) {
-      this.clearActiveMarker();
       this.scrollYAxis(event);
     },
-    onZrMouseDown(event) {
-      if (this.activeMarkerId == null) return;
-      if (!event) return;
-      this.dragOrigin = { x: event.offsetX, y: event.offsetY };
-    },
     onZrMouseMove(event) {
-      if (!this.dragOrigin || this.activeMarkerId == null) return;
       if (!event) return;
-      const dx = event.offsetX - this.dragOrigin.x;
-      const dy = event.offsetY - this.dragOrigin.y;
-      if (dx * dx + dy * dy >= 16) {
-        this.dragOrigin = null;
-        this.clearActiveMarker();
+      if (this.isHoveringMarkerButton) return;
+
+      const markerId = this.findHoveredMarkerId(event);
+      if (markerId != null) {
+        this.isHoveringMarkerLine = true;
+        this.cancelHoverClear();
+        this.setHoveredMarker(markerId);
+        return;
       }
+
+      this.isHoveringMarkerLine = false;
+      this.scheduleHoverClear();
     },
-    onZrMouseUp() {
-      this.dragOrigin = null;
+    onZrGlobalOut() {
+      this.isHoveringMarkerLine = false;
+      this.isHoveringMarkerLabel = false;
+      this.scheduleHoverClear();
     },
-    clearActiveMarker() {
-      if (this.activeMarkerId == null) return;
-      this.activeMarkerId = null;
+    findHoveredMarkerId(event) {
+      if (!this.chart) return null;
+
+      const offsetX = event.offsetX;
+      const offsetY = event.offsetY;
+      if (offsetX == null || offsetY == null) return null;
+
+      const mainGridRect = this.getGridRect(CHART_CONFIG.index.grid.main);
+      const pinnedGridRect = this.getGridRect(CHART_CONFIG.index.grid.pinned);
+      const gridRects = [mainGridRect, pinnedGridRect].filter(
+        (rect) => rect && rect.height > 0
+      );
+
+      const isInsideGrid = gridRects.some((rect) => {
+        const withinX = offsetX >= rect.x && offsetX <= rect.x + rect.width;
+        const withinY = offsetY >= rect.y && offsetY <= rect.y + rect.height;
+        return withinX && withinY;
+      });
+
+      if (!isInsideGrid) return null;
+
+      const markers = this.markers ?? [];
+      const threshold = CHART_CONFIG.markerHoverThreshold;
+      let closestId = null;
+      let minDistance = threshold + 1;
+
+      markers.forEach((marker) => {
+        if (!marker || marker.time == null || marker.id == null) return;
+        const markerTime = this.toTimeValue(marker.time);
+        if (markerTime == null) return;
+        const lineX = this.getAxisPixelFromValue(
+          markerTime,
+          CHART_CONFIG.index.axis.main
+        );
+        if (lineX == null) return;
+        if (
+          mainGridRect &&
+          (lineX < mainGridRect.x ||
+            lineX > mainGridRect.x + mainGridRect.width)
+        ) {
+          return;
+        }
+
+        const distance = Math.abs(offsetX - lineX);
+        if (distance > threshold) return;
+        if (marker.id === this.hoveredMarkerId) {
+          closestId = marker.id;
+          minDistance = distance;
+          return;
+        }
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestId = marker.id;
+        }
+      });
+
+      return closestId;
+    },
+    // =====================
+    // 마커 호버 상태
+    // =====================
+    setHoveredMarker(markerId) {
+      if (this.hoveredMarkerId === markerId) return;
+      this.hoveredMarkerId = markerId;
+      this.applyHoverState();
+    },
+    clearHoveredMarker() {
+      if (this.hoveredMarkerId == null) return;
+      this.hoveredMarkerId = null;
+      this.applyHoverState();
+    },
+    applyHoverState() {
+      this.updateMarkerLines();
       this.updateMarkerButtons();
     },
+    scheduleHoverClear() {
+      this.cancelHoverClear();
+      if (
+        this.isHoveringMarkerLine ||
+        this.isHoveringMarkerLabel ||
+        this.isHoveringMarkerButton
+      ) {
+        return;
+      }
+      this.hoverClearTimer = setTimeout(() => {
+        this.hoverClearTimer = null;
+        if (
+          this.isHoveringMarkerLine ||
+          this.isHoveringMarkerLabel ||
+          this.isHoveringMarkerButton
+        ) {
+          return;
+        }
+        this.clearHoveredMarker();
+      }, 0);
+    },
+    cancelHoverClear() {
+      if (this.hoverClearTimer == null) return;
+      clearTimeout(this.hoverClearTimer);
+      this.hoverClearTimer = null;
+    },
+    onMarkerButtonEnter(markerId) {
+      this.isHoveringMarkerButton = true;
+      this.cancelHoverClear();
+      this.setHoveredMarker(markerId);
+    },
+    onMarkerButtonLeave() {
+      this.isHoveringMarkerButton = false;
+      this.scheduleHoverClear();
+    },
+    // =====================
+    // 오버레이 업데이트
+    // =====================
     updateSelectionLines() {
       if (!this.chart) return;
 
@@ -503,7 +694,7 @@ export default {
         }
       }
 
-      this.chart.setOption({
+      this.applyOptionPatch({
         series: [
           {
             id: 'sy-selection-main',
@@ -525,14 +716,68 @@ export default {
       const data = params.data;
       return data && data.markerId != null ? data.markerId : null;
     },
-    getActiveMarkers() {
-      if (this.activeMarkerId == null) return [];
-      return (this.markers || []).filter(
+    getHoveredMarkers() {
+      if (this.hoveredMarkerId == null) return [];
+      const markers = this.markers ?? [];
+      return markers.filter(
         (marker) =>
           marker &&
           marker.time != null &&
-          marker.id === this.activeMarkerId
+          marker.id === this.hoveredMarkerId
       );
+    },
+    getRightLabelThreshold() {
+      const start = this.viewStart ?? this.domainStart;
+      const end = this.viewEnd ?? this.domainEnd;
+      if (start == null || end == null) return null;
+      const span = end - start;
+      if (span <= 0) return null;
+      return start + span * CHART_CONFIG.markerLabelRightRatio;
+    },
+    resolveMarkerType(value) {
+      const text = String(value ?? '').toLowerCase();
+      if (text === 'warning' || text === 'warn') return 'warning';
+      if (text === 'error' || text === 'err') return 'error';
+      return 'event';
+    },
+    getMarkerLabelStyle(marker) {
+      const markerType = marker && marker.type != null ? marker.type : '';
+      const typeKey = this.resolveMarkerType(markerType);
+      const themes = CHART_CONFIG.markerLabelThemes;
+      const theme = themes[typeKey] ?? themes.event;
+      return {
+        color: theme.textColor,
+        backgroundColor: theme.backgroundColor,
+        borderColor: theme.borderColor
+      };
+    },
+    buildMarkerLinePoint(marker) {
+      if (!marker || marker.time == null) return null;
+      const markerTime = this.toTimeValue(marker.time);
+      if (markerTime == null) return null;
+      return {
+        xAxis: markerTime,
+        markerId: marker.id
+      };
+    },
+    buildMarkerLabelEntry(marker, showLabel) {
+      const point = this.buildMarkerLinePoint(marker);
+      if (!point) return null;
+      const labelStyle = this.getMarkerLabelStyle(marker);
+      const labelVisible = showLabel ?? true;
+
+      return {
+        xAxis: point.xAxis,
+        markerId: point.markerId,
+        markerCode: marker.code ?? '',
+        markerType: marker.type ?? '',
+        label: {
+          show: labelVisible,
+          color: labelStyle.color,
+          backgroundColor: labelStyle.backgroundColor,
+          borderColor: labelStyle.borderColor
+        }
+      };
     },
     getClampedCursorRange() {
       const topMin = this.viewStart != null ? this.viewStart : this.domainStart;
@@ -549,6 +794,9 @@ export default {
         end: clampedEnd
       };
     },
+    // =====================
+    // 차트 옵션 구성
+    // =====================
     buildOption() {
       const layout = this.getLayoutMetrics();
       const cursorRange = this.getClampedCursorRange();
@@ -763,7 +1011,19 @@ export default {
           yAxisIndex: index.axis.pinned,
           silent: true
         }),
+        this.buildHoverMarkerLineSeries({
+          id: 'sy-markers-hover-main',
+          xAxisIndex: index.axis.main,
+          yAxisIndex: index.axis.main
+        }),
+        this.buildHoverMarkerLineSeries({
+          id: 'sy-markers-hover-pinned',
+          xAxisIndex: index.axis.pinned,
+          yAxisIndex: index.axis.pinned
+        }),
         this.buildMarkerLabelSeries(),
+        this.buildRightMarkerLabelSeries(),
+        this.buildHoverMarkerLabelSeries(),
         this.buildCursorOverlaySeries(cursorRange)
       ];
     },
@@ -838,22 +1098,79 @@ export default {
         }
       };
     },
-    buildMarkerLabelSeries() {
-      const { markerLabel, lineStyle, index } = CHART_CONFIG;
+    buildHoverMarkerLineSeries(options) {
+      const { id, xAxisIndex, yAxisIndex } = options;
+      const { lineStyle } = CHART_CONFIG;
       return {
-        id: 'sy-markers-labels',
+        id,
         type: 'scatter',
-        xAxisIndex: index.axis.label,
-        yAxisIndex: index.axis.label,
+        xAxisIndex,
+        yAxisIndex,
         data: [],
-        silent: false,
+        silent: true,
         emphasis: {
           disabled: true
         },
         markLine: {
           symbol: ['none', 'none'],
           precision: 0,
-          z: 22,
+          z: 30,
+          lineStyle: {
+            ...lineStyle.marker
+          },
+          emphasis: {
+            disabled: true
+          },
+          label: {
+            show: false
+          },
+          data: []
+        }
+      };
+    },
+    buildMarkerLabelSeries() {
+      return this.buildMarkerLabelSeriesConfig({
+        id: 'sy-markers-labels',
+        zIndex: 22,
+        silent: false
+      });
+    },
+    buildRightMarkerLabelSeries() {
+      return this.buildMarkerLabelSeriesConfig({
+        id: 'sy-markers-labels-right',
+        zIndex: 24,
+        silent: false
+      });
+    },
+    buildHoverMarkerLabelSeries() {
+      return this.buildMarkerLabelSeriesConfig({
+        id: 'sy-markers-hover-labels',
+        zIndex: 32,
+        silent: false
+      });
+    },
+    buildMarkerLabelSeriesConfig(options) {
+      const { markerLabel, lineStyle, index } = CHART_CONFIG;
+      const id = options.id;
+      const zIndex = options.zIndex;
+      const silent = options.silent ?? false;
+
+      const defaultTheme = CHART_CONFIG.markerLabelThemes.event;
+
+      return {
+        id,
+        type: 'scatter',
+        xAxisIndex: index.axis.label,
+        yAxisIndex: index.axis.label,
+        data: [],
+        silent,
+        emphasis: {
+          disabled: true
+        },
+        markLine: {
+          symbol: ['none', 'none'],
+          precision: 0,
+          z: zIndex,
           lineStyle: {
             ...lineStyle.markerLabel
           },
@@ -868,17 +1185,16 @@ export default {
             distance: markerLabel.distance,
             offset: [0, markerLabel.offsetY],
             rotate: markerLabel.rotate,
-            color: markerLabel.color,
-            backgroundColor: markerLabel.backgroundColor,
-            borderColor: markerLabel.borderColor,
+            color: defaultTheme.textColor,
+            backgroundColor: defaultTheme.backgroundColor,
+            borderColor: defaultTheme.borderColor,
             borderWidth: markerLabel.borderWidth,
             padding: markerLabel.padding,
             borderRadius: 6,
             fontSize: markerLabel.fontSize,
             fontFamily: markerLabel.fontFamily,
             formatter: (params) => {
-              const x = params && params.data && params.data.xAxis;
-              return this.formatDateTime(x);
+              return this.getMarkerLabelText(params);
             }
           },
           data: []
@@ -994,6 +1310,9 @@ export default {
         }
       );
     },
+    // =====================
+    // 유틸리티
+    // =====================
     resolveDomain(payload, intervals) {
       const providedStart = this.toTimeValue(payload.domainStart);
       const providedEnd = this.toTimeValue(payload.domainEnd);
@@ -1086,7 +1405,7 @@ export default {
         options.axisMin != null ? options.axisMin : this.domainStart;
       const axisMax =
         options.axisMax != null ? options.axisMax : this.domainEnd;
-      const dataZoomId = options.dataZoomId || 'dz_bottom';
+      const dataZoomId = options.dataZoomId ?? 'dz_bottom';
       const fallbackStart =
         options.fallbackStart != null ? options.fallbackStart : this.viewStart;
       const fallbackEnd =
@@ -1159,7 +1478,7 @@ export default {
 
       batches.forEach((batch) => {
         if (!batch) return;
-        const zoomId = this.getDataZoomId(batch) || this.getDataZoomId(event);
+        const zoomId = this.getDataZoomId(batch) ?? this.getDataZoomId(event);
 
         if (zoomId === 'dz_y') {
           return;
@@ -1194,7 +1513,7 @@ export default {
           {
             axisMin: this.domainStart,
             axisMax: this.domainEnd,
-            dataZoomId: zoomId || 'dz_bottom',
+            dataZoomId: zoomId ?? 'dz_bottom',
             fallbackStart: this.viewStart,
             fallbackEnd: this.viewEnd
           }
@@ -1209,6 +1528,7 @@ export default {
       }
       if (viewUpdated) {
         this.syncTopSlider();
+        this.updateMarkerLines();
       }
       if (viewUpdated || cursorUpdated) {
         this.updateMarkerButtons();
@@ -1268,14 +1588,44 @@ export default {
     updateMarkerLines() {
       if (!this.chart) return;
 
-      const markerLines = (this.markers || [])
-        .filter((marker) => marker && marker.time != null)
-        .map((marker) => ({
-          xAxis: marker.time,
-          markerId: marker.id
-        }));
+      const markerLines = [];
+      const baseLabelLines = [];
+      const rightLabelLines = [];
+      const hoverLineData = [];
+      const hoverLabelData = [];
+      const markers = this.markers ?? [];
+      const rightThreshold = this.getRightLabelThreshold();
+      const hoveredId = this.hoveredMarkerId;
 
-      this.chart.setOption({
+      markers.forEach((marker) => {
+        const linePoint = this.buildMarkerLinePoint(marker);
+        if (!linePoint) return;
+        markerLines.push(linePoint);
+
+        const isHovered =
+          hoveredId != null && marker && marker.id === hoveredId;
+        const labelEntry = this.buildMarkerLabelEntry(marker, !isHovered);
+        if (labelEntry) {
+          if (rightThreshold != null && labelEntry.xAxis >= rightThreshold) {
+            rightLabelLines.push(labelEntry);
+          } else {
+            baseLabelLines.push(labelEntry);
+          }
+        }
+
+        if (isHovered) {
+          const hoverLine = this.buildMarkerLinePoint(marker);
+          if (hoverLine) {
+            hoverLineData.push(hoverLine);
+          }
+          const hoverLabel = this.buildMarkerLabelEntry(marker, true);
+          if (hoverLabel) {
+            hoverLabelData.push(hoverLabel);
+          }
+        }
+      });
+
+      this.applyOptionPatch({
         series: [
           {
             id: 'sy-markers-main',
@@ -1292,17 +1642,48 @@ export default {
           {
             id: 'sy-markers-labels',
             markLine: {
-              data: markerLines
+              data: baseLabelLines
+            }
+          },
+          {
+            id: 'sy-markers-labels-right',
+            markLine: {
+              data: rightLabelLines
+            }
+          },
+          {
+            id: 'sy-markers-hover-main',
+            markLine: {
+              data: hoverLineData
+            }
+          },
+          {
+            id: 'sy-markers-hover-pinned',
+            markLine: {
+              data: hoverLineData
+            }
+          },
+          {
+            id: 'sy-markers-hover-labels',
+            markLine: {
+              data: hoverLabelData
             }
           }
         ]
       });
     },
+    getMarkerLabelText(params) {
+      const data = params && params.data ? params.data : null;
+      const markerCode = data && data.markerCode != null ? data.markerCode : '';
+      if (markerCode) return String(markerCode);
+      const xValue = data && data.xAxis != null ? data.xAxis : null;
+      return this.formatDateTime(xValue);
+    },
     updateCursorLines() {
       if (!this.chart) return;
       const cursorRange = this.getClampedCursorRange();
 
-      this.chart.setOption({
+      this.applyOptionPatch({
         series: [
           {
             id: 'sy-cursors-overlay',
@@ -1322,7 +1703,7 @@ export default {
       const cursorRange = this.getClampedCursorRange();
 
       this.isSyncingTopSlider = true;
-      this.chart.setOption({
+      this.applyOptionPatch({
         xAxis: [
           {
             id: 'x-label',
@@ -1360,13 +1741,13 @@ export default {
       }
 
       const { index, markerDelete } = CHART_CONFIG;
-      const markers = this.getActiveMarkers();
+      const markers = this.getHoveredMarkers();
       const mainGridRect = this.getGridRect(index.grid.main);
       const pinnedGridRect = this.getGridRect(index.grid.pinned);
       const buttons = [];
 
       if (!markers.length) {
-        this.activeMarkerId = null;
+        this.hoveredMarkerId = null;
         this.markerButtons = [];
         return;
       }
