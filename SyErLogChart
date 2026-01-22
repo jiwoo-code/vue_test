@@ -40,21 +40,57 @@ export default {
   },
   mounted() {
     this.initChart();
+    window.addEventListener('resize', this.resizeChart, { passive: true });
   },
   beforeDestroy() {
+    window.removeEventListener('resize', this.resizeChart);
     this.teardownChart();
   },
   methods: {
+    // =====================
+    // 차트 라이프사이클
+    // =====================
     initChart() {
       const el = this.$refs.chart;
       if (!el) return;
       this.chart = echarts.init(el);
-      this.chart.setOption(this.buildOption(), { notMerge: true });
+      this.chart.setOption(this.buildBaseOption(), { notMerge: true });
+      this.applyDataUpdate(true);
       this.bindEvents();
     },
     refreshChart() {
       if (!this.chart) return;
-      this.chart.setOption(this.buildOption(), { notMerge: true });
+      this.applyDataUpdate(false);
+    },
+    applyDataUpdate(isInit) {
+      if (!this.chart) return;
+      const option = {
+        xAxis: {
+          min: this.domainStart,
+          max: this.domainEnd
+        },
+        yAxis: {
+          data: this.categories
+        },
+        dataZoom: [
+          {
+            id: 'erlog-slider',
+            startValue: this.domainStart,
+            endValue: this.domainEnd
+          }
+        ],
+        series: [
+          {
+            id: 'erlog-series',
+            data: this.seriesData
+          }
+        ]
+      };
+
+      this.chart.setOption(option, {
+        notMerge: false,
+        lazyUpdate: !isInit
+      });
     },
     teardownChart() {
       if (!this.chart) return;
@@ -71,20 +107,25 @@ export default {
       if (!this.chart) return;
       this.chart.resize();
     },
+    // =====================
+    // 데이터 준비
+    // =====================
     prepareSeries() {
       const items = Array.isArray(this.items) ? this.items : [];
       const categories = [];
       const seriesData = [];
+      const categoryIndexMap = new Map();
       let minTime = null;
       let maxTime = null;
 
       items.forEach((item) => {
         if (!item) return;
-        const eqpId = item.eqpId || 'EQP-UNKNOWN';
-        let categoryIndex = categories.indexOf(eqpId);
-        if (categoryIndex === -1) {
+        const eqpId = item.eqpId ?? 'EQP-UNKNOWN';
+        let categoryIndex = categoryIndexMap.get(eqpId);
+        if (categoryIndex == null) {
+          categoryIndex = categories.length;
           categories.push(eqpId);
-          categoryIndex = categories.length - 1;
+          categoryIndexMap.set(eqpId, categoryIndex);
         }
 
         const start = this.toTimeValue(item.lotStart);
@@ -127,7 +168,10 @@ export default {
       }
       return COLOR_RULES.incompleteSy;
     },
-    buildOption() {
+    // =====================
+    // 차트 옵션
+    // =====================
+    buildBaseOption() {
       return {
         backgroundColor: '#ffffff',
         animation: false,
@@ -158,8 +202,8 @@ export default {
             bottom: 18,
             height: 22,
             labelFormatter: '',
-            startValue: this.domainStart,
-            endValue: this.domainEnd
+            startValue: 0,
+            endValue: 0
           },
           {
             id: 'erlog-inside',
@@ -173,8 +217,8 @@ export default {
         ],
         xAxis: {
           type: 'time',
-          min: this.domainStart,
-          max: this.domainEnd,
+          min: 0,
+          max: 0,
           minInterval: 30 * 60 * 1000,
           splitNumber: 48,
           axisLine: {
@@ -198,7 +242,7 @@ export default {
         yAxis: {
           type: 'category',
           inverse: true,
-          data: this.categories,
+          data: [],
           axisTick: { show: false },
           axisLine: { show: false },
           axisLabel: {
@@ -217,11 +261,14 @@ export default {
               x: [1, 2],
               y: 0
             },
-            data: this.seriesData
+            data: []
           }
         ]
       };
     },
+    // =====================
+    // 시리즈 렌더링
+    // =====================
     renderItem(params, api) {
       const categoryIndex = api.value(0);
       const start = api.coord([api.value(1), categoryIndex]);
@@ -252,6 +299,9 @@ export default {
         }
       );
     },
+    // =====================
+    // 차트 인터랙션
+    // =====================
     onChartClick(params) {
       if (!params || params.seriesId !== 'erlog-series' || !params.data) return;
       const payload = params.data.payload;
@@ -289,6 +339,9 @@ export default {
 
       return start;
     },
+    // =====================
+    // 툴팁 헬퍼
+    // =====================
     formatTooltip(params) {
       if (!params || !params.data || !params.data.payload) return '';
       const payload = params.data.payload;
@@ -360,6 +413,9 @@ export default {
       }
       return null;
     },
+    // =====================
+    // 포맷팅
+    // =====================
     formatAxisLabel(value) {
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return '';
@@ -371,6 +427,9 @@ export default {
     pad2(value) {
       return String(value).padStart(2, '0');
     },
+    // =====================
+    // 시간 파싱
+    // =====================
     toTimeValue(value) {
       if (value == null) return null;
       if (typeof value === 'number') return value;
@@ -381,7 +440,7 @@ export default {
     },
     parseDateTimeMs(value) {
       const match = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d{3})$/.exec(
-        String(value || '').trim()
+        String(value ?? '').trim()
       );
       if (!match) return null;
       const [, year, month, day, hour, minute, second, ms] = match;
