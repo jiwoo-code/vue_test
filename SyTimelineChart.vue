@@ -255,14 +255,17 @@ export default {
       const sliderBottom = slider.top + slider.height + slider.gap;
       const gridBottom = grid.bottom;
       const chartHeight = this.chart ? this.chart.getHeight() : 640;
-      const totalCategories = Math.max(this.categories.length, 1);
       const labelHeight = Math.max(0, slider.labelGap);
       const usableHeight = Math.max(
         0,
         chartHeight - gridBottom - sliderBottom - labelHeight
       );
-      const rowHeight = totalCategories ? usableHeight / totalCategories : usableHeight;
-      const pinnedHeight = rowHeight;
+
+      const hasPinned = Boolean(this.pinnedCategory);
+      const visibleMain = Math.max(this.getVisibleMainCount(), 1);
+      const totalVisible = visibleMain + (hasPinned ? 1 : 0);
+      const rowHeight = totalVisible ? usableHeight / totalVisible : usableHeight;
+      const pinnedHeight = hasPinned ? rowHeight : 0;
       const labelTop = sliderBottom;
       const pinnedTop = sliderBottom + labelHeight;
       const mainTop = pinnedTop + pinnedHeight;
@@ -293,6 +296,77 @@ export default {
           bottom: layout.gridBottom
         }
       };
+    },
+    getYAxisScrollWindow() {
+      const total = this.scrollCategories.length;
+      if (!total) {
+        return { startValue: 0, endValue: 0 };
+      }
+
+      const maxVisible = 12;
+      const endValue = Math.min(total - 1, maxVisible - 1);
+      return { startValue: 0, endValue };
+    },
+    getVisibleMainCount() {
+      const total = this.scrollCategories.length;
+      if (!total) return 0;
+
+      const dz = this.getDataZoomById('dz_y');
+      let startValue = dz && dz.startValue != null ? dz.startValue : null;
+      let endValue = dz && dz.endValue != null ? dz.endValue : null;
+
+      if (startValue == null || endValue == null) {
+        const fallback = this.getYAxisScrollWindow();
+        startValue = fallback.startValue;
+        endValue = fallback.endValue;
+      }
+
+      const start = this.clamp(Math.round(startValue), 0, total - 1);
+      const end = this.clamp(Math.round(endValue), 0, total - 1);
+      return Math.max(1, end - start + 1);
+    },
+    getDataZoomById(id) {
+      if (!this.chart || !id) return null;
+      const option = this.chart.getOption();
+      const dataZoom = option && option.dataZoom;
+      if (!Array.isArray(dataZoom)) return null;
+      return dataZoom.find((item) => item && item.id === id) || null;
+    },
+    scrollYAxis(event) {
+      if (!this.chart || !event) return;
+      const total = this.scrollCategories.length;
+      if (!total) return;
+
+      const delta =
+        typeof event.wheelDelta === 'number'
+          ? event.wheelDelta
+          : typeof event.deltaY === 'number'
+            ? -event.deltaY
+            : 0;
+      if (!delta) return;
+
+      const direction = delta > 0 ? -1 : 1;
+      const fallback = this.getYAxisScrollWindow();
+      const dz = this.getDataZoomById('dz_y');
+      let startValue =
+        dz && dz.startValue != null ? dz.startValue : fallback.startValue;
+      let endValue = dz && dz.endValue != null ? dz.endValue : fallback.endValue;
+
+      startValue = Math.round(startValue);
+      endValue = Math.round(endValue);
+      const window = Math.max(0, endValue - startValue);
+      const maxStart = Math.max(0, total - 1 - window);
+      const nextStart = this.clamp(startValue + direction, 0, maxStart);
+      const nextEnd = nextStart + window;
+
+      if (nextStart === startValue && nextEnd === endValue) return;
+
+      this.chart.dispatchAction({
+        type: 'dataZoom',
+        dataZoomId: 'dz_y',
+        startValue: nextStart,
+        endValue: nextEnd
+      });
     },
     buildGridOptions(layout) {
       const { grid } = CHART_CONFIG;
@@ -387,8 +461,9 @@ export default {
       }
       this.clearActiveMarker();
     },
-    onChartWheel() {
+    onChartWheel(event) {
       this.clearActiveMarker();
+      this.scrollYAxis(event);
     },
     onZrMouseDown(event) {
       if (this.activeMarkerId == null) return;
@@ -504,6 +579,7 @@ export default {
     buildDataZoomOptions(layout, cursorRange) {
       const dataZoomLayout = this.getDataZoomLayout(layout);
       const { index } = CHART_CONFIG;
+      const yWindow = this.getYAxisScrollWindow();
 
       return [
         {
@@ -534,7 +610,10 @@ export default {
           id: 'dz_inside',
           type: 'inside',
           xAxisIndex: [index.axis.main, index.axis.pinned],
-          filterMode: 'weakFilter'
+          filterMode: 'weakFilter',
+          zoomOnMouseWheel: false,
+          moveOnMouseWheel: false,
+          moveOnMouseMove: false
         },
         {
           id: 'dz_y',
@@ -542,6 +621,13 @@ export default {
           yAxisIndex: 0,
           filterMode: 'weakFilter',
           showDataShadow: false,
+          brushSelect: false,
+          zoomLock: true,
+          showDetail: false,
+          handleSize: 0,
+          moveHandleSize: 0,
+          startValue: yWindow.startValue,
+          endValue: yWindow.endValue,
           right: 8,
           ...dataZoomLayout.y,
           width: 12
