@@ -469,3 +469,483 @@ export default {
   border: 1px solid rgba(15, 23, 42, 0.12);
 }
 </style>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<template>
+  <div class="sy-erlog-chart" ref="chart"></div>
+</template>
+
+<script>
+import * as echarts from 'echarts';
+
+const COLOR_RULES = Object.freeze({
+  hasSy: '#3b82f6',
+  incompleteSy: '#f59e0b',
+  reject: '#ef4444'
+});
+
+export default {
+  name: 'SyErLogChart',
+  data() {
+    return {
+      chart: null,
+      categories: [],
+      seriesData: [],
+      domainStart: 0,
+      domainEnd: 0
+    };
+  },
+  mounted() {
+    this.initChart();
+    window.addEventListener('resize', this.resizeChart, { passive: true });
+  },
+  beforeDestroy() {
+    window.removeEventListener('resize', this.resizeChart);
+    this.teardownChart();
+  },
+  methods: {
+    // =====================
+    // Public API
+    // =====================
+    setData(items) {
+      this.prepareSeries(items);
+      this.refreshChart();
+    },
+
+    // =====================
+    // Chart lifecycle
+    // =====================
+    initChart() {
+      const chartElement = this.$refs.chart;
+      if (!chartElement) return;
+
+      this.chart = echarts.init(chartElement);
+      this.chart.setOption(this.buildBaseOption(), { notMerge: true });
+
+      this.bindEvents();
+      this.resizeChart();
+    },
+
+    refreshChart() {
+      if (!this.chart) return;
+
+      const option = {
+        xAxis: { min: this.domainStart, max: this.domainEnd },
+        yAxis: { data: this.categories },
+        dataZoom: [
+          { id: 'erlog-slider', startValue: this.domainStart, endValue: this.domainEnd }
+        ],
+        series: [
+          { id: 'erlog-series', data: this.seriesData }
+        ]
+      };
+
+      this.chart.setOption(option, { notMerge: false, lazyUpdate: true });
+      this.resizeChart();
+    },
+
+    teardownChart() {
+      if (!this.chart) return;
+      this.chart.off('click', this.onChartClick);
+      this.chart.dispose();
+      this.chart = null;
+    },
+
+    bindEvents() {
+      if (!this.chart) return;
+      this.chart.off('click', this.onChartClick);
+      this.chart.on('click', this.onChartClick);
+    },
+
+    resizeChart() {
+      if (!this.chart) return;
+
+      const chartElement = this.$refs.chart;
+      if (!chartElement) return;
+
+      const rect = chartElement.getBoundingClientRect();
+      const width = Math.floor(rect.width);
+      const height = Math.floor(rect.height);
+
+      if (width < 50 || height < 50) return;
+      this.chart.resize({ width, height });
+    },
+
+    // =====================
+    // Data
+    // =====================
+    prepareSeries(rawItems) {
+      const items = Array.isArray(rawItems) ? rawItems : [];
+      const categories = [];
+      const seriesData = [];
+      const categoryIndexMap = new Map();
+
+      let minTime = null;
+      let maxTime = null;
+
+      items.forEach((item) => {
+        if (!item) return;
+
+        const eqpId = item.eqpId ?? 'EQP-UNKNOWN';
+        let categoryIndex = categoryIndexMap.get(eqpId);
+
+        if (categoryIndex == null) {
+          categoryIndex = categories.length;
+          categories.push(eqpId);
+          categoryIndexMap.set(eqpId, categoryIndex);
+        }
+
+        const start = this.toTimeValue(item.lotStart);
+        const end = this.toTimeValue(item.lotFinish);
+        if (start == null || end == null) return;
+
+        minTime = minTime == null ? start : Math.min(minTime, start);
+        maxTime = maxTime == null ? end : Math.max(maxTime, end);
+
+        seriesData.push({
+          name: item.lotId,
+          value: [categoryIndex, start, end, Math.max(0, end - start)],
+          itemStyle: { color: this.resolveColor(item) },
+          payload: { ...item }
+        });
+      });
+
+      if (minTime == null || maxTime == null) {
+        const now = Date.now();
+        minTime = now - 60 * 60 * 1000;
+        maxTime = now + 60 * 60 * 1000;
+      }
+
+      const padding = 20 * 60 * 1000;
+      this.domainStart = minTime - padding;
+      this.domainEnd = maxTime + padding;
+      this.categories = categories;
+      this.seriesData = seriesData;
+    },
+
+    resolveColor(item) {
+      if ((item.rejectWafer ?? 0) >= 1) return COLOR_RULES.reject;
+      if ((item.avgSyCount ?? 0) >= 63) return COLOR_RULES.hasSy;
+      return COLOR_RULES.incompleteSy;
+    },
+
+    // =====================
+    // Option
+    // =====================
+    buildBaseOption() {
+      return {
+        backgroundColor: '#ffffff',
+        animation: false,
+        grid: { left: 110, right: 32, top: 18, bottom: 70 },
+        tooltip: {
+          trigger: 'item',
+          confine: false,
+          appendToBody: true,
+          backgroundColor: 'transparent',
+          borderWidth: 0,
+          padding: 0,
+          extraCssText: 'box-shadow: none;',
+          formatter: this.formatTooltip
+        },
+        dataZoom: [
+          {
+            id: 'erlog-slider',
+            type: 'slider',
+            xAxisIndex: 0,
+            filterMode: 'weakFilter',
+            showDataShadow: false,
+            brushSelect: false,
+            bottom: 18,
+            height: 22,
+            labelFormatter: '',
+            startValue: 0,
+            endValue: 0
+          },
+          {
+            id: 'erlog-inside',
+            type: 'inside',
+            xAxisIndex: 0,
+            filterMode: 'weakFilter',
+            zoomOnMouseWheel: true,
+            moveOnMouseWheel: false,
+            moveOnMouseMove: false
+          }
+        ],
+        xAxis: {
+          type: 'time',
+          min: 0,
+          max: 0,
+          minInterval: 30 * 60 * 1000,
+          splitNumber: 48,
+          axisLine: { lineStyle: { color: '#cbd5e1' } },
+          axisLabel: {
+            color: '#475569',
+            interval: 0,
+            hideOverlap: true,
+            formatter: (value) => this.formatAxisLabel(value)
+          },
+          splitLine: { show: true, lineStyle: { color: '#e2e8f0' } }
+        },
+        yAxis: {
+          type: 'category',
+          inverse: true,
+          data: [],
+          axisTick: { show: false },
+          axisLine: { show: false },
+          axisLabel: { color: '#334155' }
+        },
+        series: [
+          {
+            id: 'erlog-series',
+            type: 'custom',
+            renderItem: this.renderItem,
+            itemStyle: { opacity: 0.92 },
+            encode: { x: [1, 2], y: 0 },
+            data: []
+          }
+        ]
+      };
+    },
+
+    renderItem(params, api) {
+      const categoryIndex = api.value(0);
+      const start = api.coord([api.value(1), categoryIndex]);
+      const end = api.coord([api.value(2), categoryIndex]);
+      const height = api.size([0, 1])[1] * 0.24;
+
+      const rectShape = echarts.graphic.clipRectByRect(
+        {
+          x: start[0],
+          y: start[1] - height / 2,
+          width: end[0] - start[0],
+          height
+        },
+        {
+          x: params.coordSys.x,
+          y: params.coordSys.y,
+          width: params.coordSys.width,
+          height: params.coordSys.height
+        }
+      );
+
+      if (!rectShape) return null;
+
+      return {
+        type: 'rect',
+        transition: ['shape'],
+        shape: rectShape,
+        style: api.style()
+      };
+    },
+
+    // =====================
+    // Interaction
+    // =====================
+    onChartClick(params) {
+      if (!params || params.seriesId !== 'erlog-series' || !params.data) return;
+
+      const payload = params.data.payload;
+      if (!payload) return;
+
+      const clickedTime = this.getClickedTime(params);
+
+      this.$emit('select-lot', {
+        lot: payload,
+        clickedTime
+      });
+    },
+
+    getClickedTime(params) {
+      const data = params && params.data;
+      const start = data && data.value ? data.value[1] : null;
+      const end = data && data.value ? data.value[2] : null;
+
+      if (!this.chart || !params || !params.event) return start;
+
+      const offsetX = params.event.offsetX;
+      const offsetY = params.event.offsetY;
+      if (offsetX == null || offsetY == null) return start;
+
+      const value = this.chart.convertFromPixel({ xAxisIndex: 0 }, [offsetX, offsetY]);
+      const candidate = Array.isArray(value) ? value[0] : value;
+
+      if (typeof candidate !== 'number' || Number.isNaN(candidate)) return start;
+
+      if (start != null && end != null) {
+        return Math.min(Math.max(candidate, start), end);
+      }
+
+      return candidate;
+    },
+
+    // =====================
+    // Tooltip helpers
+    // =====================
+    formatTooltip(params) {
+      if (!params || !params.data || !params.data.payload) return '';
+
+      const payload = params.data.payload;
+      const color = this.getTooltipColor(params);
+      const textColor = this.getTooltipTextColor(color);
+
+      const lines = [
+        `Lot ID: ${payload.lotId}`,
+        `Layer: ${payload.layer}`,
+        `Device: ${payload.device}`,
+        `Lot Start: ${payload.lotStart}`,
+        `Lot Finish: ${payload.lotFinish}`,
+        `Lot Size: ${payload.lotSize}`,
+        `Reject Wafer: ${payload.rejectWafer}`
+      ].join('<br/>');
+
+      return `
+        <div style="
+          background:${color};
+          color:${textColor};
+          padding:8px 10px;
+          border-radius:8px;
+          font-size:12px;
+          line-height:1.5;
+          box-shadow:0 10px 20px rgba(15,23,42,0.2);
+        ">
+          ${lines}
+        </div>
+      `;
+    },
+
+    getTooltipColor(params) {
+      if (params && params.color) return params.color;
+
+      const data = params && params.data;
+      if (data && data.itemStyle && data.itemStyle.color) return data.itemStyle.color;
+
+      return '#334155';
+    },
+
+    getTooltipTextColor(color) {
+      const rgb = this.parseColor(color);
+      if (!rgb) return '#ffffff';
+
+      const luminance = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
+      return luminance > 170 ? '#111827' : '#ffffff';
+    },
+
+    parseColor(color) {
+      if (!color) return null;
+
+      const text = String(color).trim();
+
+      if (text.startsWith('#')) {
+        const hex = text.slice(1);
+
+        if (hex.length === 3) {
+          const r = parseInt(hex[0] + hex[0], 16);
+          const g = parseInt(hex[1] + hex[1], 16);
+          const b = parseInt(hex[2] + hex[2], 16);
+          return { r, g, b };
+        }
+
+        if (hex.length === 6) {
+          const r = parseInt(hex.slice(0, 2), 16);
+          const g = parseInt(hex.slice(2, 4), 16);
+          const b = parseInt(hex.slice(4, 6), 16);
+          return { r, g, b };
+        }
+      }
+
+      const rgbMatch = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/i.exec(text);
+      if (!rgbMatch) return null;
+
+      return {
+        r: Number(rgbMatch[1]),
+        g: Number(rgbMatch[2]),
+        b: Number(rgbMatch[3])
+      };
+    },
+
+    // =====================
+    // Formatting
+    // =====================
+    formatAxisLabel(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '';
+
+      return [
+        `${this.pad2(date.getMonth() + 1)}-${this.pad2(date.getDate())}`,
+        `${this.pad2(date.getHours())}:${this.pad2(date.getMinutes())}`
+      ].join(' ');
+    },
+
+    pad2(value) {
+      return String(value).padStart(2, '0');
+    },
+
+    // =====================
+    // Time parsing
+    // =====================
+    toTimeValue(value) {
+      if (value == null) return null;
+      if (typeof value === 'number') return value;
+
+      const parsed = this.parseDateTimeMs(value);
+      if (parsed != null) return parsed;
+
+      const time = new Date(value).getTime();
+      return Number.isNaN(time) ? null : time;
+    },
+
+    parseDateTimeMs(value) {
+      const match = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d{3})$/.exec(
+        String(value ?? '').trim()
+      );
+      if (!match) return null;
+
+      const [, year, month, day, hour, minute, second, ms] = match;
+      const date = new Date(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hour),
+        Number(minute),
+        Number(second),
+        Number(ms)
+      );
+
+      return Number.isNaN(date.getTime()) ? null : date.getTime();
+    }
+  }
+};
+</script>
+
+<style scoped>
+.sy-erlog-chart {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 220px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+}
+</style>
