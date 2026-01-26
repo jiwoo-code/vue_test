@@ -18,6 +18,18 @@
         Marker time (yyyy-MM-dd HH:mm:ss)
         <input v-model="markerInput" type="text" placeholder="yyyy-MM-dd HH:mm:ss" />
       </label>
+      <label class="field">
+        Marker code
+        <input v-model="markerCode" type="text" placeholder="Code" />
+      </label>
+      <label class="field">
+        Marker type
+        <select v-model="markerType">
+          <option value="event">Event</option>
+          <option value="warning">Warning</option>
+          <option value="error">Error</option>
+        </select>
+      </label>
 
       <button type="button" class="btn" @click="addMarker">Add marker</button>
       <button type="button" class="btn ghost" :disabled="markers.length === 0" @click="clearMarkers">
@@ -94,6 +106,8 @@ export default {
     return {
       markers: [],
       markerInput: formatDateTime(Date.now()),
+      markerCode: '',
+      markerType: 'event',
       error: '',
       timelineData: {}
     };
@@ -115,6 +129,9 @@ export default {
     }
   },
   methods: {
+    setData(data) {
+      this.$refs.chart.setData(data);
+    },
     refreshTimeline() {
       this.error = '';
       if (typeof this.buildTimelineData === 'function') {
@@ -128,6 +145,8 @@ export default {
       }
 
       this.markers = [];
+      this.markerCode = '';
+      this.markerType = 'event';
     },
     addMarker() {
       this.error = '';
@@ -139,7 +158,15 @@ export default {
       }
 
       const id = `marker-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      const next = [...this.markers, { id, time }];
+      const next = [
+        ...this.markers,
+        {
+          id,
+          time,
+          code: this.markerCode ?? '',
+          type: this.markerType ?? 'event'
+        }
+      ];
       next.sort((a, b) => a.time - b.time);
       this.markers = next;
     },
@@ -175,8 +202,8 @@ h3 {
 
 .lede {
   margin: 0;
-  color: #cbd5f5;
-  opacity: 0.9;
+  color: #64748b;
+  opacity: 1;
 }
 
 .detail-meta {
@@ -184,7 +211,7 @@ h3 {
   flex-direction: column;
   gap: 4px;
   font-size: 12px;
-  color: #e2e8f0;
+  color: #475569;
 }
 
 .toolbar {
@@ -201,23 +228,33 @@ h3 {
   font-size: 13px;
   min-width: 280px;
   flex: 1;
-  color: #e2e8f0;
+  color: #334155;
 }
 
 input[type='text'] {
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.06);
-  color: #e2e8f0;
+  border: 1px solid #cbd5f5;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 8px 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+select {
+  border-radius: 8px;
+  border: 1px solid #cbd5f5;
+  background: #ffffff;
+  color: #0f172a;
   padding: 8px 10px;
   width: 100%;
   box-sizing: border-box;
 }
 
 .btn {
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.08);
-  color: #e2e8f0;
+  border: 1px solid #cbd5f5;
+  background: #ffffff;
+  color: #1f2937;
   border-radius: 10px;
   padding: 9px 12px;
   cursor: pointer;
@@ -225,13 +262,13 @@ input[type='text'] {
 }
 
 .btn:hover:enabled {
-  background: rgba(99, 102, 241, 0.2);
-  border-color: rgba(99, 102, 241, 0.5);
+  background: #f1f5f9;
+  border-color: rgba(59, 130, 246, 0.45);
 }
 
 .btn.ghost {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
+  border-color: #e2e8f0;
+  background: #f8fafc;
 }
 
 .btn:disabled {
@@ -247,8 +284,8 @@ input[type='text'] {
 
 .empty {
   padding: 18px 16px;
-  border: 1px dashed rgba(148, 163, 184, 0.4);
+  border: 1px dashed #cbd5f5;
   border-radius: 12px;
-  color: #94a3b8;
+  color: #64748b;
 }
 </style>
