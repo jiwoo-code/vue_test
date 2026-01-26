@@ -11,20 +11,20 @@
       <div class="legend">
         <div class="legend-item">
           <span class="swatch has-sy"></span>
-          <span>Has SY Data (avg >= 63)</span>
+          <span>Has SY Data</span>
         </div>
         <div class="legend-item">
           <span class="swatch incomplete"></span>
-          <span>Has Incomplete SY Data (avg < 63)</span>
+          <span>Has Incomplete SY Data</span>
         </div>
         <div class="legend-item">
           <span class="swatch reject"></span>
-          <span>Has Reject Wafer (>= 1)</span>
+          <span>Has Reject Wafer</span>
         </div>
       </div>
     </div>
 
-    <SyErLogChart :items="erLogData" @select-lot="onSelectLot" />
+    <SyErLogChart ref="chart" @select-lot="onSelectLot" />
   </div>
 </template>
 
@@ -42,9 +42,30 @@ export default {
       default: () => []
     }
   },
+  watch: {
+    erLogData: {
+      deep: true,
+      immediate: true,
+      handler(value) {
+        this.setData(value);
+      }
+    }
+  },
   methods: {
     onSelectLot(payload) {
+      console.log('메인탭 onSelectLot() payload = ', payload);
       this.$emit('select-lot', payload);
+    },
+    setData(data) {
+      const chart = this.$refs.chart;
+      if (!chart || typeof chart.setData !== 'function') return;
+      chart.setData(data);
+    },
+    hideTooltip() {
+      const chart = this.$refs.chart;
+      if (chart && typeof chart.hideTooltip === 'function') {
+        chart.hideTooltip();
+      }
     }
   }
 };
@@ -72,13 +93,14 @@ h3 {
 
 .lede {
   margin: 0;
-  color: #cbd5f5;
-  opacity: 0.9;
+  color: #64748b;
+  opacity: 1;
 }
 
 .legend-row {
   display: flex;
   justify-content: flex-end;
+  margin-top: 6px;
 }
 
 .legend {
@@ -92,7 +114,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #e2e8f0;
+  color: #334155;
 }
 
 .swatch {
