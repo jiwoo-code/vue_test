@@ -433,17 +433,20 @@ export default {
         backgroundColor: '#ffffff',
         animation: false,
         tooltip: {
-          show: false,
-          formatter: (params) => {
-            if (!params || !params.value) return '';
-            const start = this.formatDateTime(params.value[1]);
-            const end = this.formatDateTime(params.value[2]);
-            return [
-              `${params.marker}${params.name}`,
-              `${start} ??${end}`,
-              `${Math.round(params.value[3] / 1000)}s`
-            ].join('<br/>');
-          }
+          trigger: 'item',
+          triggerOn: 'mousemove',
+          confine: false,
+          appendToBody: true,
+          className: 'sy-timeline-tooltip',
+          backgroundColor: '#1f2937',
+          borderWidth: 0,
+          padding: 8,
+          textStyle: {
+            color: '#ffffff',
+            fontSize: 12
+          },
+          extraCssText: 'box-shadow: 0 10px 20px rgba(15,23,42,0.2); pointer-events: none;',
+          formatter: (params) => this.getTimelineTooltipHtml(params)
         },
         dataZoom: this.buildDataZoomOptions(layout, cursorRange),
         grid: this.buildGridOptions(layout),
@@ -1334,15 +1337,27 @@ export default {
       if (!params.value || typeof params.value[0] !== 'number') return;
 
       let categoryIndex = null;
-      if (params.seriesId === 'sy-bars-pinned') {
+      const isPinned = params.seriesId === 'sy-bars-pinned';
+      const isMain = params.seriesId === 'sy-bars-main';
+
+      if (isPinned) {
         categoryIndex = 0;
-      } else if (params.seriesId === 'sy-bars-main') {
+      } else if (isMain) {
         categoryIndex = params.value[0] + 1;
       }
 
       if (categoryIndex == null) return;
       this.selectedCategoryIndex = categoryIndex;
       this.updateSelectionLines();
+
+      const payload = {
+        seriesId: params.seriesId,
+        categoryIndex,
+        categoryName: this.resolveCategoryName(params),
+        value: params.value,
+        data: params.data
+      };
+      this.$emit('item-click', payload);
     },
     onChartMouseOver(params) {
       const markerId = this.getMarkerIdFromEvent(params);
@@ -1895,6 +1910,72 @@ export default {
       if (markerCode) return String(markerCode);
       const xValue = data && data.xAxis != null ? data.xAxis : null;
       return this.formatDateTime(xValue);
+    },
+    getTimelineTooltipHtml(params) {
+      if (!params || !Array.isArray(params.value)) return '';
+      const isPinned = params.seriesId === 'sy-bars-pinned';
+      const isMain = params.seriesId === 'sy-bars-main';
+      if (!isPinned && !isMain) return '';
+      return isPinned
+        ? this.getPinnedTooltipHtml(params)
+        : this.getRowTooltipHtml(params);
+    },
+    getPinnedTooltipHtml(params) {
+      if (!params || !Array.isArray(params.value)) return '';
+      const categoryName = this.resolveCategoryName(params);
+      const start = this.formatDateTime(params.value[1]);
+      const end = this.formatDateTime(params.value[2]);
+      const durationMs = params.value[2] - params.value[1];
+      const durationMin =
+        typeof durationMs === 'number' && !Number.isNaN(durationMs)
+          ? Math.max(0, Math.round(durationMs / 60000))
+          : null;
+
+      const lines = ['Pinned Row', this.safeText(categoryName)];
+      if (params.name) {
+        lines.push(`Type: ${params.name}`);
+      }
+      lines.push(`Start: ${start}`);
+      lines.push(`End: ${end}`);
+      if (durationMin != null) {
+        lines.push(`Duration: ${durationMin} min`);
+      }
+
+      return lines.join('<br/>');
+    },
+    getRowTooltipHtml(params) {
+      if (!params || !Array.isArray(params.value)) return '';
+      const categoryName = this.resolveCategoryName(params);
+      const start = this.formatDateTime(params.value[1]);
+      const end = this.formatDateTime(params.value[2]);
+      const durationMs = params.value[2] - params.value[1];
+      const durationMin =
+        typeof durationMs === 'number' && !Number.isNaN(durationMs)
+          ? Math.max(0, Math.round(durationMs / 60000))
+          : null;
+
+      const lines = ['Row', this.safeText(categoryName)];
+      if (params.name) {
+        lines.push(`Type: ${params.name}`);
+      }
+      lines.push(`Start: ${start}`);
+      lines.push(`End: ${end}`);
+      if (durationMin != null) {
+        lines.push(`Duration: ${durationMin} min`);
+      }
+
+      return lines.join('<br/>');
+    },
+    resolveCategoryName(params) {
+      if (!params || !Array.isArray(params.value)) return null;
+      if (params.seriesId === 'sy-bars-pinned') {
+        return this.pinnedCategory || this.categories[0] || null;
+      }
+      const idx = params.value[0];
+      return this.scrollCategories[idx] || null;
+    },
+    safeText(value) {
+      return value == null ? '-' : String(value);
     },
     // =====================
     // 시간 파싱
