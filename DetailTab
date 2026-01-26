@@ -44,6 +44,7 @@
       v-else
       :markers="markers"
       :timeline-data="timelineData"
+      @item-click="onTimelineItemClick"
       @remove-marker="removeMarker"
     />
   </div>
@@ -172,6 +173,10 @@ export default {
     },
     removeMarker(markerId) {
       this.markers = this.markers.filter((item) => item.id !== markerId);
+    },
+    onTimelineItemClick(payload) {
+      // TODO: 필요 시 여기에서 타임라인 아이템 클릭 처리
+      void payload;
     },
     clearMarkers() {
       this.markers = [];
