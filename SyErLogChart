@@ -112,6 +112,7 @@ export default {
     // =====================
     // 데이터 준비
     // =====================
+    // 아이템에서 카테고리/시리즈/시간 범위를 정리
     prepareSeries() {
       const categories = [];
       const seriesData = [];
@@ -174,6 +175,7 @@ export default {
     // =====================
     // 차트 옵션
     // =====================
+    // 툴팁 DOM/위치 제어는 잔존 툴팁/잘림 방지 목적
     buildBaseOption() {
       return {
         backgroundColor: '#ffffff',
@@ -282,6 +284,7 @@ export default {
     // =====================
     // 시리즈 렌더링
     // =====================
+    // custom series로 막대를 직접 그리기
     renderItem(params, api) {
       const categoryIndex = api.value(0);
       const start = api.coord([api.value(1), categoryIndex]);
@@ -321,12 +324,12 @@ export default {
       if (!payload) return;
       const clickedTime = this.getClickedTime(params);
       this.hideTooltip();
-      console.log('아 이 미친새끼');
       this.$emit('select-lot', {
         lot: payload,
         clickedTime
       });
     },
+    // 클릭 위치(픽셀)를 시간 값으로 환산
     getClickedTime(params) {
       const data = params && params.data;
       const start = data && data.value ? data.value[1] : null;
@@ -442,6 +445,7 @@ export default {
     // =====================
     // ZRender 이벤트
     // =====================
+    // 차트 밖으로 나갈 때 툴팁 잔존 방지
     bindZrEvents() {
       if (!this.chart) return;
       const zr = this.chart.getZr();
