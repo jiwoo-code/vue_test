@@ -273,10 +273,12 @@ export default {
       this.domainStart = resolvedDomain.start;
       this.domainEnd = resolvedDomain.end;
 
+      // 초기 화면에 보이는 시간창을 전체 범위의 일부(22%~42%)로 설정
       const defaultViewStart =
         span > 0 ? resolvedDomain.start + span * 0.22 : resolvedDomain.start;
       const defaultViewEnd =
         span > 0 ? resolvedDomain.start + span * 0.42 : resolvedDomain.end;
+      // 그 시간창 안에서 커서(선) 기본 위치를 더 좁은 구간(28%~35%)로 설정
       const defaultCursorStart =
         span > 0 ? resolvedDomain.start + span * 0.28 : resolvedDomain.start;
       const defaultCursorEnd =
@@ -375,6 +377,7 @@ export default {
     // =====================
     // 차트 옵션
     // =====================
+    // 슬라이더/라벨/핀/메인 영역 세로 레이아웃 계산
     getLayoutMetrics() {
       const { grid, slider } = CHART_CONFIG;
       const sliderBottom = slider.top + slider.height + slider.gap;
@@ -449,6 +452,7 @@ export default {
         series: this.buildSeriesOptions(cursorRange)
       };
     },
+    // 상단/하단/inside/Y축 스크롤용 dataZoom 묶음 생성
     buildDataZoomOptions(layout, cursorRange) {
       const dataZoomLayout = this.getDataZoomLayout(layout);
       const { index } = CHART_CONFIG;
@@ -599,6 +603,7 @@ export default {
         })
       ];
     },
+    // 실제 데이터 + 선택/마커/커서용 보조 시리즈 구성
     buildSeriesOptions(cursorRange) {
       const { index } = CHART_CONFIG;
       return [
@@ -1013,44 +1018,41 @@ export default {
     },
     getYAxisScrollWindow() {
       const total = this.scrollCategories.length;
-      if (!total) {
-        return { startValue: 0, endValue: 0 };
-      }
-
+      if (!total) return { startValue: 0, endValue: 0 };
       const maxVisible = 12;
-      const endValue = Math.min(total - 1, maxVisible - 1);
-      return { startValue: 0, endValue };
+      return {
+        startValue: 0,
+        endValue: Math.min(total - 1, maxVisible - 1)
+      };
     },
     getVisibleMainCount() {
       const total = this.scrollCategories.length;
       if (!total) return 0;
 
-      const dz = this.getDataZoomById('dz_y');
-      let startValue = dz && dz.startValue != null ? dz.startValue : null;
-      let endValue = dz && dz.endValue != null ? dz.endValue : null;
-
-      if (startValue == null || endValue == null) {
-        const fallback = this.getYAxisScrollWindow();
-        startValue = fallback.startValue;
-        endValue = fallback.endValue;
-      }
+      const dz = this.getYAxisZoom();
+      const fallback = this.getYAxisScrollWindow();
+      const startValue =
+        dz && dz.startValue != null ? dz.startValue : fallback.startValue;
+      const endValue =
+        dz && dz.endValue != null ? dz.endValue : fallback.endValue;
 
       const start = this.clamp(Math.round(startValue), 0, total - 1);
       const end = this.clamp(Math.round(endValue), 0, total - 1);
       return Math.max(1, end - start + 1);
     },
-    getDataZoomById(id) {
+    getYAxisZoom() {
       if (this.isBuildingOption) return null;
       const chart = this.getChartInstance();
-      if (!chart || !id) return null;
+      if (!chart) return null;
       const option = chart.getOption();
       const dataZoom = option && option.dataZoom;
       if (!Array.isArray(dataZoom)) return null;
-      return dataZoom.find((item) => item && item.id === id) ?? null;
+      return dataZoom.find((item) => item && item.id === 'dz_y') ?? null;
     },
     // =====================
     // 시리즈 렌더링
     // =====================
+    // custom series: 막대를 직접 그리기
     renderItem(params, api) {
       const categoryIndex = api.value(0);
       const start = api.coord([api.value(1), categoryIndex]);
@@ -1105,7 +1107,7 @@ export default {
 
       const direction = delta > 0 ? -1 : 1;
       const fallback = this.getYAxisScrollWindow();
-      const dz = this.getDataZoomById('dz_y');
+      const dz = this.getYAxisZoom();
       let startValue =
         dz && dz.startValue != null ? dz.startValue : fallback.startValue;
       let endValue = dz && dz.endValue != null ? dz.endValue : fallback.endValue;
@@ -1505,6 +1507,7 @@ export default {
         ]
       });
     },
+    // 상단 슬라이더와 커서 범위 동기화 (루프 방지 플래그 사용)
     syncTopSlider() {
       this.getChartInstance();
       if (!this.chart) return;
@@ -1543,6 +1546,7 @@ export default {
         this.isSyncingTopSlider = false;
       }, 0);
     },
+    // 마커 라인 좌표 → DOM 버튼 위치로 변환
     updateMarkerButtons() {
       this.getChartInstance();
       if (!this.chart) {
