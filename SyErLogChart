@@ -521,3 +521,110 @@ export default {
   border: 1px solid rgba(15, 23, 42, 0.12);
 }
 </style>
+
+
+
+
+
+
+
+
+prepareSeries() {
+  const categories = [];
+  const seriesData = [];
+  const categoryIndexMap = new Map();
+  let minTime = null;
+  let maxTime = null;
+
+  const items = Array.isArray(this.items) ? this.items : [];
+
+  items.forEach((item) => {
+    if (!item || !item.eqpId) return;
+
+    let categoryIndex = categoryIndexMap.get(item.eqpId);
+    if (categoryIndex == null) {
+      categoryIndex = categories.length;
+      categories.push(item.eqpId);
+      categoryIndexMap.set(item.eqpId, categoryIndex);
+    }
+
+    const start = this.toTimeValue(item.lotStart);
+    const end = this.toTimeValue(item.lotFinish);
+    if (start == null || end == null || end <= start) return;
+
+    minTime = minTime == null ? start : Math.min(minTime, start);
+    maxTime = maxTime == null ? end : Math.max(maxTime, end);
+
+    const color = this.resolveColor(item);
+
+    seriesData.push({
+      name: item.lotId,
+      value: [categoryIndex, start, end, end - start],
+      itemStyle: { color },
+      tooltipHtml: this.buildTooltipHtml(item, color),
+      payload: { ...item }
+    });
+  });
+
+  // ✅ 데이터가 하나도 없으면 "완전 빈 상태"
+  if (!seriesData.length) {
+    this.domainStart = null;
+    this.domainEnd = null;
+    this.categories = [];
+    this.seriesData = [];
+    return;
+  }
+
+  const padding = 20 * 60 * 1000;
+  this.domainStart = minTime - padding;
+  this.domainEnd = maxTime + padding;
+  this.categories = categories;
+  this.seriesData = seriesData;
+},
+
+
+
+
+
+
+
+
+
+const hasData = this.domainStart != null && this.domainEnd != null;
+
+xAxis: {
+  type: 'time',
+
+  // ✅ 핵심: 데이터 있을 때만 min/max 설정
+  min: hasData ? this.domainStart : null,
+  max: hasData ? this.domainEnd : null,
+
+  minInterval: 30 * 60 * 1000,
+  splitNumber: 48,
+
+  axisLine: {
+    lineStyle: {
+      color: '#cbd5e1'
+    }
+  },
+
+  // ✅ 데이터 없으면 라벨 자체 숨김
+  axisLabel: {
+    show: hasData,
+    color: '#475569',
+    interval: 0,
+    hideOverlap: true,
+    rotate: 90,
+    margin: 6,
+    inside: false,
+    formatter: (value) => this.formatAxisLabel(value)
+  },
+
+  // ✅ 데이터 없으면 그리드 라인도 숨김
+  splitLine: {
+    show: hasData,
+    lineStyle: {
+      color: '#e2e8f0'
+    }
+  }
+},
