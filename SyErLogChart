@@ -1,21 +1,23 @@
 <template>
-  <v-chart
-    class="sy-erlog-chart"
-    :option="chartOption"
-    :autoresize="true"
-    @ready="onChartReady"
-    @click="onChartClick"
-  />
+  <div class="erlog-chart-wrap">
+    <!-- 변경 시작: 줌 상태 유지 이벤트 -->
+    <TimelineGanttChart
+      ref="base"
+      class="erlog-chart"
+      :payload="payloadState"
+      :height="220"
+      :features="erlogFeatures"
+      :tooltip-options="erlogTooltipOptions"
+      :option-overrides="erlogOptionOverrides"
+      @datazoom="onDataZoom"
+      @chart-click="onChartClick"
+    />
+    <!-- 변경 끝: 줌 상태 유지 이벤트 -->
+  </div>
 </template>
 
 <script>
-import { use, graphic } from 'echarts/core';
-import { CanvasRenderer } from 'echarts/renderers';
-import { CustomChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent, DataZoomComponent } from 'echarts/components';
-import VChart from 'vue-echarts';
-
-use([CanvasRenderer, CustomChart, GridComponent, TooltipComponent, DataZoomComponent]);
+import TimelineGanttChart from './TimelineGanttChart.vue';
 
 const COLOR_RULES = Object.freeze({
   hasSy: '#3b82f6',
@@ -29,126 +31,330 @@ const TOOLTIP_TEXT_COLOR = Object.freeze({
   [COLOR_RULES.reject]: '#ffffff'
 });
 
+const ERLOG_FEATURES = Object.freeze({
+  topSlider: false,
+  ySlider: false,
+  markers: false,
+  markerHoverButton: false,
+  markerHoverEffect: false
+});
+
 export default {
   name: 'SyErLogChart',
   components: {
-    'v-chart': VChart
+    TimelineGanttChart
   },
   data() {
+    const now = Date.now();
+    const domainStart = now - 60 * 60 * 1000;
+    const domainEnd = now + 60 * 60 * 1000;
     return {
-      chart: null,
-      zr: null,
-      zrGlobalOutHandler: null,
       items: [],
-      categories: [],
-      seriesData: [],
-      domainStart: 0,
-      domainEnd: 0
+      allItems: [],
+      // 변경 시작: 필터/도메인/줌 상태 분리
+      // 변경: Y축 고정 유지를 위해 전체 카테고리 목록과 인덱스 맵 저장
+      allCategories: [],
+      categoryIndexMap: new Map(),
+      // 변경: 도메인은 전체 데이터 기준으로 계산해 필터와 무관하게 고정
+      domainState: {
+        domainStart,
+        domainEnd
+      },
+      // 변경: 필터 변경 시 줌 상태 유지
+      zoomState: {
+        viewStart: domainStart,
+        viewEnd: domainEnd,
+        cursorStart: null,
+        cursorEnd: null
+      },
+      // 변경 끝: 필터/도메인/줌 상태 분리
+      filterState: {
+        hasSy: true,
+        incompleteSy: true,
+        reject: true
+      },
+      payloadState: {
+        categories: [],
+        intervals: [],
+        domainStart,
+        domainEnd,
+        viewStart: domainStart,
+        viewEnd: domainEnd,
+        pinnedCategoryIndex: -1
+      }
     };
   },
-  beforeDestroy() {
-    this.teardownChart();
-  },
   computed: {
-    chartOption() {
-      const base = this.buildBaseOption();
-      const dataZoom = base.dataZoom.map((item) => {
-        if (item && item.id === 'erlog-slider') {
-          return {
-            ...item,
-            startValue: this.domainStart,
-            endValue: this.domainEnd
-          };
-        }
-        return item;
-      });
-      const series = base.series.map((item) => {
-        if (item && item.id === 'erlog-series') {
-          return {
-            ...item,
-            data: this.seriesData
-          };
-        }
-        return item;
-      });
-
+    erlogFeatures() {
+      return ERLOG_FEATURES;
+    },
+    erlogTooltipOptions() {
       return {
-        ...base,
-        xAxis: {
-          ...base.xAxis,
-          min: this.domainStart,
-          max: this.domainEnd
-        },
-        yAxis: {
-          ...base.yAxis,
-          data: this.categories
-        },
-        dataZoom,
-        series
+        className: 'erlog-tooltip',
+        backgroundColor: 'transparent',
+        borderWidth: 0,
+        padding: 0,
+        extraCssText: 'box-shadow:none;'
+      };
+    },
+    erlogOptionOverrides() {
+      return {
+        grid: [
+          {
+            id: 'grid-pinned',
+            left: 80,
+            right: 32,
+            top: 20,
+            height: 0,
+            containLabel: true
+          },
+          {
+            id: 'grid-main',
+            left: 80,
+            right: 32,
+            top: 20,
+            bottom: 120,
+            containLabel: true
+          }
+        ],
+        dataZoom: [
+          {
+            id: 'erlog-slider',
+            type: 'slider',
+            xAxisIndex: 1,
+            filterMode: 'weakFilter',
+            showDataShadow: false,
+            brushSelect: false,
+            bottom: 10,
+            height: 22,
+            labelFormatter: '',
+            startValue: this.payloadState.viewStart,
+            endValue: this.payloadState.viewEnd
+          },
+          {
+            id: 'erlog-inside',
+            type: 'inside',
+            xAxisIndex: 1,
+            filterMode: 'weakFilter',
+            zoomOnMouseWheel: true,
+            moveOnMouseWheel: false,
+            moveOnMouseMove: false
+          }
+        ],
+        xAxis: [
+          {
+            id: 'x-pinned',
+            gridIndex: 0,
+            type: 'time',
+            min: this.payloadState.domainStart,
+            max: this.payloadState.domainEnd,
+            axisLabel: { show: false },
+            axisTick: { show: false },
+            axisLine: { show: false },
+            splitLine: { show: false }
+          },
+          {
+            id: 'x-main',
+            gridIndex: 1,
+            type: 'time',
+            min: this.payloadState.domainStart,
+            max: this.payloadState.domainEnd,
+            minInterval: 30 * 60 * 1000,
+            splitNumber: 48,
+            axisLine: {
+              lineStyle: {
+                color: '#cbd5e1'
+              }
+            },
+            axisLabel: {
+              color: '#475569',
+              interval: 0,
+              hideOverlap: true,
+              rotate: 90,
+              margin: 6,
+              inside: false,
+              formatter: (value) => this.formatAxisLabel(value)
+            },
+            splitLine: {
+              show: true,
+              lineStyle: {
+                color: '#e2e8f0'
+              }
+            }
+          }
+        ],
+        yAxis: [
+          {
+            id: 'y-pinned',
+            gridIndex: 0,
+            type: 'category',
+            inverse: true,
+            data: [],
+            axisTick: { show: false },
+            axisLine: { show: false },
+            axisLabel: { show: false }
+          },
+          {
+            id: 'y-main',
+            gridIndex: 1,
+            type: 'category',
+            inverse: true,
+            data: this.payloadState.categories || [],
+            axisTick: { show: false },
+            axisLine: { show: false },
+            axisLabel: {
+              color: '#334155'
+            }
+          }
+        ]
       };
     }
   },
   methods: {
-    // =====================
-    // 차트 라이프사이클
-    // =====================
-    onChartReady(chart) {
-      this.chart = chart;
-      this.bindZrEvents();
-    },
-    teardownChart() {
-      if (!this.chart) return;
-      this.unbindZrEvents();
-      this.hideTooltip();
-      this.chart = null;
-    },
-    // =====================
-    // 데이터 갱신
-    // =====================
     setData(data) {
-      this.items = Array.isArray(data) ? data : [];
-      this.prepareSeries();
+      this.allItems = Array.isArray(data) ? data : [];
+      // 변경: 데이터 갱신 시 전체 도메인/카테고리 상태를 계산
+      const categoryState = this.buildCategoryState(this.allItems);
+      this.allCategories = categoryState.categories;
+      this.categoryIndexMap = categoryState.categoryIndexMap;
+      this.domainState = this.buildDomainFromItems(this.allItems);
+      this.zoomState = this.normalizeZoomState(this.zoomState, this.domainState);
+      this.applyFilters();
     },
-    // =====================
-    // 데이터 준비
-    // =====================
-    // 아이템에서 카테고리/시리즈/시간 범위를 정리
-    prepareSeries() {
+    setFilters(filters) {
+      if (filters && typeof filters === 'object') {
+        this.filterState = {
+          ...this.filterState,
+          ...filters
+        };
+      }
+      this.applyFilters();
+    },
+    hideTooltip() {
+      const base = this.$refs.base;
+      if (base && typeof base.hideTooltip === 'function') {
+        base.hideTooltip();
+      }
+    },
+    // 변경 시작: 줌 상태 유지
+    onDataZoom(payload) {
+      if (!payload || typeof payload !== 'object') return;
+      const domain = this.domainState || {};
+      const next = {
+        viewStart: payload.viewStart,
+        viewEnd: payload.viewEnd,
+        cursorStart: payload.cursorStart,
+        cursorEnd: payload.cursorEnd
+      };
+      this.zoomState = this.normalizeZoomState(next, domain);
+    },
+    // 변경 끝: 줌 상태 유지
+    onChartClick(params) {
+      if (!params || params.seriesId !== 'bars-main' || !params.data) return;
+      const raw = params.data.raw || null;
+      if (!raw) return;
+      const clickedTime = this.getClickedTime(params);
+      this.hideTooltip();
+      this.$emit('select-lot', {
+        lot: raw,
+        clickedTime
+      });
+    },
+    getClickedTime(params) {
+      const data = params && params.data ? params.data : null;
+      const start = data && data.value ? data.value[1] : null;
+      const end = data && data.value ? data.value[2] : null;
+      const base = this.$refs.base;
+      const chart = base && typeof base.getChartInstance === 'function' ? base.getChartInstance() : null;
+      if (!chart || !params.event) {
+        return start;
+      }
+      const offsetX = params.event.offsetX;
+      const offsetY = params.event.offsetY;
+      if (offsetX == null || offsetY == null) {
+        return start;
+      }
+      const value = chart.convertFromPixel({ xAxisIndex: 1 }, [offsetX, offsetY]);
+      const candidate = Array.isArray(value) ? value[0] : value;
+      if (typeof candidate === 'number' && !Number.isNaN(candidate)) {
+        if (start != null && end != null) {
+          return Math.min(Math.max(candidate, start), end);
+        }
+        return candidate;
+      }
+      return start;
+    },
+    // 변경 시작: 필터 적용 구조(도메인/카테고리/줌 유지)
+    applyFilters() {
+      const filtered = this.filterItems(this.allItems, this.filterState);
+      this.items = filtered;
+      // 변경: intervals만 필터링하고 도메인/카테고리/줌은 유지
+      const intervals = this.buildIntervalsFromItems(filtered, this.categoryIndexMap);
+      const domain = this.domainState || {};
+      let zoom = this.normalizeZoomState(this.zoomState, domain);
+      const adjustedZoom = this.ensureZoomHasVisibleData(intervals, zoom, domain);
+      if (adjustedZoom) {
+        zoom = adjustedZoom;
+        this.zoomState = adjustedZoom;
+      }
+      this.payloadState = {
+        categories: this.allCategories || [],
+        intervals,
+        domainStart: domain.domainStart,
+        domainEnd: domain.domainEnd,
+        viewStart: zoom.viewStart,
+        viewEnd: zoom.viewEnd,
+        cursorStart: zoom.cursorStart,
+        cursorEnd: zoom.cursorEnd,
+        pinnedCategoryIndex: -1
+      };
+    },
+    // 변경 끝: 필터 적용 구조(도메인/카테고리/줌 유지)
+    filterItems(items, filters) {
+      const list = Array.isArray(items) ? items : [];
+      if (!filters || typeof filters !== 'object') return list;
+      const hasActive = Object.values(filters).some(Boolean);
+      if (!hasActive) return [];
+      return list.filter((item) => {
+        const status = this.resolveStatus(item);
+        return !!filters[status];
+      });
+    },
+    resolveStatus(item) {
+      if (item && item.rejectWafer >= 1) {
+        return 'reject';
+      }
+      if (item && item.avgSyCount >= 63) {
+        return 'hasSy';
+      }
+      return 'incompleteSy';
+    },
+    // 변경 시작: 전체 데이터 기반 카테고리/도메인/intervals
+    buildCategoryState(items) {
       const categories = [];
-      const seriesData = [];
       const categoryIndexMap = new Map();
-      let minTime = null;
-      let maxTime = null;
-
-      this.items.forEach((item) => {
+      // 변경: 전체 데이터 기준으로 안정적인 카테고리 목록 구성
+      (Array.isArray(items) ? items : []).forEach((item) => {
         if (!item) return;
         const eqpId = item.eqpId ?? 'EQP-UNKNOWN';
-        let categoryIndex = categoryIndexMap.get(eqpId);
-        if (categoryIndex == null) {
-          categoryIndex = categories.length;
+        if (!categoryIndexMap.has(eqpId)) {
+          categoryIndexMap.set(eqpId, categories.length);
           categories.push(eqpId);
-          categoryIndexMap.set(eqpId, categoryIndex);
         }
-
+      });
+      return { categories, categoryIndexMap };
+    },
+    buildDomainFromItems(items) {
+      let minTime = null;
+      let maxTime = null;
+      // 변경: 필터된 데이터가 아닌 전체 데이터로 도메인 계산
+      (Array.isArray(items) ? items : []).forEach((item) => {
+        if (!item) return;
         const start = this.toTimeValue(item.lotStart);
         const end = this.toTimeValue(item.lotFinish);
-        if (start == null || end == null) return;
-
+        if (start == null || end == null || end <= start) return;
         minTime = minTime == null ? start : Math.min(minTime, start);
         maxTime = maxTime == null ? end : Math.max(maxTime, end);
-
-        const color = this.resolveColor(item);
-        seriesData.push({
-          name: item.lotId,
-          value: [categoryIndex, start, end, Math.max(0, end - start)],
-          itemStyle: {
-            color
-          },
-          tooltipHtml: this.buildTooltipHtml(item, color),
-          payload: {
-            ...item
-          }
-        });
       });
 
       if (minTime == null || maxTime == null) {
@@ -158,233 +364,104 @@ export default {
       }
 
       const padding = 20 * 60 * 1000;
-      this.domainStart = minTime - padding;
-      this.domainEnd = maxTime + padding;
-      this.categories = categories;
-      this.seriesData = seriesData;
+      return {
+        domainStart: minTime - padding,
+        domainEnd: maxTime + padding
+      };
     },
+    buildIntervalsFromItems(items, categoryIndexMap) {
+      const intervals = [];
+      // 변경: 전체 카테고리 인덱스 맵을 사용해 intervals 생성
+      (Array.isArray(items) ? items : []).forEach((item, index) => {
+        if (!item) return;
+        const eqpId = item.eqpId ?? 'EQP-UNKNOWN';
+        const categoryIndex = categoryIndexMap && categoryIndexMap.get ? categoryIndexMap.get(eqpId) : null;
+        if (categoryIndex == null) return;
+
+        const start = this.toTimeValue(item.lotStart);
+        const end = this.toTimeValue(item.lotFinish);
+        if (start == null || end == null || end <= start) return;
+
+        const itemColor = this.resolveColor(item);
+        const tooltipText = this.buildTooltipText(item, itemColor);
+        const raw = {
+          ...item,
+          itemColor,
+          tooltipText
+        };
+
+        intervals.push({
+          id: `erlog-${categoryIndex}-${index}`,
+          raw,
+          itemStyle: { color: itemColor },
+          value: [categoryIndex, start, end, Math.max(0, end - start)]
+        });
+      });
+      return intervals;
+    },
+    normalizeZoomState(next, domain) {
+      const domainStart =
+        domain && typeof domain.domainStart === 'number' ? domain.domainStart : Date.now();
+      const domainEnd =
+        domain && typeof domain.domainEnd === 'number' ? domain.domainEnd : domainStart;
+      const viewStart = this.clampTime(next && next.viewStart, domainStart, domainEnd, domainStart);
+      const viewEnd = this.clampTime(next && next.viewEnd, domainStart, domainEnd, domainEnd);
+      const cursorStart = this.clampTime(next && next.cursorStart, viewStart, viewEnd, null);
+      const cursorEnd = this.clampTime(next && next.cursorEnd, viewStart, viewEnd, null);
+
+      return {
+        viewStart: Math.min(viewStart, viewEnd),
+        viewEnd: Math.max(viewStart, viewEnd),
+        cursorStart,
+        cursorEnd
+      };
+    },
+    clampTime(value, min, max, fallback) {
+      if (typeof value !== 'number' || Number.isNaN(value)) return fallback;
+      return Math.min(max, Math.max(min, value));
+    },
+    ensureZoomHasVisibleData(intervals, zoom, domain) {
+      // 변경: 현재 줌 범위에 데이터가 없으면 전체 도메인으로 복구
+      if (!Array.isArray(intervals) || intervals.length === 0) return null;
+      if (!zoom || typeof zoom.viewStart !== 'number' || typeof zoom.viewEnd !== 'number') return null;
+
+      const viewStart = Math.min(zoom.viewStart, zoom.viewEnd);
+      const viewEnd = Math.max(zoom.viewStart, zoom.viewEnd);
+      const hasVisible = intervals.some((item) => {
+        if (!item || !Array.isArray(item.value)) return false;
+        const start = this.toTimeValue(item.value[1]);
+        const end = this.toTimeValue(item.value[2]);
+        if (start == null || end == null) return false;
+        return end >= viewStart && start <= viewEnd;
+      });
+
+      if (hasVisible) return null;
+      if (!domain || typeof domain.domainStart !== 'number' || typeof domain.domainEnd !== 'number') {
+        return null;
+      }
+
+      return {
+        viewStart: domain.domainStart,
+        viewEnd: domain.domainEnd,
+        cursorStart: null,
+        cursorEnd: null
+      };
+    },
+    // 변경 끝: 전체 데이터 기반 카테고리/도메인/intervals
     resolveColor(item) {
-      if (item.rejectWafer >= 1) {
+      const status = this.resolveStatus(item);
+      if (status === 'reject') {
         return COLOR_RULES.reject;
       }
-      if (item.avgSyCount >= 63) {
+      if (status === 'hasSy') {
         return COLOR_RULES.hasSy;
       }
       return COLOR_RULES.incompleteSy;
     },
-    // =====================
-    // 차트 옵션
-    // =====================
-    // 툴팁 DOM/위치 제어는 잔존 툴팁/잘림 방지 목적
-    buildBaseOption() {
-      return {
-        backgroundColor: '#ffffff',
-        animation: false,
-        grid: {
-          left: 80,
-          right: 32,
-          top: 20,
-          bottom: 120
-        },
-        tooltip: {
-          trigger: 'item',
-          triggerOn: 'mousemove',
-          confine: false,
-          appendToBody: true,
-          className: 'erlog-tooltip',
-          backgroundColor: 'transparent',
-          borderWidth: 0,
-          padding: 0,
-          showDelay: 0,
-          hideDelay: 0,
-          transitionDuration: 0,
-          extraCssText: 'box-shadow: none; pointer-events: none;',
-          position: (pos, params, dom, rect, size) =>
-            this.getTooltipPosition(pos, size),
-          formatter: this.getTooltipHtml
-        },
-        dataZoom: [
-          {
-            id: 'erlog-slider',
-            type: 'slider',
-            xAxisIndex: 0,
-            filterMode: 'weakFilter',
-            showDataShadow: false,
-            brushSelect: false,
-            bottom: 10,
-            height: 22,
-            labelFormatter: '',
-            startValue: 0,
-            endValue: 0
-          },
-          {
-            id: 'erlog-inside',
-            type: 'inside',
-            xAxisIndex: 0,
-            filterMode: 'weakFilter',
-            zoomOnMouseWheel: true,
-            moveOnMouseWheel: false,
-            moveOnMouseMove: false
-          }
-        ],
-        xAxis: {
-          type: 'time',
-          min: 0,
-          max: 0,
-          minInterval: 30 * 60 * 1000,
-          splitNumber: 48,
-          axisLine: {
-            lineStyle: {
-              color: '#cbd5e1'
-            }
-          },
-          axisLabel: {
-            color: '#475569',
-            interval: 0,
-            hideOverlap: true,
-            rotate: 90,
-            margin: 6,
-            inside: false,
-            formatter: (value) => this.formatAxisLabel(value)
-          },
-          splitLine: {
-            show: true,
-            lineStyle: {
-              color: '#e2e8f0'
-            }
-          }
-        },
-        yAxis: {
-          type: 'category',
-          inverse: true,
-          data: [],
-          axisTick: { show: false },
-          axisLine: { show: false },
-          axisLabel: {
-            color: '#334155'
-          }
-        },
-        series: [
-          {
-            id: 'erlog-series',
-            type: 'custom',
-            renderItem: this.renderItem,
-            itemStyle: {
-              opacity: 0.92
-            },
-            encode: {
-              x: [1, 2],
-              y: 0
-            },
-            data: []
-          }
-        ]
-      };
-    },
-    // =====================
-    // 시리즈 렌더링
-    // =====================
-    // custom series로 막대를 직접 그리기
-    renderItem(params, api) {
-      const categoryIndex = api.value(0);
-      const start = api.coord([api.value(1), categoryIndex]);
-      const end = api.coord([api.value(2), categoryIndex]);
-      const height = 35; // api.size([0, 1])[1] * 0.6;
-
-      const rectShape = graphic.clipRectByRect(
-        {
-          x: start[0],
-          y: start[1] - height / 2,
-          width: end[0] - start[0],
-          height
-        },
-        {
-          x: params.coordSys.x,
-          y: params.coordSys.y,
-          width: params.coordSys.width,
-          height: params.coordSys.height
-        }
-      );
-
-      return (
-        rectShape && {
-          type: 'rect',
-          transition: ['shape'],
-          shape: rectShape,
-          style: api.style()
-        }
-      );
-    },
-    // =====================
-    // 차트 인터랙션
-    // =====================
-    onChartClick(params) {
-      if (!params || params.seriesId !== 'erlog-series' || !params.data) return;
-      const payload = params.data.payload;
-      if (!payload) return;
-      const clickedTime = this.getClickedTime(params);
-      this.hideTooltip();
-      this.$emit('select-lot', {
-        lot: payload,
-        clickedTime
-      });
-    },
-    // 클릭 위치(픽셀)를 시간 값으로 환산
-    getClickedTime(params) {
-      const data = params && params.data;
-      const start = data && data.value ? data.value[1] : null;
-      const end = data && data.value ? data.value[2] : null;
-
-      if (!this.chart || !params || !params.event) {
-        return start;
-      }
-
-      const offsetX = params.event.offsetX;
-      const offsetY = params.event.offsetY;
-      if (offsetX == null || offsetY == null) {
-        return start;
-      }
-
-      const value = this.chart.convertFromPixel({ xAxisIndex: 0 }, [offsetX, offsetY]);
-      const candidate = Array.isArray(value) ? value[0] : value;
-
-      if (typeof candidate === 'number' && !Number.isNaN(candidate)) {
-        if (start != null && end != null) {
-          return Math.min(Math.max(candidate, start), end);
-        }
-        return candidate;
-      }
-
-      return start;
-    },
-    // =====================
-    // 툴팁 헬퍼
-    // =====================
-    hideTooltip() {
-      if (this.chart) {
-        this.chart.dispatchAction({ type: 'hideTip' });
-      }
-      this.clearTooltip();
-    },
-    clearTooltip() {
-      if (typeof document === 'undefined') return;
-      const nodes = document.querySelectorAll(
-        '.erlog-tooltip, .echarts-tooltip'
-      );
-      nodes.forEach((node) => {
-        if (node && node.parentNode) {
-          node.parentNode.removeChild(node);
-        }
-      });
-    },
-    getTooltipHtml(params) {
-      const data = params && params.data ? params.data : null;
-      return data && data.tooltipHtml ? data.tooltipHtml : '';
-    },
-    buildTooltipHtml(item, color) {
-      if (!item) return '';
+    buildTooltipText(item, color) {
       const textColor = TOOLTIP_TEXT_COLOR[color] || '#ffffff';
-      const lines = [
+      void textColor;
+      return [
         `Lot ID: ${this.safeText(item.lotId)}`,
         `Layer: ${this.safeText(item.layer)}`,
         `Device: ${this.safeText(item.device)}`,
@@ -392,82 +469,11 @@ export default {
         `Lot Finish: ${this.safeText(item.lotFinish)}`,
         `Lot Size: ${this.safeText(item.lotSize)}`,
         `Reject Wafer: ${this.safeText(item.rejectWafer)}`
-      ].join('<br/>');
-
-      return [
-        '<div style="',
-        `background:${color};`,
-        `color:${textColor};`,
-        'padding:8px 10px;',
-        'border-radius:8px;',
-        'font-size:12px;',
-        'line-height:1.5;',
-        'box-shadow:0 10px 20px rgba(15,23,42,0.2);',
-        '">',
-        lines,
-        '</div>'
-      ].join('');
+      ].join('\n');
     },
     safeText(value) {
       return value == null ? '-' : String(value);
     },
-    getTooltipPosition(pos, size) {
-      if (!pos || !size || !Array.isArray(pos)) {
-        return pos;
-      }
-      const margin = 8;
-      const viewWidth = size.viewSize[0];
-      const viewHeight = size.viewSize[1];
-      const contentWidth = size.contentSize[0];
-      const contentHeight = size.contentSize[1];
-
-      let left = pos[0] + margin;
-      let top = pos[1] - contentHeight - margin;
-
-      if (top < margin) {
-        top = pos[1] + margin;
-      }
-      if (left + contentWidth + margin > viewWidth) {
-        left = viewWidth - contentWidth - margin;
-      }
-      if (left < margin) {
-        left = margin;
-      }
-      if (top + contentHeight + margin > viewHeight) {
-        top = viewHeight - contentHeight - margin;
-      }
-      if (top < margin) {
-        top = margin;
-      }
-
-      return [left, top];
-    },
-    // =====================
-    // ZRender 이벤트
-    // =====================
-    // 차트 밖으로 나갈 때 툴팁 잔존 방지
-    bindZrEvents() {
-      if (!this.chart) return;
-      const zr = this.chart.getZr();
-      if (!zr) return;
-      this.zr = zr;
-      if (!this.zrGlobalOutHandler) {
-        this.zrGlobalOutHandler = () => {
-          this.hideTooltip();
-        };
-      }
-      zr.on('globalout', this.zrGlobalOutHandler);
-    },
-    unbindZrEvents() {
-      if (!this.zr) return;
-      if (this.zrGlobalOutHandler) {
-        this.zr.off('globalout', this.zrGlobalOutHandler);
-      }
-      this.zr = null;
-    },
-    // =====================
-    // 포맷팅
-    // =====================
     formatAxisLabel(value) {
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return '';
@@ -479,9 +485,6 @@ export default {
     pad2(value) {
       return String(value).padStart(2, '0');
     },
-    // =====================
-    // 시간 파싱
-    // =====================
     toTimeValue(value) {
       if (value == null) return null;
       if (typeof value === 'number') return value;
@@ -492,7 +495,7 @@ export default {
     },
     parseDateTimeMs(value) {
       const match = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d{3})$/.exec(
-        String(value ?? '').trim()
+        String(value || '').trim()
       );
       if (!match) return null;
       const [, year, month, day, hour, minute, second, ms] = match;
@@ -512,119 +515,13 @@ export default {
 </script>
 
 <style scoped>
-.sy-erlog-chart {
+.erlog-chart-wrap {
   width: 100%;
   height: 220px;
-  border-radius: 14px;
-  overflow: hidden;
-  background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.erlog-chart {
+  width: 100%;
+  height: 100%;
 }
 </style>
-
-
-
-
-
-
-
-
-prepareSeries() {
-  const categories = [];
-  const seriesData = [];
-  const categoryIndexMap = new Map();
-  let minTime = null;
-  let maxTime = null;
-
-  const items = Array.isArray(this.items) ? this.items : [];
-
-  items.forEach((item) => {
-    if (!item || !item.eqpId) return;
-
-    let categoryIndex = categoryIndexMap.get(item.eqpId);
-    if (categoryIndex == null) {
-      categoryIndex = categories.length;
-      categories.push(item.eqpId);
-      categoryIndexMap.set(item.eqpId, categoryIndex);
-    }
-
-    const start = this.toTimeValue(item.lotStart);
-    const end = this.toTimeValue(item.lotFinish);
-    if (start == null || end == null || end <= start) return;
-
-    minTime = minTime == null ? start : Math.min(minTime, start);
-    maxTime = maxTime == null ? end : Math.max(maxTime, end);
-
-    const color = this.resolveColor(item);
-
-    seriesData.push({
-      name: item.lotId,
-      value: [categoryIndex, start, end, end - start],
-      itemStyle: { color },
-      tooltipHtml: this.buildTooltipHtml(item, color),
-      payload: { ...item }
-    });
-  });
-
-  // ✅ 데이터가 하나도 없으면 "완전 빈 상태"
-  if (!seriesData.length) {
-    this.domainStart = null;
-    this.domainEnd = null;
-    this.categories = [];
-    this.seriesData = [];
-    return;
-  }
-
-  const padding = 20 * 60 * 1000;
-  this.domainStart = minTime - padding;
-  this.domainEnd = maxTime + padding;
-  this.categories = categories;
-  this.seriesData = seriesData;
-},
-
-
-
-
-
-
-
-
-
-const hasData = this.domainStart != null && this.domainEnd != null;
-
-xAxis: {
-  type: 'time',
-
-  // ✅ 핵심: 데이터 있을 때만 min/max 설정
-  min: hasData ? this.domainStart : null,
-  max: hasData ? this.domainEnd : null,
-
-  minInterval: 30 * 60 * 1000,
-  splitNumber: 48,
-
-  axisLine: {
-    lineStyle: {
-      color: '#cbd5e1'
-    }
-  },
-
-  // ✅ 데이터 없으면 라벨 자체 숨김
-  axisLabel: {
-    show: hasData,
-    color: '#475569',
-    interval: 0,
-    hideOverlap: true,
-    rotate: 90,
-    margin: 6,
-    inside: false,
-    formatter: (value) => this.formatAxisLabel(value)
-  },
-
-  // ✅ 데이터 없으면 그리드 라인도 숨김
-  splitLine: {
-    show: hasData,
-    lineStyle: {
-      color: '#e2e8f0'
-    }
-  }
-},
