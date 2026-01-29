@@ -7,22 +7,39 @@
       </div>
     </div>
 
+    <!-- 변경 시작: 범례 클릭 필터 UI -->
     <div class="legend-row">
       <div class="legend">
-        <div class="legend-item">
+        <button
+          type="button"
+          class="legend-item"
+          :class="{ 'is-off': !legendFilters.hasSy }"
+          @click="toggleLegend('hasSy')"
+        >
           <span class="swatch has-sy"></span>
           <span>Has SY Data</span>
-        </div>
-        <div class="legend-item">
+        </button>
+        <button
+          type="button"
+          class="legend-item"
+          :class="{ 'is-off': !legendFilters.incompleteSy }"
+          @click="toggleLegend('incompleteSy')"
+        >
           <span class="swatch incomplete"></span>
           <span>Has Incomplete SY Data</span>
-        </div>
-        <div class="legend-item">
+        </button>
+        <button
+          type="button"
+          class="legend-item"
+          :class="{ 'is-off': !legendFilters.reject }"
+          @click="toggleLegend('reject')"
+        >
           <span class="swatch reject"></span>
           <span>Has Reject Wafer</span>
-        </div>
+        </button>
       </div>
     </div>
+    <!-- 변경 끝: 범례 클릭 필터 UI -->
 
     <SyErLogChart ref="chart" @select-lot="onSelectLot" />
   </div>
@@ -42,6 +59,17 @@ export default {
       default: () => []
     }
   },
+  // 변경 시작: 범례 필터 상태/동작 추가
+  data() {
+    return {
+      // 변경: 차트 필터링을 위한 범례 상태 추가
+      legendFilters: {
+        hasSy: true,
+        incompleteSy: true,
+        reject: true
+      }
+    };
+  },
   watch: {
     erLogData: {
       deep: true,
@@ -56,10 +84,24 @@ export default {
       console.log('메인탭 onSelectLot() payload = ', payload);
       this.$emit('select-lot', payload);
     },
+    // 변경: 범례 상태를 토글하고 차트에 필터 전달
+    toggleLegend(key) {
+      if (!Object.prototype.hasOwnProperty.call(this.legendFilters, key)) return;
+      this.legendFilters[key] = !this.legendFilters[key];
+      const chart = this.$refs.chart;
+      if (chart && typeof chart.setFilters === 'function') {
+        chart.setFilters({ ...this.legendFilters });
+      }
+      this.hideTooltip();
+    },
     setData(data) {
       const chart = this.$refs.chart;
       if (!chart || typeof chart.setData !== 'function') return;
       chart.setData(data);
+      // 변경: 데이터 갱신 시 필터를 다시 적용
+      if (typeof chart.setFilters === 'function') {
+        chart.setFilters({ ...this.legendFilters });
+      }
     },
     hideTooltip() {
       const chart = this.$refs.chart;
@@ -69,6 +111,7 @@ export default {
     }
   }
 };
+// 변경 끝: 범례 필터 상태/동작 추가
 </script>
 
 <style scoped>
@@ -110,12 +153,25 @@ h3 {
   font-size: 12px;
 }
 
+/* 변경 시작: 범례 버튼 스타일 */
 .legend-item {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
   color: #334155;
+  /* 변경: 버튼 형태의 범례 스타일 */
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
 }
+
+/* 변경: 비활성 범례 시각 상태 */
+.legend-item.is-off {
+  opacity: 0.45;
+}
+/* 변경 끝: 범례 버튼 스타일 */
 
 .swatch {
   width: 10px;
