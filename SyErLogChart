@@ -36,6 +36,7 @@
       class="sy-erlog-chart"
       :option="chartOption"
       :autoresize="true"
+      :update-options="updateOptions"
       @ready="onChartReady"
       @click="onChartClick"
     />
@@ -70,11 +71,15 @@ export default {
   },
   data() {
     return {
+      updateOptions: {
+        notMerge: false
+      },
+
       chart: null,
       items: [],
 
       // =====================
-      // 축 고정용(전체 데이터 기준)
+      // 축 고정(전체 데이터 기준)
       // =====================
       baseCategories: [],
       baseDomainStart: 0,
@@ -82,24 +87,18 @@ export default {
       categoryIndexMap: new Map(),
 
       // =====================
-      // 현재 뷰(줌) 유지용
-      // =====================
-      viewStart: 0,
-      viewEnd: 0,
-      isViewInitialized: false,
-
-      // =====================
-      // 실제 렌더링 데이터
+      // 실제 표시 데이터(필터 적용 결과)
       // =====================
       seriesData: [],
 
+      // =====================
+      // 범례 토글 상태
+      // =====================
       legendFilter: {
         hasSy: true,
         incompleteSy: true,
         reject: true
-      },
-
-      onDataZoomHandler: null
+      }
     };
   },
   beforeDestroy() {
@@ -108,17 +107,6 @@ export default {
   computed: {
     chartOption() {
       const base = this.buildBaseOption();
-
-      const dataZoom = base.dataZoom.map((item) => {
-        if (item && item.id === 'erlog-slider') {
-          return {
-            ...item,
-            startValue: this.viewStart,
-            endValue: this.viewEnd
-          };
-        }
-        return item;
-      });
 
       const series = base.series.map((item) => {
         if (item && item.id === 'erlog-series') {
@@ -132,6 +120,8 @@ export default {
 
       return {
         ...base,
+
+        // ✅ 축은 항상 전체 데이터 기준으로 고정
         xAxis: {
           ...base.xAxis,
           min: this.baseDomainStart,
@@ -141,7 +131,9 @@ export default {
           ...base.yAxis,
           data: this.baseCategories
         },
-        dataZoom,
+
+        // ✅ dataZoom에는 startValue/endValue를 절대 바인딩하지 않음
+        //    (ECharts 내부 상태로 줌 유지)
         series
       };
     }
@@ -152,28 +144,11 @@ export default {
     // =====================
     onChartReady(chart) {
       this.chart = chart;
-      this.bindDataZoomEvent();
     },
     teardownChart() {
       if (!this.chart) return;
-      this.unbindDataZoomEvent();
       this.hideTooltip();
       this.chart = null;
-    },
-    bindDataZoomEvent() {
-      if (!this.chart) return;
-
-      if (!this.onDataZoomHandler) {
-        this.onDataZoomHandler = () => {
-          this.syncViewFromChart();
-        };
-      }
-
-      this.chart.on('datazoom', this.onDataZoomHandler);
-    },
-    unbindDataZoomEvent() {
-      if (!this.chart || !this.onDataZoomHandler) return;
-      this.chart.off('datazoom', this.onDataZoomHandler);
     },
 
     // =====================
@@ -188,7 +163,7 @@ export default {
         [key]: !current
       };
 
-      // 축은 고정, 시리즈만 재생성
+      // ✅ 축은 건드리지 않고, 표시 데이터만 다시 만든다
       this.seriesData = this.buildSeriesData(this.items);
       this.hideTooltip();
     },
@@ -199,18 +174,15 @@ export default {
     setData(data) {
       this.items = Array.isArray(data) ? data : [];
 
-      // ✅ 전체 데이터 기준으로 축(카테고리/도메인) 고정 값 갱신
+      // ✅ 축(카테고리/도메인)은 전체 데이터 기준으로 갱신
       this.prepareBaseAxis(this.items);
 
-      // ✅ 데이터가 새로 들어온 경우: 뷰(줌)도 전체 범위로 초기화
-      this.resetViewToBase();
-
-      // ✅ 필터 상태에 맞게 시리즈 생성
+      // ✅ 필터 상태에 따라 표시 데이터만 만든다
       this.seriesData = this.buildSeriesData(this.items);
     },
 
     // =====================
-    // 축(카테고리/도메인) 고정 준비
+    // 전체 데이터 기준 축 준비
     // =====================
     prepareBaseAxis(items) {
       const categories = [];
@@ -250,37 +222,8 @@ export default {
       this.baseDomainEnd = maxTime + padding;
     },
 
-    resetViewToBase() {
-      this.viewStart = this.baseDomainStart;
-      this.viewEnd = this.baseDomainEnd;
-      this.isViewInitialized = true;
-    },
-
     // =====================
-    // 현재 줌(뷰) 구간 동기화
-    // =====================
-    syncViewFromChart() {
-      if (!this.chart) return;
-
-      const option = this.chart.getOption();
-      const dataZoomList = option && option.dataZoom ? option.dataZoom : null;
-      if (!Array.isArray(dataZoomList) || dataZoomList.length === 0) return;
-
-      const sliderZoom = dataZoomList.find((item) => item && item.id === 'erlog-slider');
-      if (!sliderZoom) return;
-
-      const startValue = sliderZoom.startValue;
-      const endValue = sliderZoom.endValue;
-
-      if (typeof startValue === 'number' && typeof endValue === 'number') {
-        this.viewStart = startValue;
-        this.viewEnd = endValue;
-        this.isViewInitialized = true;
-      }
-    },
-
-    // =====================
-    // 시리즈 데이터 생성(필터 적용)
+    // 표시 데이터 생성(필터 적용)
     // =====================
     buildSeriesData(items) {
       const seriesData = [];
@@ -304,13 +247,9 @@ export default {
         seriesData.push({
           name: item.lotId,
           value: [categoryIndex, start, end, Math.max(0, end - start)],
-          itemStyle: {
-            color
-          },
+          itemStyle: { color },
           tooltipHtml: this.buildTooltipHtml(item, color),
-          payload: {
-            ...item
-          }
+          payload: { ...item }
         });
       });
 
@@ -352,6 +291,8 @@ export default {
           position: (pos, params, dom, rect, size) => this.getTooltipPosition(pos, size),
           formatter: this.getTooltipHtml
         },
+
+        // ✅ dataZoom은 “구성만” 제공하고, startValue/endValue는 안 넣는다
         dataZoom: [
           {
             id: 'erlog-slider',
@@ -362,9 +303,7 @@ export default {
             brushSelect: false,
             bottom: 10,
             height: 22,
-            labelFormatter: '',
-            startValue: 0,
-            endValue: 0
+            labelFormatter: ''
           },
           {
             id: 'erlog-inside',
@@ -383,9 +322,7 @@ export default {
           minInterval: 30 * 60 * 1000,
           splitNumber: 48,
           axisLine: {
-            lineStyle: {
-              color: '#cbd5e1'
-            }
+            lineStyle: { color: '#cbd5e1' }
           },
           axisLabel: {
             color: '#475569',
@@ -398,9 +335,7 @@ export default {
           },
           splitLine: {
             show: true,
-            lineStyle: {
-              color: '#e2e8f0'
-            }
+            lineStyle: { color: '#e2e8f0' }
           }
         },
         yAxis: {
@@ -409,22 +344,15 @@ export default {
           data: [],
           axisTick: { show: false },
           axisLine: { show: false },
-          axisLabel: {
-            color: '#334155'
-          }
+          axisLabel: { color: '#334155' }
         },
         series: [
           {
             id: 'erlog-series',
             type: 'custom',
             renderItem: this.renderItem,
-            itemStyle: {
-              opacity: 0.92
-            },
-            encode: {
-              x: [1, 2],
-              y: 0
-            },
+            itemStyle: { opacity: 0.92 },
+            encode: { x: [1, 2], y: 0 },
             data: []
           }
         ]
@@ -647,7 +575,6 @@ export default {
   justify-content: flex-end;
   gap: 10px 16px;
   flex-wrap: wrap;
-  font-size: 12px;
 }
 
 .legend-item {
@@ -659,6 +586,8 @@ export default {
   padding: 0;
   cursor: pointer;
   color: #334155;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 .legend-item.off {
