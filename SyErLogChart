@@ -33,11 +33,11 @@
     </div>
 
     <v-chart
+      ref="chart"
       class="sy-erlog-chart"
       :option="chartOption"
       :autoresize="true"
       :update-options="updateOptions"
-      @ready="onChartReady"
       @click="onChartClick"
     />
   </div>
@@ -75,7 +75,8 @@ export default {
         notMerge: false
       },
 
-      chart: null,
+      isTooltipEnabled: true,
+
       items: [],
 
       // =====================
@@ -87,22 +88,16 @@ export default {
       categoryIndexMap: new Map(),
 
       // =====================
-      // 실제 표시 데이터(필터 적용 결과)
+      // 실제 표시 데이터
       // =====================
       seriesData: [],
 
-      // =====================
-      // 범례 토글 상태
-      // =====================
       legendFilter: {
         hasSy: true,
         incompleteSy: true,
         reject: true
       }
     };
-  },
-  beforeDestroy() {
-    this.teardownChart();
   },
   computed: {
     chartOption() {
@@ -120,8 +115,6 @@ export default {
 
       return {
         ...base,
-
-        // ✅ 축은 항상 전체 데이터 기준으로 고정
         xAxis: {
           ...base.xAxis,
           min: this.baseDomainStart,
@@ -131,24 +124,27 @@ export default {
           ...base.yAxis,
           data: this.baseCategories
         },
-
-        // ✅ dataZoom에는 startValue/endValue를 절대 바인딩하지 않음
-        //    (ECharts 내부 상태로 줌 유지)
+        tooltip: {
+          ...base.tooltip,
+          show: this.isTooltipEnabled
+        },
         series
       };
     }
   },
   methods: {
     // =====================
-    // 차트 라이프사이클
+    // Public API
     // =====================
-    onChartReady(chart) {
-      this.chart = chart;
-    },
-    teardownChart() {
-      if (!this.chart) return;
-      this.hideTooltip();
-      this.chart = null;
+    setData(data) {
+      this.items = Array.isArray(data) ? data : [];
+
+      this.prepareBaseAxis(this.items);
+      this.seriesData = this.buildSeriesData(this.items);
+
+      this.$nextTick(() => {
+        this.resetZoom();
+      });
     },
 
     // =====================
@@ -163,26 +159,44 @@ export default {
         [key]: !current
       };
 
-      // ✅ 축은 건드리지 않고, 표시 데이터만 다시 만든다
-      this.seriesData = this.buildSeriesData(this.items);
-      this.hideTooltip();
-    },
-
-    // =====================
-    // 데이터 갱신
-    // =====================
-    setData(data) {
-      this.items = Array.isArray(data) ? data : [];
-
-      // ✅ 축(카테고리/도메인)은 전체 데이터 기준으로 갱신
-      this.prepareBaseAxis(this.items);
-
-      // ✅ 필터 상태에 따라 표시 데이터만 만든다
       this.seriesData = this.buildSeriesData(this.items);
     },
 
     // =====================
-    // 전체 데이터 기준 축 준비
+    // Chart instance
+    // =====================
+    getChartInstance() {
+      const chartComponent = this.$refs.chart;
+      if (!chartComponent) return null;
+
+      if (typeof chartComponent.getEchartsInstance === 'function') {
+        return chartComponent.getEchartsInstance();
+      }
+
+      return chartComponent.chart || null;
+    },
+
+    resetZoom() {
+      const chart = this.getChartInstance();
+      if (!chart) return;
+
+      chart.dispatchAction({
+        type: 'dataZoom',
+        dataZoomId: 'erlog-slider',
+        start: 0,
+        end: 100
+      });
+
+      chart.dispatchAction({
+        type: 'dataZoom',
+        dataZoomId: 'erlog-inside',
+        start: 0,
+        end: 100
+      });
+    },
+
+    // =====================
+    // Axis preparation
     // =====================
     prepareBaseAxis(items) {
       const categories = [];
@@ -194,7 +208,7 @@ export default {
       items.forEach((item) => {
         if (!item) return;
 
-        const eqpId = item.eqpId ?? 'EQP-UNKNOWN';
+        const eqpId = item.eqpId ?? '';
         if (!categoryIndexMap.has(eqpId)) {
           categoryIndexMap.set(eqpId, categories.length);
           categories.push(eqpId);
@@ -223,10 +237,10 @@ export default {
     },
 
     // =====================
-    // 표시 데이터 생성(필터 적용)
+    // Series building
     // =====================
     buildSeriesData(items) {
-      const seriesData = [];
+      const result = [];
 
       items.forEach((item) => {
         if (!item) return;
@@ -234,7 +248,7 @@ export default {
         const type = this.resolveType(item);
         if (!this.legendFilter[type]) return;
 
-        const eqpId = item.eqpId ?? 'EQP-UNKNOWN';
+        const eqpId = item.eqpId ?? '';
         const categoryIndex = this.categoryIndexMap.get(eqpId);
         if (categoryIndex == null) return;
 
@@ -244,7 +258,7 @@ export default {
 
         const color = COLOR_RULES[type];
 
-        seriesData.push({
+        result.push({
           name: item.lotId,
           value: [categoryIndex, start, end, Math.max(0, end - start)],
           itemStyle: { color },
@@ -253,7 +267,7 @@ export default {
         });
       });
 
-      return seriesData;
+      return result;
     },
 
     resolveType(item) {
@@ -263,7 +277,7 @@ export default {
     },
 
     // =====================
-    // 차트 옵션
+    // Chart option base
     // =====================
     buildBaseOption() {
       return {
@@ -288,11 +302,8 @@ export default {
           hideDelay: 0,
           transitionDuration: 0,
           extraCssText: 'box-shadow: none; pointer-events: none;',
-          position: (pos, params, dom, rect, size) => this.getTooltipPosition(pos, size),
           formatter: this.getTooltipHtml
         },
-
-        // ✅ dataZoom은 “구성만” 제공하고, startValue/endValue는 안 넣는다
         dataZoom: [
           {
             id: 'erlog-slider',
@@ -330,7 +341,6 @@ export default {
             hideOverlap: true,
             rotate: 90,
             margin: 6,
-            inside: false,
             formatter: (value) => this.formatAxisLabel(value)
           },
           splitLine: {
@@ -360,7 +370,7 @@ export default {
     },
 
     // =====================
-    // 시리즈 렌더링
+    // Render item
     // =====================
     renderItem(params, api) {
       const categoryIndex = api.value(0);
@@ -394,7 +404,7 @@ export default {
     },
 
     // =====================
-    // 차트 인터랙션
+    // Interaction
     // =====================
     onChartClick(params) {
       if (!params || params.seriesId !== 'erlog-series' || !params.data) return;
@@ -404,7 +414,6 @@ export default {
 
       const clickedTime = this.getClickedTime(params);
 
-      this.hideTooltip();
       this.$emit('select-lot', {
         lot: payload,
         clickedTime
@@ -416,13 +425,14 @@ export default {
       const start = data && data.value ? data.value[1] : null;
       const end = data && data.value ? data.value[2] : null;
 
-      if (!this.chart || !params || !params.event) return start;
+      const chart = this.getChartInstance();
+      if (!chart || !params || !params.event) return start;
 
       const offsetX = params.event.offsetX;
       const offsetY = params.event.offsetY;
       if (offsetX == null || offsetY == null) return start;
 
-      const value = this.chart.convertFromPixel({ xAxisIndex: 0 }, [offsetX, offsetY]);
+      const value = chart.convertFromPixel({ xAxisIndex: 0 }, [offsetX, offsetY]);
       const candidate = Array.isArray(value) ? value[0] : value;
 
       if (typeof candidate === 'number' && !Number.isNaN(candidate)) {
@@ -436,24 +446,8 @@ export default {
     },
 
     // =====================
-    // 툴팁 헬퍼
+    // Tooltip content
     // =====================
-    hideTooltip() {
-      if (this.chart) {
-        this.chart.dispatchAction({ type: 'hideTip' });
-      }
-      this.clearTooltip();
-    },
-    clearTooltip() {
-      if (typeof document === 'undefined') return;
-
-      const nodes = document.querySelectorAll('.erlog-tooltip, .echarts-tooltip');
-      nodes.forEach((node) => {
-        if (node && node.parentNode) {
-          node.parentNode.removeChild(node);
-        }
-      });
-    },
     getTooltipHtml(params) {
       const data = params && params.data ? params.data : null;
       return data && data.tooltipHtml ? data.tooltipHtml : '';
@@ -489,29 +483,9 @@ export default {
     safeText(value) {
       return value == null ? '-' : String(value);
     },
-    getTooltipPosition(pos, size) {
-      if (!pos || !size || !Array.isArray(pos)) return pos;
-
-      const margin = 8;
-      const viewWidth = size.viewSize[0];
-      const viewHeight = size.viewSize[1];
-      const contentWidth = size.contentSize[0];
-      const contentHeight = size.contentSize[1];
-
-      let left = pos[0] + margin;
-      let top = pos[1] - contentHeight - margin;
-
-      if (top < margin) top = pos[1] + margin;
-      if (left + contentWidth + margin > viewWidth) left = viewWidth - contentWidth - margin;
-      if (left < margin) left = margin;
-      if (top + contentHeight + margin > viewHeight) top = viewHeight - contentHeight - margin;
-      if (top < margin) top = margin;
-
-      return [left, top];
-    },
 
     // =====================
-    // 포맷팅
+    // Formatting / time
     // =====================
     formatAxisLabel(value) {
       const date = new Date(value);
@@ -525,10 +499,6 @@ export default {
     pad2(value) {
       return String(value).padStart(2, '0');
     },
-
-    // =====================
-    // 시간 파싱
-    // =====================
     toTimeValue(value) {
       if (value == null) return null;
       if (typeof value === 'number') return value;
@@ -586,7 +556,7 @@ export default {
   padding: 0;
   cursor: pointer;
   color: #334155;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.2;
 }
 
