@@ -1259,6 +1259,49 @@ export default {
 
       return { start: fallbackStart, end: fallbackEnd };
     },
+/**
+ * 상단 슬라이더(dz_top)의 활성 구간(커서 범위)을 시간값으로 지정합니다.
+ * @param {number|string|Date} startTime
+ * @param {number|string|Date} endTime
+ */
+setTopSliderRange(startTime, endTime) {
+  this.getChartInstance();
+  if (!this.chart) return;
+
+  const topMin = this.viewStart != null ? this.viewStart : this.domainStart;
+  const topMax = this.viewEnd != null ? this.viewEnd : this.domainEnd;
+
+  const startValueRaw = this.toTimeValue(startTime);
+  const endValueRaw = this.toTimeValue(endTime);
+  if (startValueRaw == null || endValueRaw == null) return;
+
+  const startValue = this.clamp(Math.min(startValueRaw, endValueRaw), topMin, topMax);
+  const endValue = this.clamp(Math.max(startValueRaw, endValueRaw), topMin, topMax);
+
+  // 내부 루프 방지 플래그 (onDataZoom에서 dz_top 처리할 때 걸러짐)
+  this.isSyncingTopSlider = true;
+
+  this.chart.dispatchAction({
+    type: 'dataZoom',
+    dataZoomId: 'dz_top',
+    startValue: Math.round(startValue),
+    endValue: Math.round(endValue)
+  });
+
+  // state도 함께 맞춰둠(즉시 반영 + 다른 로직과 일관성)
+  this.cursorStart = startValue;
+  this.cursorEnd = endValue;
+
+  // 라인/라벨/버튼 갱신
+  this.updateCursorLines();
+  this.updateMarkerLines();
+  this.updateMarkerButtons();
+
+  setTimeout(() => {
+    this.isSyncingTopSlider = false;
+  }, 0);
+},
+
     onDataZoom(event) {
       const batches =
         event && Array.isArray(event.batch) && event.batch.length
