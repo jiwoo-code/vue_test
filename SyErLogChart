@@ -596,6 +596,7 @@ export default {
 
 
 
+
 WITH prod_lot AS (
 SELECT
     eqp_id
@@ -628,8 +629,8 @@ FROM prism_ops.eqp_prod_sy_map_hist
 WHERE eqp_id = #{eqpId}
 AND process_tmstp BETWEEN #{startTime}::timestamp - interval '1 day'
                      AND #{endTime}::timestamp + interval '1 day'
-AND exp_start_tmstp BETWEEN #{startTime}::timestamp - interval '2 hours'
-                       AND #{endTime}::timestamp + interval '22 hours'
+AND process_start_tmstp BETWEEN #{startTime}::timestamp - interval '2 hours'
+                           AND #{endTime}::timestamp + interval '22 hours'
 GROUP BY
     eqp_id
     , lot_id
@@ -643,7 +644,7 @@ SELECT
     , p.lot_size
     , p.lot_start_time
     , p.lot_finish_time
-    , coalesce(s.sy_count, 0) AS sy_count
+    , s.sy_count
 FROM prod_lot p
 LEFT JOIN sy_lot s
 ON s.eqp_id = p.eqp_id
