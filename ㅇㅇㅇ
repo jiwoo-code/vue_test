@@ -152,3 +152,15 @@ AND e.slot_seq_key = p.slot_seq_key
 ORDER BY
     e.info_name,
     e.process_start_tmstp;
+
+
+
+
+SELECT
+    COUNT(*) AS total_prod_events,
+    SUM(CASE WHEN COALESCE(p.chuck_id::text, '') = '' THEN 1 ELSE 0 END) AS missing_chuck_id
+FROM base_events e
+LEFT JOIN prod_filtered p
+ON e.lot_id = p.lot_id
+AND e.slot_seq_key = p.slot_seq_key
+WHERE e.source_type = 'PROD';
