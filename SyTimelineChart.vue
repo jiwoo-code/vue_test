@@ -2084,3 +2084,576 @@ setTopSliderRange(startTime, endTime) {
   pointer-events: auto;
 }
 </style>
+
+
+
+
+
+
+
+
+
+WITH
+-- ============================================================================
+-- params
+-- - 목적: SQL 내부에서 파라미터(eqpid, start/end)를 반복 사용
+-- - Python 대응: controller.load_sy_data(equipment, start_date, end_date)
+-- ============================================================================
+params AS (
+SELECT
+    CAST(#{eqpId} AS text) AS eqp_id,
+    CAST(#{startTime} AS timestamp) AS start_time,
+    CAST(#{endTime} AS timestamp) AS end_time
+),
+
+-- ============================================================================
+-- eqp
+-- - 목적: eqp_model_name 조회 (sy_info 조인용)
+-- - Python 대응:
+--   base_loader.select_eqp()
+--   sy_loader.load_data(): eqp_model_name = eqp_info[...]iloc[0]
+-- ============================================================================
+eqp AS (
+SELECT
+    pei.eqp_model_name
+FROM photo_eqp_info pei
+JOIN params p
+ON pei.eqp_id = p.eqp_id
+WHERE pei.use_yn = 'Y'
+LIMIT 1
+),
+
+-- ============================================================================
+-- sy_info
+-- - 목적: SY 메타(정렬 order) 조회
+-- - Python 대응:
+--   sy_loader.load_data():
+--     select module_name, info_name, "order" from prism_common.sy_info ...
+-- ============================================================================
+sy_info AS (
+SELECT
+    si.module_name,
+    si.info_name,
+    si."order"
+FROM prism_common.sy_info si
+JOIN eqp e
+ON si.eqp_model_name = e.eqp_model_name
+),
+
+-- ============================================================================
+-- sy_raw
+-- - 목적: SY 원천 이력(±4시간 확장 로딩)
+-- - Python 대응:
+--   sy_loader.load_data():
+--     from eqp_prod_sy_map_hist
+--     process_tmstp >= start - 4h
+--     process_tmstp <= end + 4h
+-- - 추가: info_name 오타 정규화
+--   Python에 'Die exposuer'가 섞여 있으므로 DB에서 통일(Die exposure)
+-- ============================================================================
+sy_raw AS (
+SELECT
+    m.lot_id,
+    m.slot_seq,
+    m.module_name,
+    CASE
+        WHEN m.info_name IN ('Die exposuer', 'Die exposure') THEN 'Die exposure'
+        ELSE m.info_name
+    END AS info_name,
+    m.process_start_tmstp,
+    m.process_end_tmstp
+FROM eqp_prod_sy_map_hist m
+JOIN params p
+ON m.eqp_id = p.eqp_id
+WHERE m.process_tmstp >= p.start_time - interval '4 hours'
+AND m.process_tmstp <= p.end_time + interval '4 hours'
+),
+
+-- ============================================================================
+-- sy_filtered
+-- - 목적: 실제 표시 범위(start~end)로 필터 + sy_info 조인(order 부여) + 중복 제거
+-- - Python 대응:
+--   sy_loader.load_data():
+--     df = df.sort_values(...)
+--     df = df[(start<=process_start<=end)]
+--     df = df.drop_duplicates()
+-- ============================================================================
+sy_filtered AS (
+SELECT DISTINCT
+    r.lot_id,
+    r.slot_seq,
+    r.module_name,
+    r.info_name,
+    r.process_start_tmstp,
+    r.process_end_tmstp,
+    i."order"
+FROM sy_raw r
+LEFT JOIN sy_info i
+ON r.module_name = i.module_name
+AND r.info_name = i.info_name
+JOIN params p
+ON 1 = 1
+WHERE r.process_start_tmstp >= p.start_time
+AND r.process_start_tmstp <= p.end_time
+),
+
+-- ============================================================================
+-- prod_raw
+-- - 목적: 생산(노광) 원천 이력 로딩
+-- - Python 대응:
+--   prod_loader.load_data():
+--     from eqp_prod_std_wafer_hist
+--     where file_date between start_date-1day and end_date-1day (Python 코드 그대로 반영)
+--     order by exp_start_tmstp
+-- ============================================================================
+prod_raw AS (
+SELECT
+    w.wafer_seq,
+    w.lot_id,
+    w.slot_seq,
+    w.exp_start_tmstp,
+    w.exp_finish_tmstp,
+    w.step_id,
+    w.reticle_id,
+    w.chuck_id,
+    w.status,
+    w.wafer_exp_sec,
+    w.layer_id,
+    w.device_id,
+    w.as_on_tmstp,
+    w.as_off_tmstp,
+    w.ts_on_tmstp,
+    w.ts_off_tmstp,
+    w.arr_on_tmstp,
+    w.arr_off_tmstp,
+    w.trr_on_tmstp,
+    w.trr_off_tmstp,
+    w.file_date
+FROM eqp_prod_std_wafer_hist w
+JOIN params p
+ON w.eqp_id = p.eqp_id
+WHERE w.file_date BETWEEN (p.start_time::date - interval '1 day') AND (p.end_time::date - interval '1 day')
+),
+
+-- ============================================================================
+-- prod_filtered
+-- - 목적: 실제 표시 범위(start~end)로 필터 + swap_time 계산(초)
+-- - Python 대응:
+--   prod_loader.load_data():
+--     df['prev_end'] = exp_finish.shift(1)
+--     df['swap_time'] = (exp_start - prev_end).seconds fillna(0)
+--     df_filtered = df[(start<=exp_start<=end)]
+-- - 주의: swap_time은 음수 가능성도 그대로 유지(데이터가 그렇다면)
+-- ============================================================================
+prod_filtered AS (
+SELECT
+    r.*,
+    COALESCE(
+        EXTRACT(EPOCH FROM (r.exp_start_tmstp - LAG(r.exp_finish_tmstp) OVER (ORDER BY r.exp_start_tmstp))),
+        0
+    ) AS swap_time_sec
+FROM prod_raw r
+JOIN params p
+ON 1 = 1
+WHERE r.exp_start_tmstp >= p.start_time
+AND r.exp_start_tmstp <= p.end_time
+),
+
+-- ============================================================================
+-- sy_die_keys
+-- - 목적: SY 쪽에 이미 'Die exposure' 이벤트가 존재하는 (lot_id, slot_seq) 목록
+-- - Python 대응:
+--   __create_die_exposuer_row_by_production_data():
+--     df_die_exposuer = df_sy[df_sy.info_name=='Die exposuer/Die exposure'][['lot_id','slot_seq']]
+--     drop_duplicates()
+-- ============================================================================
+sy_die_keys AS (
+SELECT DISTINCT
+    s.lot_id,
+    s.slot_seq
+FROM sy_filtered s
+WHERE s.info_name = 'Die exposure'
+),
+
+-- ============================================================================
+-- die_only_prod
+-- - 목적: SY에 Die exposure가 없는 경우, prod로부터 Die exposure 이벤트 생성
+-- - Python 대응:
+--   __create_die_exposuer_row_by_production_data():
+--     prod LEFT merge indicator
+--     left_only rows -> rename exp_start/finish -> process_start/end
+--     module_name='E-chuck', info_name='Die exposure'
+-- - SQL 구현:
+--   sy_die_keys에 없으면 생성
+--   module_name 철자는 최종 결과에 영향을 주므로 'E-Chuck'로 통일(기존 sy module dict 기준)
+-- ============================================================================
+die_only_prod AS (
+SELECT
+    p.lot_id,
+    p.slot_seq,
+    'E-Chuck' AS module_name,
+    'Die exposure' AS info_name,
+    p.exp_start_tmstp AS process_start_tmstp,
+    p.exp_finish_tmstp AS process_end_tmstp,
+    i."order"
+FROM prod_filtered p
+LEFT JOIN sy_die_keys k
+ON p.lot_id = k.lot_id
+AND p.slot_seq = k.slot_seq
+LEFT JOIN sy_info i
+ON i.module_name = 'E-Chuck'
+AND i.info_name = 'Die exposure'
+WHERE k.lot_id IS NULL
+),
+
+-- ============================================================================
+-- track_as/ts/arr/trr
+-- - 목적: prod의 track signal on/off를 이벤트로 변환
+-- - Python 대응:
+--   __calculate_track_signal(df_origin, track_signal):
+--     df_origin[['lot_id','slot_seq', f'{sig}_on', f'{sig}_off']]
+--     module_name="Track Signal"
+--     info_name=sig.upper()
+--     rename to process_start/end
+-- ============================================================================
+track_as AS (
+SELECT
+    p.lot_id,
+    p.slot_seq,
+    'Track Signal' AS module_name,
+    'AS' AS info_name,
+    p.as_on_tmstp AS process_start_tmstp,
+    p.as_off_tmstp AS process_end_tmstp,
+    i."order"
+FROM prod_filtered p
+LEFT JOIN sy_info i
+ON i.module_name = 'Track Signal'
+AND i.info_name = 'AS'
+),
+track_ts AS (
+SELECT
+    p.lot_id,
+    p.slot_seq,
+    'Track Signal' AS module_name,
+    'TS' AS info_name,
+    p.ts_on_tmstp AS process_start_tmstp,
+    p.ts_off_tmstp AS process_end_tmstp,
+    i."order"
+FROM prod_filtered p
+LEFT JOIN sy_info i
+ON i.module_name = 'Track Signal'
+AND i.info_name = 'TS'
+),
+track_arr AS (
+SELECT
+    p.lot_id,
+    p.slot_seq,
+    'Track Signal' AS module_name,
+    'ARR' AS info_name,
+    p.arr_on_tmstp AS process_start_tmstp,
+    p.arr_off_tmstp AS process_end_tmstp,
+    i."order"
+FROM prod_filtered p
+LEFT JOIN sy_info i
+ON i.module_name = 'Track Signal'
+AND i.info_name = 'ARR'
+),
+track_trr AS (
+SELECT
+    p.lot_id,
+    p.slot_seq,
+    'Track Signal' AS module_name,
+    'TRR' AS info_name,
+    p.trr_on_tmstp AS process_start_tmstp,
+    p.trr_off_tmstp AS process_end_tmstp,
+    i."order"
+FROM prod_filtered p
+LEFT JOIN sy_info i
+ON i.module_name = 'Track Signal'
+AND i.info_name = 'TRR'
+),
+
+-- ============================================================================
+-- events_union
+-- - 목적: sy + die_only_prod + track_* 를 하나의 이벤트 스트림으로 통합
+-- - Python 대응:
+--   controller.load_sy_data():
+--     dfs=[df_sy, df_only_prod] + track_signal 4종 append
+--     df_merged = concat(dfs)
+-- ============================================================================
+events_union AS (
+SELECT
+    s.lot_id,
+    s.slot_seq,
+    s.module_name,
+    s.info_name,
+    s.process_start_tmstp,
+    s.process_end_tmstp,
+    s."order"
+FROM sy_filtered s
+
+UNION ALL
+
+SELECT
+    d.lot_id,
+    d.slot_seq,
+    d.module_name,
+    d.info_name,
+    d.process_start_tmstp,
+    d.process_end_tmstp,
+    d."order"
+FROM die_only_prod d
+
+UNION ALL
+
+SELECT
+    t.lot_id,
+    t.slot_seq,
+    t.module_name,
+    t.info_name,
+    t.process_start_tmstp,
+    t.process_end_tmstp,
+    t."order"
+FROM track_as t
+
+UNION ALL
+
+SELECT
+    t.lot_id,
+    t.slot_seq,
+    t.module_name,
+    t.info_name,
+    t.process_start_tmstp,
+    t.process_end_tmstp,
+    t."order"
+FROM track_ts t
+
+UNION ALL
+
+SELECT
+    t.lot_id,
+    t.slot_seq,
+    t.module_name,
+    t.info_name,
+    t.process_start_tmstp,
+    t.process_end_tmstp,
+    t."order"
+FROM track_arr t
+
+UNION ALL
+
+SELECT
+    t.lot_id,
+    t.slot_seq,
+    t.module_name,
+    t.info_name,
+    t.process_start_tmstp,
+    t.process_end_tmstp,
+    t."order"
+FROM track_trr t
+),
+
+-- ============================================================================
+-- events_calc
+-- - 목적: interval/duration 계산(초)
+-- - Python 대응:
+--   controller.load_sy_data():
+--     df_merged.sort_values(['info_name','process_start_tmstp'])
+--     df_merged['intervar'] = start - groupby(info_name).shift(end) seconds
+--     df_merged['duration'] = end - start seconds
+-- - 구현 포인트:
+--   interval은 음수 허용(그대로 출력)
+--   duration도 음수 가능(데이터가 그렇다면 그대로 출력)
+-- ============================================================================
+events_calc AS (
+SELECT
+    e.lot_id,
+    e.slot_seq,
+    e.module_name,
+    e.info_name,
+    e.process_start_tmstp,
+    e.process_end_tmstp,
+    e."order",
+    EXTRACT(
+        EPOCH
+        FROM (
+            e.process_start_tmstp
+            - LAG(e.process_end_tmstp) OVER (PARTITION BY e.info_name ORDER BY e.process_start_tmstp)
+        )
+    ) AS interval_sec,
+    EXTRACT(
+        EPOCH
+        FROM (
+            e.process_end_tmstp - e.process_start_tmstp
+        )
+    ) AS duration_sec
+FROM events_union e
+),
+
+-- ============================================================================
+-- events_enriched
+-- - 목적: module_name -> sub_order 매핑 + 최종 정렬용 컬럼 확정
+-- - Python 대응:
+--   sy_loader.filter_sy():
+--     filtered_df['sub_order'] = module_name.map(MODULE_DICT)
+--     sort_values(by=['order','sub_order','info_name'], ascending=False, na_position='first')
+-- ============================================================================
+events_enriched AS (
+SELECT
+    e.lot_id,
+    e.slot_seq,
+    e.module_name,
+    e.info_name,
+    e.process_start_tmstp,
+    e.process_end_tmstp,
+    e."order",
+    CASE
+        WHEN e.module_name = 'WH Track Interface' THEN 0
+        WHEN e.module_name = 'WH Unload Robot' THEN 1
+        WHEN e.module_name = 'WH Prealigner' THEN 2
+        WHEN e.module_name = 'WH load Robot' THEN 3
+        WHEN e.module_name = 'WH Load Lock 1' THEN 4
+        WHEN e.module_name = 'WH Vacuum Prealigner' THEN 5
+        WHEN e.module_name = 'WH Stage Unload Robot' THEN 6
+        WHEN e.module_name = 'WH Stage Load Robot' THEN 7
+        WHEN e.module_name = 'M-Chuck' THEN 8
+        WHEN e.module_name = 'E-Chuck' THEN 9
+        WHEN e.module_name = 'WH Load Lock 2' THEN 10
+        WHEN e.module_name = 'WH Discharger' THEN 11
+        WHEN e.module_name = 'RH Robot' THEN 12
+        WHEN e.module_name = 'RH LoadPort 1' THEN 13
+        WHEN e.module_name = 'RH LoadPort 2' THEN 14
+        WHEN e.module_name = 'RH Load Lock 1' THEN 15
+        WHEN e.module_name = 'RH Load Lock 2' THEN 16
+        WHEN e.module_name = 'In Vacuum RH Robot' THEN 17
+        WHEN e.module_name = 'RED ARM 1' THEN 18
+        WHEN e.module_name = 'RED ARM 2' THEN 19
+        WHEN e.module_name = 'Unknown' THEN 20
+        WHEN e.module_name = 'Track Signal' THEN -1
+        ELSE NULL
+    END AS sub_order,
+    e.interval_sec,
+    e.duration_sec
+FROM events_calc e
+),
+
+-- ============================================================================
+-- loss_wst / loss_loh
+-- - 목적: loss 원천 2개 테이블에서 loss_piece 생성
+-- - Python 대응:
+--   loss_loader.load_wst(), loss_loader.load_loh()
+--   load_all_loss():
+--     loss_time fillna(0) round(3)
+--     loss = result_name + "[" + loss_time + "]"
+-- ============================================================================
+loss_wst AS (
+SELECT
+    w.wafer_seq,
+    w.result_name || '[' || ROUND(COALESCE(w.loss_time, 0)::numeric, 3)::text || ']' AS loss_piece
+FROM anal_algrth_wst_result_hist w
+JOIN params p
+ON w.eqp_id = p.eqp_id
+WHERE w.summary_date BETWEEN (p.start_time::date - interval '1 day') AND (p.end_time::date + interval '1 day')
+AND w.slot_seq <> 1
+),
+loss_loh AS (
+SELECT
+    l.wafer_seq,
+    l.result_name || '[' || ROUND(COALESCE(l.loss_time, 0)::numeric, 3)::text || ']' AS loss_piece
+FROM prism_ops.anal_algrth_loh_result_hist l
+JOIN params p
+ON l.eqp_id = p.eqp_id
+WHERE l.summary_date BETWEEN (p.start_time::date - interval '1 day') AND (p.end_time::date + interval '1 day')
+),
+
+-- ============================================================================
+-- loss_all
+-- - 목적: wst + loh 통합
+-- - Python 대응:
+--   load_all_loss(): df_loss = concat([df_wst, df_loh], axis=0)
+-- ============================================================================
+loss_all AS (
+SELECT
+    wafer_seq,
+    loss_piece
+FROM loss_wst
+
+UNION ALL
+
+SELECT
+    wafer_seq,
+    loss_piece
+FROM loss_loh
+),
+
+-- ============================================================================
+-- loss_agg
+-- - 목적: wafer_seq 기준 최종 loss 문자열 1개로 확정
+-- - Python 대응:
+--   load_all_loss():
+--     df_loh.groupby(['wafer_seq'])['loss'].agg(list)
+--     df_loss concat
+--   + 요청 조건:
+--     "DB에 다중 loss가 있어도 최종은 wafer_seq 기준 1개의 문자열"
+-- - 구현:
+--   DISTINCT로 중복 제거 후 STRING_AGG로 1개 문자열 생성(정렬 포함)
+-- ============================================================================
+loss_agg AS (
+SELECT
+    a.wafer_seq,
+    STRING_AGG(a.loss_piece, ',' ORDER BY a.loss_piece) AS loss
+FROM (
+    SELECT DISTINCT
+        wafer_seq,
+        loss_piece
+    FROM loss_all
+) a
+GROUP BY a.wafer_seq
+)
+
+-- ============================================================================
+-- final
+-- - 목적: events + prod(노광정보) + loss를 결합하여 최종 JSON row 생성
+-- - Python 대응:
+--   controller.load_sy_data():
+--     df_merged.merge(df_prod[DISPLAY_COLS], on=['lot_id','slot_seq'], how='left')
+--     df_merged.merge(df_loss, on=['wafer_seq'], how='left')
+--     __fill_missing_value(df_merged)  -> SQL에서 COALESCE로 "" 보장
+-- - 주의:
+--   최종 응답은 "모든 값 문자열"이므로
+--   각 컬럼을 ::text로 변환하고 COALESCE(...,'')로 null을 빈문자 처리
+-- ============================================================================
+SELECT
+    COALESCE(e.lot_id::text, '') AS lot_id,
+    COALESCE(e.slot_seq::text, '') AS slot_seq,
+    COALESCE(e.module_name::text, '') AS module_name,
+    COALESCE(e.info_name::text, '') AS info_name,
+    COALESCE(e.process_start_tmstp::text, '') AS process_start_tmstp,
+    COALESCE(e.process_end_tmstp::text, '') AS process_end_tmstp,
+    COALESCE(e."order"::text, '') AS "order",
+    COALESCE(e.sub_order::text, '') AS sub_order,
+    COALESCE(e.interval_sec::text, '') AS interval,
+    COALESCE(e.duration_sec::text, '') AS duration,
+    COALESCE(p.chuck_id::text, '') AS chuck_id,
+    COALESCE(p.step_id::text, '') AS step_id,
+    COALESCE(p.reticle_id::text, '') AS reticle_id,
+    COALESCE(p.swap_time_sec::text, '') AS swap_time,
+    COALESCE(p.exp_start_tmstp::text, '') AS exp_start_tmstp,
+    COALESCE(p.exp_finish_tmstp::text, '') AS exp_finish_tmstp,
+    COALESCE(p.status::text, '') AS status,
+    COALESCE(p.wafer_exp_sec::text, '') AS wafer_exp_sec,
+    COALESCE(p.wafer_seq::text, '') AS wafer_seq,
+    COALESCE(p.layer_id::text, '') AS layer_id,
+    COALESCE(p.device_id::text, '') AS device_id,
+    COALESCE(l.loss::text, '') AS loss
+FROM events_enriched e
+LEFT JOIN prod_filtered p
+ON e.lot_id = p.lot_id
+AND e.slot_seq = p.slot_seq
+LEFT JOIN loss_agg l
+ON p.wafer_seq = l.wafer_seq
+ORDER BY
+    e."order" DESC NULLS FIRST,
+    e.sub_order DESC NULLS FIRST,
+    e.info_name DESC NULLS FIRST,
+    e.process_start_tmstp ASC;
