@@ -14,57 +14,42 @@ eqp as (
     on p.eqp_id = x.eqp_id
     where p.use_yn = 'Y'
 ),
-sy_raw as (
+
+-- =====================
+-- SY base (조회 + sy_info 조인 + 기간 필터)
+-- =====================
+sy_base as (
     select
         s.lot_id
-      , s.slot_seq
-      , s.module_name
-      , s.info_name
-      , s.process_start_tmstp
-      , s.process_end_tmstp
-      , s.process_tmstp
-    from eqp_prod_sy_map_hist s
-    join params x
-    on s.eqp_id = x.eqp_id
-    where s.process_tmstp >= x.start_ts - interval '4 hours'
-    and s.process_tmstp <= x.end_ts + interval '4 hours'
-),
-sy_with_order as (
-    select
-        s.lot_id
-      , s.slot_seq
+      , trim(s.slot_seq::text) as slot_seq
       , s.module_name
       , s.info_name
       , s.process_start_tmstp
       , s.process_end_tmstp
       , m."order"
-    from sy_raw s
+    from eqp_prod_sy_map_hist s
+    join params x
+    on s.eqp_id = x.eqp_id
     cross join eqp e
     left join prism_common.sy_info m
     on m.eqp_model_name = e.eqp_model_name
     and m.module_name = s.module_name
     and m.info_name = s.info_name
-),
-sy_filtered as (
-    select
-        s.lot_id
-      , s.slot_seq::text as slot_seq
-      , s.module_name
-      , s.info_name
-      , s.process_start_tmstp
-      , s.process_end_tmstp
-      , s."order"
-    from sy_with_order s
-    join params x
-    on 1 = 1
-    where s.process_start_tmstp >= x.start_ts
+    where s.process_tmstp >= x.start_ts - interval '4 hours'
+    and s.process_tmstp <= x.end_ts + interval '4 hours'
+    and s.process_start_tmstp >= x.start_ts
     and s.process_start_tmstp <= x.end_ts
 ),
-prod_raw as (
+
+-- =====================
+-- PROD base (조회 + swap_time 계산)
+-- slot_seq 소수점(.0) 제거 포함
+-- =====================
+prod_base as (
     select
         p.wafer_seq
       , p.lot_id
-      , p.slot_seq::text as slot_seq
+      , regexp_replace(trim(p.slot_seq::text), '\.0+$', '') as slot_seq
       , p.step_id
       , p.reticle_id
       , p.chuck_id
@@ -82,89 +67,104 @@ prod_raw as (
       , p.arr_off_tmstp
       , p.trr_on_tmstp
       , p.trr_off_tmstp
+      , extract(epoch from (
+            p.exp_start_tmstp
+            - lag(p.exp_finish_tmstp) over (order by p.exp_start_tmstp)
+        )) as swap_time
     from eqp_prod_std_wafer_hist p
     join params x
     on p.eqp_id = x.eqp_id
     where p.exp_start_tmstp >= x.start_ts
     and p.exp_start_tmstp <= x.end_ts
 ),
-prod_with_swap as (
+
+-- =====================
+-- Only PROD Die exposure events (SY에 없는 경우만 추가)
+-- =====================
+only_prod_events as (
     select
-        p.*
-      , extract(epoch from (p.exp_start_tmstp - lag(p.exp_finish_tmstp) over (order by p.exp_start_tmstp))) as swap_time
-    from prod_raw p
-),
-only_prod_die_exposure as (
-    select
-        p.lot_id
+        'only_prod'::text as src
+      , p.lot_id
       , p.slot_seq
       , 'E-chuck'::text as module_name
       , 'Die exposure'::text as info_name
       , p.exp_start_tmstp as process_start_tmstp
       , p.exp_finish_tmstp as process_end_tmstp
       , null::int as "order"
-    from prod_with_swap p
+    from prod_base p
     where not exists (
         select
             1
-        from sy_filtered s
+        from sy_base s
         where s.lot_id = p.lot_id
         and s.slot_seq = p.slot_seq
         and s.info_name in ('Die exposure', 'Die exposuer')
     )
 ),
-track_signal_events as (
+
+-- =====================
+-- Track signal events (AS/TS/ARR/TRR)
+-- =====================
+track_events as (
     select
-        lot_id
+        'track'::text as src
+      , lot_id
       , slot_seq
       , 'Track Signal'::text as module_name
       , 'AS'::text as info_name
       , as_on_tmstp as process_start_tmstp
       , as_off_tmstp as process_end_tmstp
       , null::int as "order"
-    from prod_with_swap
+    from prod_base
     where as_on_tmstp is not null
     and as_off_tmstp is not null
 
     union all
     select
-        lot_id
+        'track'::text as src
+      , lot_id
       , slot_seq
       , 'Track Signal'::text as module_name
       , 'TS'::text as info_name
       , ts_on_tmstp as process_start_tmstp
       , ts_off_tmstp as process_end_tmstp
       , null::int as "order"
-    from prod_with_swap
+    from prod_base
     where ts_on_tmstp is not null
     and ts_off_tmstp is not null
 
     union all
     select
-        lot_id
+        'track'::text as src
+      , lot_id
       , slot_seq
       , 'Track Signal'::text as module_name
       , 'ARR'::text as info_name
       , arr_on_tmstp as process_start_tmstp
       , arr_off_tmstp as process_end_tmstp
       , null::int as "order"
-    from prod_with_swap
+    from prod_base
     where arr_on_tmstp is not null
     and arr_off_tmstp is not null
 
     union all
     select
-        lot_id
+        'track'::text as src
+      , lot_id
       , slot_seq
       , 'Track Signal'::text as module_name
       , 'TRR'::text as info_name
       , trr_on_tmstp as process_start_tmstp
       , trr_off_tmstp as process_end_tmstp
       , null::int as "order"
-    from prod_with_swap
+    from prod_base
     where trr_on_tmstp is not null
     and trr_off_tmstp is not null
 ),
+
+-- =====================
+-- Events union (SY + only_prod + track)
+-- =====================
 events as (
     select
         'sy'::text as src
@@ -175,11 +175,11 @@ events as (
       , process_start_tmstp
       , process_end_tmstp
       , "order"
-    from sy_filtered
+    from sy_base
 
     union all
     select
-        'only_prod'::text as src
+        src
       , lot_id
       , slot_seq
       , module_name
@@ -187,11 +187,11 @@ events as (
       , process_start_tmstp
       , process_end_tmstp
       , "order"
-    from only_prod_die_exposure
+    from only_prod_events
 
     union all
     select
-        'track'::text as src
+        src
       , lot_id
       , slot_seq
       , module_name
@@ -199,9 +199,13 @@ events as (
       , process_start_tmstp
       , process_end_tmstp
       , "order"
-    from track_signal_events
+    from track_events
 ),
-events_timecalc as (
+
+-- =====================
+-- interval/duration 계산 (파이썬과 동일: info_name 기준)
+-- =====================
+events_time as (
     select
         e.src
       , e.lot_id
@@ -221,141 +225,128 @@ events_timecalc as (
       , extract(epoch from (e.process_end_tmstp - e.process_start_tmstp)) as duration
     from events e
 ),
-prod_display as (
-    select
-        lot_id
-      , slot_seq
-      , chuck_id
-      , step_id
-      , reticle_id
-      , swap_time
-      , exp_start_tmstp
-      , exp_finish_tmstp
-      , status
-      , wafer_exp_sec
-      , wafer_seq
-      , layer_id
-      , device_id
-    from prod_with_swap
-),
-loss_items as (
-    select
-        w.wafer_seq
-      , w.result_name || '[' || coalesce(round(w.loss_time::numeric, 3)::text, '0') || ']' as loss_item
-    from anal_algrth_wst_result_hist w
-    join params x
-    on w.eqp_id = x.eqp_id
-    where w.summary_date between x.start_ts::date - interval '1 day' and x.end_ts::date + interval '1 day'
 
-    union all
-
-    select
-        l.wafer_seq
-      , l.result_name || '[' || coalesce(round(l.loss_time::numeric, 3)::text, '0') || ']' as loss_item
-    from prism_ops.anal_algrth_loh_result_hist l
-    join params x
-    on l.eqp_id = x.eqp_id
-    where l.summary_date between x.start_ts::date - interval '1 day' and x.end_ts::date + interval '1 day'
-),
+-- =====================
+-- Loss (wafer_seq별 문자열 집계)
+-- - [0.000] -> [0.0]
+-- - 불필요한 trailing 0 제거 + 소수점 1자리 최소 유지
+-- =====================
 loss_by_wafer as (
+    with loss_items as (
+        select
+            w.wafer_seq
+          , w.result_name as result_name
+          , coalesce(round(w.loss_time::numeric, 3), 0::numeric) as loss_time_rounded
+        from anal_algrth_wst_result_hist w
+        join params x
+        on w.eqp_id = x.eqp_id
+        where w.summary_date between x.start_ts::date - interval '1 day' and x.end_ts::date + interval '1 day'
+
+        union all
+
+        select
+            l.wafer_seq
+          , l.result_name as result_name
+          , coalesce(round(l.loss_time::numeric, 3), 0::numeric) as loss_time_rounded
+        from prism_ops.anal_algrth_loh_result_hist l
+        join params x
+        on l.eqp_id = x.eqp_id
+        where l.summary_date between x.start_ts::date - interval '1 day' and x.end_ts::date + interval '1 day'
+    ),
+    loss_items_text as (
+        select
+            wafer_seq
+          , result_name
+          , case
+                when position('.' in normalized) = 0 then normalized || '.0'
+                else normalized
+            end as loss_time_text
+        from (
+            select
+                wafer_seq
+              , result_name
+              , regexp_replace(
+                    regexp_replace(
+                        regexp_replace(loss_time_rounded::text, '(\.\d*?)0+$', '\1'),
+                        '\.$',
+                        ''
+                    ),
+                    '^$',
+                    '0'
+                ) as normalized
+            from loss_items
+        ) t
+    )
     select
         wafer_seq
-      , string_agg(loss_item, ', ' order by loss_item) as loss
-    from loss_items
+      , string_agg(result_name || '[' || loss_time_text || ']', ', ' order by result_name || '[' || loss_time_text || ']') as loss
+    from loss_items_text
     group by wafer_seq
+),
+
+-- =====================
+-- Final (events + prod + loss + sub_order + 정렬)
+-- =====================
+final_result as (
+    select
+        e.lot_id
+      , e.slot_seq
+      , e.module_name
+      , e.info_name
+      , e.process_start_tmstp
+      , e.process_end_tmstp
+      , e."order"
+      , e.interval
+      , e.duration
+      , case e.module_name
+            when 'WH Track Interface' then 0
+            when 'WH Unload Robot' then 1
+            when 'WH Prealigner' then 2
+            when 'WH load Robot' then 3
+            when 'WH Load Lock 1' then 4
+            when 'WH Vacuum Prealigner' then 5
+            when 'WH Stage Unload Robot' then 6
+            when 'WH Stage Load Robot' then 7
+            when 'M-Chuck' then 8
+            when 'E-Chuck' then 9
+            when 'WH Load Lock 2' then 10
+            when 'WH Discharger' then 11
+            when 'RH Robot' then 12
+            when 'RH LoadPort 1' then 13
+            when 'RH LoadPort 2' then 14
+            when 'RH Load Lock 1' then 15
+            when 'RH Load Lock 2' then 16
+            when 'In Vacuum RH Robot' then 17
+            when 'RED ARM 1' then 18
+            when 'RED ARM 2' then 19
+            when 'Unknown' then 20
+            when 'Track Signal' then -1
+            else null
+        end as sub_order
+      , p.chuck_id
+      , p.step_id
+      , p.reticle_id
+      , p.swap_time
+      , p.exp_start_tmstp
+      , p.exp_finish_tmstp
+      , p.status
+      , p.wafer_exp_sec
+      , p.wafer_seq
+      , p.layer_id
+      , p.device_id
+      , l.loss
+    from events_time e
+    left join prod_base p
+    on p.lot_id = e.lot_id
+    and p.slot_seq = e.slot_seq
+    left join loss_by_wafer l
+    on l.wafer_seq = p.wafer_seq
 )
 select
-    e.lot_id
-  , e.slot_seq
-  , e.module_name
-  , e.info_name
-  , e.process_start_tmstp
-  , e.process_end_tmstp
-  , e."order"
-  , e.interval
-  , e.duration
-  , p.chuck_id
-  , p.step_id
-  , p.reticle_id
-  , p.swap_time
-  , p.exp_start_tmstp
-  , p.exp_finish_tmstp
-  , p.status
-  , p.wafer_exp_sec
-  , p.wafer_seq
-  , p.layer_id
-  , p.device_id
-  , lbw.loss
-from events_timecalc e
-left join prod_display p
-on p.lot_id = e.lot_id
-and p.slot_seq = e.slot_seq
-left join loss_by_wafer lbw
-on lbw.wafer_seq = p.wafer_seq
+    *
+from final_result
 order by
-    e.process_start_tmstp
-  , e.src
-  , e.lot_id
-  , e.slot_seq
-  , e.info_name;
-
-
-
-
-select
-    e.lot_id
-  , e.slot_seq
-  , e.module_name
-  , e.info_name
-  , e.process_start_tmstp
-  , e.process_end_tmstp
-  , e."order"
-  , e.interval
-  , e.duration
-  , case e.module_name
-        when 'WH Track Interface' then 0
-        when 'WH Unload Robot' then 1
-        when 'WH Prealigner' then 2
-        when 'WH load Robot' then 3
-        when 'WH Load Lock 1' then 4
-        when 'WH Vacuum Prealigner' then 5
-        when 'WH Stage Unload Robot' then 6
-        when 'WH Stage Load Robot' then 7
-        when 'M-Chuck' then 8
-        when 'E-Chuck' then 9
-        when 'WH Load Lock 2' then 10
-        when 'WH Discharger' then 11
-        when 'RH Robot' then 12
-        when 'RH LoadPort 1' then 13
-        when 'RH LoadPort 2' then 14
-        when 'RH Load Lock 1' then 15
-        when 'RH Load Lock 2' then 16
-        when 'In Vacuum RH Robot' then 17
-        when 'RED ARM 1' then 18
-        when 'RED ARM 2' then 19
-        when 'Unknown' then 20
-        when 'Track Signal' then -1
-        else null
-    end as sub_order
-  , p.chuck_id
-  , p.step_id
-  , p.reticle_id
-  , p.swap_time
-  , p.exp_start_tmstp
-  , p.exp_finish_tmstp
-  , p.status
-  , p.wafer_exp_sec
-  , p.wafer_seq
-  , p.layer_id
-  , p.device_id
-  , lbw.loss
-from events_timecalc e
-left join prod_display p
-on p.lot_id = e.lot_id
-and p.slot_seq = e.slot_seq
-left join loss_by_wafer lbw
-on lbw.wafer_seq = p.wafer_seq
-order by
-    e."order" desc nulls first
+    "order" desc nulls first
   , sub_order desc nulls first
-  , e.info_name desc nulls first;
+  , info_name desc nulls first
+  , process_start_tmstp;
