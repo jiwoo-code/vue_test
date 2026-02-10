@@ -262,3 +262,12 @@ select
     count(*) filter (where loss like '[%') as loh_loss_row_count
   , count(distinct wafer_seq) filter (where loss like '[%') as loh_wafer_count
 from final_result;
+
+
+
+
+
+select
+    count(distinct wafer_seq) filter (where loss like '[%') as loh_wafer_count
+  , count(distinct wafer_seq) filter (where loss not like '[%' and loss <> '') as non_loh_wafer_with_loss
+from final_result;
