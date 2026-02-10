@@ -2,32 +2,122 @@ with
 params as (
     select
         'PAXV813'::text as eqp_id
-      , '2026-01-13 00:00:00'::timestamp as start_ts
-      , '2026-01-14 00:00:00'::timestamp as end_ts
+      , '2026-01-13 11:15:21'::timestamp as start_ts
+      , '2026-01-13 12:15:21'::timestamp as end_ts
 ),
-sy_keys as (
-    select distinct
+eqp as (
+    select
+        p.eqp_id
+      , p.eqp_model_name
+    from photo_eqp_info p
+    join params x
+    on p.eqp_id = x.eqp_id
+    where p.use_yn = 'Y'
+),
+sy_raw as (
+    select
         s.lot_id
-      , trim(s.slot_seq::text) as slot_seq
+      , s.slot_seq
+      , s.module_name
+      , s.info_name
+      , s.process_start_tmstp
+      , s.process_end_tmstp
+      , s.process_tmstp
     from eqp_prod_sy_map_hist s
     join params x
     on s.eqp_id = x.eqp_id
+    where s.process_tmstp >= x.start_ts - interval '4 hours'
+    and s.process_tmstp <= x.end_ts + interval '4 hours'
+),
+sy_with_order as (
+    select
+        s.lot_id
+      , s.slot_seq
+      , s.module_name
+      , s.info_name
+      , s.process_start_tmstp
+      , s.process_end_tmstp
+      , m."order"
+    from sy_raw s
+    cross join eqp e
+    left join prism_common.sy_info m
+    on m.eqp_model_name = e.eqp_model_name
+    and m.module_name = s.module_name
+    and m.info_name = s.info_name
+),
+sy_filtered as (
+    select
+        s.lot_id
+      , s.slot_seq::text as slot_seq
+      , s.module_name
+      , s.info_name
+      , s.process_start_tmstp
+      , s.process_end_tmstp
+      , s."order"
+    from sy_with_order s
+    join params x
+    on 1 = 1
     where s.process_start_tmstp >= x.start_ts
     and s.process_start_tmstp <= x.end_ts
 ),
-prod_keys as (
-    select distinct
-        p.lot_id
-      , trim(p.slot_seq::text) as slot_seq
+prod_filtered as (
+    select
+        p.wafer_seq
+      , p.lot_id
+      , p.slot_seq::text as slot_seq
+      , p.exp_start_tmstp
+      , p.exp_finish_tmstp
     from eqp_prod_std_wafer_hist p
     join params x
     on p.eqp_id = x.eqp_id
     where p.exp_start_tmstp >= x.start_ts
     and p.exp_start_tmstp <= x.end_ts
+),
+only_prod_die_exposure as (
+    select
+        p.lot_id
+      , p.slot_seq
+      , 'E-chuck'::text as module_name
+      , 'Die exposure'::text as info_name
+      , p.exp_start_tmstp as process_start_tmstp
+      , p.exp_finish_tmstp as process_end_tmstp
+      , null::int as "order"
+    from prod_filtered p
+    where not exists (
+        select
+            1
+        from sy_filtered s
+        where s.lot_id = p.lot_id
+        and s.slot_seq = p.slot_seq
+        and s.info_name in ('Die exposure', 'Die exposuer')
+    )
 )
 select
-    count(*) as key_intersection_count
-from sy_keys s
-join prod_keys p
-on p.lot_id = s.lot_id
-and p.slot_seq = s.slot_seq;
+    'sy'::text as src
+  , lot_id
+  , slot_seq
+  , module_name
+  , info_name
+  , process_start_tmstp
+  , process_end_tmstp
+  , "order"
+from sy_filtered
+
+union all
+
+select
+    'only_prod'::text as src
+  , lot_id
+  , slot_seq
+  , module_name
+  , info_name
+  , process_start_tmstp
+  , process_end_tmstp
+  , "order"
+from only_prod_die_exposure
+order by
+    src
+  , process_start_tmstp
+  , lot_id
+  , slot_seq
+limit 500;
