@@ -60,13 +60,20 @@ sy_filtered as (
     where s.process_start_tmstp >= x.start_ts
     and s.process_start_tmstp <= x.end_ts
 ),
-prod_base as (
+prod_raw as (
     select
         p.wafer_seq
       , p.lot_id
       , p.slot_seq::text as slot_seq
+      , p.step_id
+      , p.reticle_id
+      , p.chuck_id
       , p.exp_start_tmstp
       , p.exp_finish_tmstp
+      , p.status
+      , p.wafer_exp_sec
+      , p.layer_id
+      , p.device_id
       , p.as_on_tmstp
       , p.as_off_tmstp
       , p.ts_on_tmstp
@@ -81,6 +88,12 @@ prod_base as (
     where p.exp_start_tmstp >= x.start_ts
     and p.exp_start_tmstp <= x.end_ts
 ),
+prod_with_swap as (
+    select
+        p.*
+      , extract(epoch from (p.exp_start_tmstp - lag(p.exp_finish_tmstp) over (order by p.exp_start_tmstp))) as swap_time
+    from prod_raw p
+),
 only_prod_die_exposure as (
     select
         p.lot_id
@@ -90,7 +103,7 @@ only_prod_die_exposure as (
       , p.exp_start_tmstp as process_start_tmstp
       , p.exp_finish_tmstp as process_end_tmstp
       , null::int as "order"
-    from prod_base p
+    from prod_with_swap p
     where not exists (
         select
             1
@@ -109,7 +122,7 @@ track_signal_events as (
       , as_on_tmstp as process_start_tmstp
       , as_off_tmstp as process_end_tmstp
       , null::int as "order"
-    from prod_base
+    from prod_with_swap
     where as_on_tmstp is not null
     and as_off_tmstp is not null
 
@@ -122,7 +135,7 @@ track_signal_events as (
       , ts_on_tmstp as process_start_tmstp
       , ts_off_tmstp as process_end_tmstp
       , null::int as "order"
-    from prod_base
+    from prod_with_swap
     where ts_on_tmstp is not null
     and ts_off_tmstp is not null
 
@@ -135,7 +148,7 @@ track_signal_events as (
       , arr_on_tmstp as process_start_tmstp
       , arr_off_tmstp as process_end_tmstp
       , null::int as "order"
-    from prod_base
+    from prod_with_swap
     where arr_on_tmstp is not null
     and arr_off_tmstp is not null
 
@@ -148,7 +161,7 @@ track_signal_events as (
       , trr_on_tmstp as process_start_tmstp
       , trr_off_tmstp as process_end_tmstp
       , null::int as "order"
-    from prod_base
+    from prod_with_swap
     where trr_on_tmstp is not null
     and trr_off_tmstp is not null
 ),
@@ -190,30 +203,69 @@ events as (
 ),
 events_timecalc as (
     select
-        src
-      , lot_id
-      , slot_seq
-      , module_name
-      , info_name
-      , process_start_tmstp
-      , process_end_tmstp
-      , "order"
+        e.src
+      , e.lot_id
+      , e.slot_seq
+      , e.module_name
+      , e.info_name
+      , e.process_start_tmstp
+      , e.process_end_tmstp
+      , e."order"
       , extract(epoch from (
-            process_start_tmstp
-            - lag(process_end_tmstp) over (
-                partition by info_name
-                order by process_start_tmstp
+            e.process_start_tmstp
+            - lag(e.process_end_tmstp) over (
+                partition by e.info_name
+                order by e.process_start_tmstp
             )
         )) as interval
-      , extract(epoch from (process_end_tmstp - process_start_tmstp)) as duration
-    from events
+      , extract(epoch from (e.process_end_tmstp - e.process_start_tmstp)) as duration
+    from events e
+),
+prod_display as (
+    select
+        lot_id
+      , slot_seq
+      , chuck_id
+      , step_id
+      , reticle_id
+      , swap_time
+      , exp_start_tmstp
+      , exp_finish_tmstp
+      , status
+      , wafer_exp_sec
+      , wafer_seq
+      , layer_id
+      , device_id
+    from prod_with_swap
 )
 select
-    *
-from events_timecalc
+    e.lot_id
+  , e.slot_seq
+  , e.module_name
+  , e.info_name
+  , e.process_start_tmstp
+  , e.process_end_tmstp
+  , e."order"
+  , e.interval
+  , e.duration
+  , p.chuck_id
+  , p.step_id
+  , p.reticle_id
+  , p.swap_time
+  , p.exp_start_tmstp
+  , p.exp_finish_tmstp
+  , p.status
+  , p.wafer_exp_sec
+  , p.wafer_seq
+  , p.layer_id
+  , p.device_id
+from events_timecalc e
+left join prod_display p
+on p.lot_id = e.lot_id
+and p.slot_seq = e.slot_seq
 order by
-    process_start_tmstp
-  , src
-  , lot_id
-  , slot_seq
-  , info_name;
+    e.process_start_tmstp
+  , e.src
+  , e.lot_id
+  , e.slot_seq
+  , e.info_name;
