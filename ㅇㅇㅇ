@@ -258,16 +258,409 @@ order by
 
 
 
-select
-    count(*) filter (where loss like '[%') as loh_loss_row_count
-  , count(distinct wafer_seq) filter (where loss like '[%') as loh_wafer_count
-from final_result;
 
 
 
 
 
-select
-    count(distinct wafer_seq) filter (where loss like '[%') as loh_wafer_count
-  , count(distinct wafer_seq) filter (where loss not like '[%' and loss <> '') as non_loh_wafer_with_loss
-from final_result;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+with
+params as (
+SELECT
+    'PAXV813'::text as eqp_id
+  , '2026-01-13 11:15:21'::timestamp as start_ts
+  , '2026-01-13 12:15:21'::timestamp as end_ts
+),
+eqp as (
+SELECT
+    p.eqp_id
+  , p.eqp_model_name
+FROM photo_eqp_info p
+JOIN params x
+ON p.eqp_id = x.eqp_id
+WHERE p.use_yn = 'Y'
+),
+
+-- =====================
+-- SY base
+-- - sy_info 조인에 eqp_model_name이 필요하므로 eqp CTE를 사용
+-- =====================
+sy_base as (
+SELECT
+    s.lot_id
+  , trim(s.slot_seq::text) as slot_seq
+  , s.module_name
+  , s.info_name
+  , s.process_start_tmstp
+  , s.process_end_tmstp
+  , m."order"
+FROM eqp_prod_sy_map_hist s
+JOIN params x
+ON s.eqp_id = x.eqp_id
+CROSS JOIN eqp e
+LEFT JOIN prism_common.sy_info m
+ON m.eqp_model_name = e.eqp_model_name
+AND m.module_name = s.module_name
+AND m.info_name = s.info_name
+WHERE s.process_tmstp >= x.start_ts - interval '4 hours'
+AND s.process_tmstp <= x.end_ts + interval '4 hours'
+AND s.process_start_tmstp >= x.start_ts
+AND s.process_start_tmstp <= x.end_ts
+),
+
+-- =====================
+-- PROD base
+-- - slot_seq: 소수점 제거 (예: '12.0' -> '12')
+-- - swap_time: 직전 exp_finish와의 차이(초)
+-- =====================
+prod_base as (
+SELECT
+    p.wafer_seq
+  , p.lot_id
+  , regexp_replace(trim(p.slot_seq::text), '\.0+$', '') as slot_seq
+  , p.step_id
+  , p.reticle_id
+  , p.chuck_id
+  , p.exp_start_tmstp
+  , p.exp_finish_tmstp
+  , p.status
+  , p.wafer_exp_sec
+  , p.layer_id
+  , p.device_id
+  , p.as_on_tmstp
+  , p.as_off_tmstp
+  , p.ts_on_tmstp
+  , p.ts_off_tmstp
+  , p.arr_on_tmstp
+  , p.arr_off_tmstp
+  , p.trr_on_tmstp
+  , p.trr_off_tmstp
+  , extract(epoch from (
+        p.exp_start_tmstp
+        - lag(p.exp_finish_tmstp) over (order by p.exp_start_tmstp)
+    )) as swap_time
+FROM eqp_prod_std_wafer_hist p
+JOIN params x
+ON p.eqp_id = x.eqp_id
+WHERE p.exp_start_tmstp >= x.start_ts
+AND p.exp_start_tmstp <= x.end_ts
+),
+
+-- =====================
+-- Only PROD Die exposure (SY에 없던 경우만 추가)
+-- =====================
+only_prod_events as (
+SELECT
+    p.lot_id
+  , p.slot_seq
+  , 'E-chuck'::text as module_name
+  , 'Die exposure'::text as info_name
+  , p.exp_start_tmstp as process_start_tmstp
+  , p.exp_finish_tmstp as process_end_tmstp
+  , null::int as "order"
+FROM prod_base p
+WHERE not exists (
+    SELECT
+        1
+    FROM sy_base s
+    WHERE s.lot_id = p.lot_id
+    AND s.slot_seq = p.slot_seq
+    AND s.info_name in ('Die exposure', 'Die exposuer')
+)
+),
+
+-- =====================
+-- Track events (AS/TS/ARR/TRR)
+-- =====================
+track_events as (
+SELECT
+    lot_id
+  , slot_seq
+  , 'Track Signal'::text as module_name
+  , 'AS'::text as info_name
+  , as_on_tmstp as process_start_tmstp
+  , as_off_tmstp as process_end_tmstp
+  , null::int as "order"
+FROM prod_base
+WHERE as_on_tmstp is not null
+AND as_off_tmstp is not null
+
+UNION ALL
+SELECT
+    lot_id
+  , slot_seq
+  , 'Track Signal'
+  , 'TS'
+  , ts_on_tmstp
+  , ts_off_tmstp
+  , null
+FROM prod_base
+WHERE ts_on_tmstp is not null
+AND ts_off_tmstp is not null
+
+UNION ALL
+SELECT
+    lot_id
+  , slot_seq
+  , 'Track Signal'
+  , 'ARR'
+  , arr_on_tmstp
+  , arr_off_tmstp
+  , null
+FROM prod_base
+WHERE arr_on_tmstp is not null
+AND arr_off_tmstp is not null
+
+UNION ALL
+SELECT
+    lot_id
+  , slot_seq
+  , 'Track Signal'
+  , 'TRR'
+  , trr_on_tmstp
+  , trr_off_tmstp
+  , null
+FROM prod_base
+WHERE trr_on_tmstp is not null
+AND trr_off_tmstp is not null
+),
+
+-- =====================
+-- Events union
+-- =====================
+events as (
+SELECT
+    lot_id
+  , slot_seq
+  , module_name
+  , info_name
+  , process_start_tmstp
+  , process_end_tmstp
+  , "order"
+FROM sy_base
+
+UNION ALL
+SELECT
+    lot_id
+  , slot_seq
+  , module_name
+  , info_name
+  , process_start_tmstp
+  , process_end_tmstp
+  , "order"
+FROM only_prod_events
+
+UNION ALL
+SELECT
+    lot_id
+  , slot_seq
+  , module_name
+  , info_name
+  , process_start_tmstp
+  , process_end_tmstp
+  , "order"
+FROM track_events
+),
+
+-- =====================
+-- interval / duration
+-- - 파이썬 동일: info_name 기준으로 interval 계산
+-- =====================
+events_time as (
+SELECT
+    e.lot_id
+  , e.slot_seq
+  , e.module_name
+  , e.info_name
+  , e.process_start_tmstp
+  , e.process_end_tmstp
+  , e."order"
+  , extract(epoch from (
+        e.process_start_tmstp
+        - lag(e.process_end_tmstp) over (
+            partition by e.info_name
+            order by e.process_start_tmstp
+        )
+    )) as interval
+  , extract(epoch from (e.process_end_tmstp - e.process_start_tmstp)) as duration
+FROM events e
+),
+
+-- =====================
+-- prod_wafer (loss 조회 범위 축소: 성능 핵심)
+-- =====================
+prod_wafer as (
+SELECT distinct
+    wafer_seq
+FROM prod_base
+WHERE wafer_seq is not null
+),
+
+-- =====================
+-- loss_time 텍스트 정규화 표현식 설명
+-- 1) round(..., 3) 후 text 변환
+-- 2) '(\.\d*?)0+$'  : 소수점 뒤 trailing 0 제거 (예: 25.370 -> 25.37)
+-- 3) '\.$'         : 끝이 '.'이면 제거 (예: 10. -> 10)
+-- 4) 결과에 '.'가 없으면 '.0'을 붙여 최소 1자리 소수 유지
+-- =====================
+
+loh_list_by_wafer as (
+SELECT
+    l.wafer_seq
+  , '['
+    || string_agg(
+        quote_literal(
+            l.result_name
+            || '['
+            || case
+                    when position('.' in normalized) = 0 then normalized || '.0'
+                    else normalized
+               end
+            || ']'
+        ),
+        ', '
+        order by l.result_name
+    )
+    || ']' as loss
+FROM (
+    SELECT
+        l.wafer_seq
+      , l.result_name
+      , regexp_replace(
+            regexp_replace(
+                regexp_replace(coalesce(round(l.loss_time::numeric, 3), 0::numeric)::text, '(\.\d*?)0+$', '\1'),
+                '\.$',
+                ''
+            ),
+            '^$',
+            '0'
+        ) as normalized
+    FROM prism_ops.anal_algrth_loh_result_hist l
+    JOIN params x
+    ON l.eqp_id = x.eqp_id
+    JOIN prod_wafer pw
+    ON pw.wafer_seq = l.wafer_seq
+    WHERE l.summary_date between x.start_ts::date - interval '1 day'
+                           and x.end_ts::date + interval '1 day'
+) l
+GROUP BY l.wafer_seq
+),
+
+wst_text_by_wafer as (
+SELECT
+    w.wafer_seq
+  , min(
+        w.result_name
+        || '['
+        || case
+                when position('.' in normalized) = 0 then normalized || '.0'
+                else normalized
+           end
+        || ']'
+    ) as loss
+FROM (
+    SELECT
+        w.wafer_seq
+      , w.result_name
+      , regexp_replace(
+            regexp_replace(
+                regexp_replace(coalesce(round(w.loss_time::numeric, 3), 0::numeric)::text, '(\.\d*?)0+$', '\1'),
+                '\.$',
+                ''
+            ),
+            '^$',
+            '0'
+        ) as normalized
+    FROM anal_algrth_wst_result_hist w
+    JOIN params x
+    ON w.eqp_id = x.eqp_id
+    JOIN prod_wafer pw
+    ON pw.wafer_seq = w.wafer_seq
+    WHERE w.summary_date between x.start_ts::date - interval '1 day'
+                           and x.end_ts::date + interval '1 day'
+) w
+GROUP BY w.wafer_seq
+),
+
+-- =====================
+-- CSV 정책: LOH 우선, 없으면 WST
+-- =====================
+loss_final_by_wafer as (
+SELECT
+    pw.wafer_seq
+  , case
+        when loh.loss is not null then loh.loss
+        else coalesce(wst.loss, '')
+    end as loss
+FROM prod_wafer pw
+LEFT JOIN loh_list_by_wafer loh
+ON loh.wafer_seq = pw.wafer_seq
+LEFT JOIN wst_text_by_wafer wst
+ON wst.wafer_seq = pw.wafer_seq
+),
+
+-- =====================
+-- Final (fill_missing_value 반영)
+-- =====================
+final_result as (
+SELECT
+    coalesce(e.lot_id, '') as lot_id
+  , coalesce(e.slot_seq, '') as slot_seq
+  , e.module_name
+  , e.info_name
+  , e.process_start_tmstp
+  , e.process_end_tmstp
+  , e."order"
+  , coalesce(e.interval, -1) as interval
+  , coalesce(e.duration, -1) as duration
+  , coalesce(p.chuck_id, -1) as chuck_id
+  , coalesce(p.step_id, '') as step_id
+  , coalesce(p.reticle_id, '') as reticle_id
+  , coalesce(p.swap_time, -1) as swap_time
+  , p.exp_start_tmstp
+  , p.exp_finish_tmstp
+  , coalesce(p.status, '') as status
+  , coalesce(p.wafer_exp_sec, -1) as wafer_exp_sec
+  , p.wafer_seq
+  , p.layer_id
+  , p.device_id
+  , coalesce(l.loss, '') as loss
+FROM events_time e
+LEFT JOIN prod_base p
+ON p.lot_id = e.lot_id
+AND p.slot_seq = e.slot_seq
+LEFT JOIN loss_final_by_wafer l
+ON l.wafer_seq = p.wafer_seq
+)
+SELECT
+    *
+FROM final_result
+ORDER BY
+    "order" desc nulls first
+  , info_name desc nulls first
+  , process_start_tmstp;
