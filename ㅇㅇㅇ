@@ -9,9 +9,6 @@ eqp as (
     select
         p.eqp_id
       , p.eqp_model_name
-      , p.schema_name
-      , p.line_group_id
-      , p.depart_name
     from photo_eqp_info p
     join params x
     on p.eqp_id = x.eqp_id
@@ -50,7 +47,13 @@ sy_with_order as (
 ),
 sy_filtered as (
     select
-        *
+        s.lot_id
+      , s.slot_seq::text as slot_seq
+      , s.module_name
+      , s.info_name
+      , s.process_start_tmstp
+      , s.process_end_tmstp
+      , s."order"
     from sy_with_order s
     join params x
     on 1 = 1
@@ -61,68 +64,61 @@ prod_raw as (
     select
         p.wafer_seq
       , p.lot_id
-      , p.slot_seq
-      , p.layer_id
-      , p.device_id
+      , p.slot_seq::text as slot_seq
       , p.step_id
       , p.reticle_id
-      , p.shuck_id as chuck_id
+      , p.chuck_id
       , p.exp_start_tmstp
       , p.exp_finish_tmstp
-      , p.wafer_exp_sec
       , p.status
-      , p.as_on_tmstp
-      , p.as_off_tmstp
-      , p.ts_on_tmstp
-      , p.ts_off_tmstp
-      , p.arr_on_tmstp
-      , p.arr_off_tmstp
-      , p.trr_on_tmstp
-      , p.trr_off_tmstp
+      , p.wafer_exp_sec
+      , p.layer_id
+      , p.device_id
     from eqp_prod_std_wafer_hist p
     join params x
     on p.eqp_id = x.eqp_id
     where p.file_date between x.start_ts::date - interval '1 day' and x.end_ts::date + interval '1 day'
 ),
+prod_with_swap as (
+    select
+        p.*
+      , extract(epoch from (p.exp_start_tmstp - lag(p.exp_finish_tmstp) over (order by p.exp_start_tmstp))) as swap_time
+    from prod_raw p
+),
 prod_filtered as (
     select
-        *
-    from prod_raw p
+        p.*
+    from prod_with_swap p
     join params x
     on 1 = 1
     where p.exp_start_tmstp >= x.start_ts
     and p.exp_start_tmstp <= x.end_ts
 )
 select
-    'sy'::text as src
-  , s.lot_id
+    s.lot_id
   , s.slot_seq
   , s.module_name
   , s.info_name
   , s.process_start_tmstp
   , s.process_end_tmstp
   , s."order"
-  , null::bigint as wafer_seq
-  , null::timestamp as exp_start_tmstp
-  , null::timestamp as exp_finish_tmstp
-from sy_filtered s
-
-union all
-
-select
-    'prod'::text as src
-  , p.lot_id
-  , p.slot_seq::text as module_name
-  , null::text as module_name
-  , null::text as info_name
-  , null::timestamp as process_start_tmstp
-  , null::timestamp as process_end_tmstp
-  , null::int as "order"
-  , p.wafer_seq
+  , p.chuck_id
+  , p.step_id
+  , p.reticle_id
+  , p.swap_time
   , p.exp_start_tmstp
   , p.exp_finish_tmstp
-from prod_filtered p
+  , p.status
+  , p.wafer_exp_sec
+  , p.wafer_seq
+  , p.layer_id
+  , p.device_id
+from sy_filtered s
+left join prod_filtered p
+on p.lot_id = s.lot_id
+and p.slot_seq = s.slot_seq
 order by
-    src
-  , lot_id
-  , slot_seq;
+    s.process_start_tmstp
+  , s.lot_id
+  , s.slot_seq
+limit 500;
