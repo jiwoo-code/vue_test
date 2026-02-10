@@ -298,3 +298,64 @@ order by
   , e.lot_id
   , e.slot_seq
   , e.info_name;
+
+
+
+
+select
+    e.lot_id
+  , e.slot_seq
+  , e.module_name
+  , e.info_name
+  , e.process_start_tmstp
+  , e.process_end_tmstp
+  , e."order"
+  , e.interval
+  , e.duration
+  , case e.module_name
+        when 'WH Track Interface' then 0
+        when 'WH Unload Robot' then 1
+        when 'WH Prealigner' then 2
+        when 'WH load Robot' then 3
+        when 'WH Load Lock 1' then 4
+        when 'WH Vacuum Prealigner' then 5
+        when 'WH Stage Unload Robot' then 6
+        when 'WH Stage Load Robot' then 7
+        when 'M-Chuck' then 8
+        when 'E-Chuck' then 9
+        when 'WH Load Lock 2' then 10
+        when 'WH Discharger' then 11
+        when 'RH Robot' then 12
+        when 'RH LoadPort 1' then 13
+        when 'RH LoadPort 2' then 14
+        when 'RH Load Lock 1' then 15
+        when 'RH Load Lock 2' then 16
+        when 'In Vacuum RH Robot' then 17
+        when 'RED ARM 1' then 18
+        when 'RED ARM 2' then 19
+        when 'Unknown' then 20
+        when 'Track Signal' then -1
+        else null
+    end as sub_order
+  , p.chuck_id
+  , p.step_id
+  , p.reticle_id
+  , p.swap_time
+  , p.exp_start_tmstp
+  , p.exp_finish_tmstp
+  , p.status
+  , p.wafer_exp_sec
+  , p.wafer_seq
+  , p.layer_id
+  , p.device_id
+  , lbw.loss
+from events_timecalc e
+left join prod_display p
+on p.lot_id = e.lot_id
+and p.slot_seq = e.slot_seq
+left join loss_by_wafer lbw
+on lbw.wafer_seq = p.wafer_seq
+order by
+    e."order" desc nulls first
+  , sub_order desc nulls first
+  , e.info_name desc nulls first;
