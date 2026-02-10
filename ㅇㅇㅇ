@@ -151,43 +151,66 @@ track_signal_events as (
     from prod_base
     where trr_on_tmstp is not null
     and trr_off_tmstp is not null
+),
+events as (
+    select
+        'sy'::text as src
+      , lot_id
+      , slot_seq
+      , module_name
+      , info_name
+      , process_start_tmstp
+      , process_end_tmstp
+      , "order"
+    from sy_filtered
+
+    union all
+    select
+        'only_prod'::text as src
+      , lot_id
+      , slot_seq
+      , module_name
+      , info_name
+      , process_start_tmstp
+      , process_end_tmstp
+      , "order"
+    from only_prod_die_exposure
+
+    union all
+    select
+        'track'::text as src
+      , lot_id
+      , slot_seq
+      , module_name
+      , info_name
+      , process_start_tmstp
+      , process_end_tmstp
+      , "order"
+    from track_signal_events
+),
+events_timecalc as (
+    select
+        src
+      , lot_id
+      , slot_seq
+      , module_name
+      , info_name
+      , process_start_tmstp
+      , process_end_tmstp
+      , "order"
+      , extract(epoch from (
+            process_start_tmstp
+            - lag(process_end_tmstp) over (
+                partition by info_name
+                order by process_start_tmstp
+            )
+        )) as interval
+      , extract(epoch from (process_end_tmstp - process_start_tmstp)) as duration
+    from events
 )
 select
-    'sy'::text as src
-  , lot_id
-  , slot_seq
-  , module_name
-  , info_name
-  , process_start_tmstp
-  , process_end_tmstp
-  , "order"
-from sy_filtered
-
-union all
-
-select
-    'only_prod'::text as src
-  , lot_id
-  , slot_seq
-  , module_name
-  , info_name
-  , process_start_tmstp
-  , process_end_tmstp
-  , "order"
-from only_prod_die_exposure
-
-union all
-
-select
-    'track'::text as src
-  , lot_id
-  , slot_seq
-  , module_name
-  , info_name
-  , process_start_tmstp
-  , process_end_tmstp
-  , "order"
-from track_signal_events
+    *
+from events_timecalc
 order by
     process_start_tmstp
   , src
