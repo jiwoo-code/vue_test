@@ -664,3 +664,288 @@ ORDER BY
     "order" desc nulls first
   , info_name desc nulls first
   , process_start_tmstp;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+with
+params as (
+SELECT
+    'PAXV813'::text as eqp_id
+  , '2026-01-13 11:15:21'::timestamp as start_ts
+  , '2026-01-13 12:15:21'::timestamp as end_ts
+),
+eqp as (
+SELECT
+    p.eqp_id
+  , p.eqp_model_name
+FROM photo_eqp_info p
+JOIN params x
+ON p.eqp_id = x.eqp_id
+WHERE p.use_yn = 'Y'
+),
+prod_base as (
+SELECT
+    p.wafer_seq
+  , p.lot_id
+  , regexp_replace(trim(p.slot_seq::text), '\.0+$', '') as slot_seq
+  , p.step_id
+  , p.reticle_id
+  , p.chuck_id
+  , p.exp_start_tmstp
+  , p.exp_finish_tmstp
+  , p.status
+  , p.wafer_exp_sec
+  , p.layer_id
+  , p.device_id
+  , p.as_on_tmstp
+  , p.as_off_tmstp
+  , p.ts_on_tmstp
+  , p.ts_off_tmstp
+  , p.arr_on_tmstp
+  , p.arr_off_tmstp
+  , p.trr_on_tmstp
+  , p.trr_off_tmstp
+  , extract(epoch from (
+        p.exp_start_tmstp
+        - lag(p.exp_finish_tmstp) over (order by p.exp_start_tmstp)
+    )) as swap_time
+FROM eqp_prod_std_wafer_hist p
+JOIN params x
+ON p.eqp_id = x.eqp_id
+WHERE p.exp_start_tmstp between x.start_ts and x.end_ts
+),
+prod_wafer as (
+SELECT distinct
+    wafer_seq
+FROM prod_base
+WHERE wafer_seq is not null
+),
+events_time as (
+SELECT
+    e.lot_id
+  , e.slot_seq
+  , e.module_name
+  , e.info_name
+  , e.process_start_tmstp
+  , e.process_end_tmstp
+  , e."order"
+  , extract(epoch from (
+        e.process_start_tmstp
+        - lag(e.process_end_tmstp) over (
+            partition by e.info_name
+            order by e.process_start_tmstp
+        )
+    )) as interval
+  , extract(epoch from (e.process_end_tmstp - e.process_start_tmstp)) as duration
+FROM (
+    SELECT
+        s.lot_id
+      , trim(s.slot_seq::text) as slot_seq
+      , s.module_name
+      , s.info_name
+      , s.process_start_tmstp
+      , s.process_end_tmstp
+      , m."order"
+    FROM eqp_prod_sy_map_hist s
+    JOIN params x
+    ON s.eqp_id = x.eqp_id
+    CROSS JOIN eqp e
+    LEFT JOIN prism_common.sy_info m
+    ON m.eqp_model_name = e.eqp_model_name
+    AND m.module_name = s.module_name
+    AND m.info_name = s.info_name
+    WHERE s.process_tmstp >= x.start_ts - interval '4 hours'
+    AND s.process_tmstp <= x.end_ts + interval '4 hours'
+    AND s.process_start_tmstp between x.start_ts and x.end_ts
+
+    UNION ALL
+    SELECT
+        p.lot_id
+      , p.slot_seq
+      , 'E-chuck'
+      , 'Die exposure'
+      , p.exp_start_tmstp
+      , p.exp_finish_tmstp
+      , null::int
+    FROM prod_base p
+    WHERE not exists (
+        SELECT
+            1
+        FROM eqp_prod_sy_map_hist s2
+        JOIN params x2
+        ON s2.eqp_id = x2.eqp_id
+        WHERE s2.lot_id = p.lot_id
+        AND trim(s2.slot_seq::text) = p.slot_seq
+        AND s2.info_name in ('Die exposure', 'Die exposuer')
+        AND s2.process_tmstp between x2.start_ts - interval '4 hours' and x2.end_ts + interval '4 hours'
+    )
+
+    UNION ALL
+    SELECT lot_id, slot_seq, 'Track Signal', 'AS',  as_on_tmstp,  as_off_tmstp,  null::int FROM prod_base WHERE as_on_tmstp  is not null and as_off_tmstp  is not null
+    UNION ALL
+    SELECT lot_id, slot_seq, 'Track Signal', 'TS',  ts_on_tmstp,  ts_off_tmstp,  null::int FROM prod_base WHERE ts_on_tmstp  is not null and ts_off_tmstp  is not null
+    UNION ALL
+    SELECT lot_id, slot_seq, 'Track Signal', 'ARR', arr_on_tmstp, arr_off_tmstp, null::int FROM prod_base WHERE arr_on_tmstp is not null and arr_off_tmstp is not null
+    UNION ALL
+    SELECT lot_id, slot_seq, 'Track Signal', 'TRR', trr_on_tmstp, trr_off_tmstp, null::int FROM prod_base WHERE trr_on_tmstp is not null and trr_off_tmstp is not null
+) e
+),
+loss_final_by_wafer as (
+SELECT
+    pw.wafer_seq
+  , case
+        when loh.loss is not null then loh.loss
+        else coalesce(wst.loss, '')
+    end as loss
+FROM prod_wafer pw
+LEFT JOIN (
+    SELECT
+        wafer_seq
+      , '[' || string_agg(quote_literal(loss_item), ', ' order by loss_item) || ']' as loss
+    FROM (
+        SELECT
+            l.wafer_seq
+          , l.result_name
+            || '['
+            || case
+                    when position('.' in normalized) = 0 then normalized || '.0'
+                    else normalized
+               end
+            || ']' as loss_item
+        FROM (
+            SELECT
+                l.wafer_seq
+              , l.result_name
+              , regexp_replace(
+                    regexp_replace(
+                        regexp_replace(coalesce(round(l.loss_time::numeric, 3), 0::numeric)::text, '(\.\d*?)0+$', '\1'),
+                        '\.$',
+                        ''
+                    ),
+                    '^$',
+                    '0'
+                ) as normalized
+            FROM prism_ops.anal_algrth_loh_result_hist l
+            JOIN params x
+            ON l.eqp_id = x.eqp_id
+            JOIN prod_wafer pw2
+            ON pw2.wafer_seq = l.wafer_seq
+            WHERE l.summary_date between x.start_ts::date - interval '1 day'
+                                   and x.end_ts::date + interval '1 day'
+        ) l
+    ) t
+    GROUP BY wafer_seq
+) loh
+ON loh.wafer_seq = pw.wafer_seq
+LEFT JOIN (
+    SELECT
+        wafer_seq
+      , min(
+            result_name
+            || '['
+            || case
+                    when position('.' in normalized) = 0 then normalized || '.0'
+                    else normalized
+               end
+            || ']'
+        ) as loss
+    FROM (
+        SELECT
+            w.wafer_seq
+          , w.result_name
+          , regexp_replace(
+                regexp_replace(
+                    regexp_replace(coalesce(round(w.loss_time::numeric, 3), 0::numeric)::text, '(\.\d*?)0+$', '\1'),
+                    '\.$',
+                    ''
+                ),
+                '^$',
+                '0'
+            ) as normalized
+        FROM anal_algrth_wst_result_hist w
+        JOIN params x
+        ON w.eqp_id = x.eqp_id
+        JOIN prod_wafer pw3
+        ON pw3.wafer_seq = w.wafer_seq
+        WHERE w.summary_date between x.start_ts::date - interval '1 day'
+                               and x.end_ts::date + interval '1 day'
+    ) w
+    GROUP BY wafer_seq
+) wst
+ON wst.wafer_seq = pw.wafer_seq
+),
+final_result as (
+SELECT
+    coalesce(e.lot_id, '') as lot_id
+  , coalesce(e.slot_seq, '') as slot_seq
+  , e.module_name
+  , e.info_name
+  , e.process_start_tmstp
+  , e.process_end_tmstp
+  , e."order"
+  , coalesce(e.interval, -1) as interval
+  , coalesce(e.duration, -1) as duration
+  , coalesce(p.chuck_id, -1) as chuck_id
+  , coalesce(p.step_id, '') as step_id
+  , coalesce(p.reticle_id, '') as reticle_id
+  , coalesce(p.swap_time, -1) as swap_time
+  , p.exp_start_tmstp
+  , p.exp_finish_tmstp
+  , coalesce(p.status, '') as status
+  , coalesce(p.wafer_exp_sec, -1) as wafer_exp_sec
+  , p.wafer_seq
+  , p.layer_id
+  , p.device_id
+  , coalesce(l.loss, '') as loss
+FROM events_time e
+LEFT JOIN prod_base p
+ON p.lot_id = e.lot_id
+AND p.slot_seq = e.slot_seq
+LEFT JOIN loss_final_by_wafer l
+ON l.wafer_seq = p.wafer_seq
+)
+SELECT
+    *
+FROM final_result
+ORDER BY
+    "order" desc nulls first
+  , info_name desc nulls first
+  , process_start_tmstp;
