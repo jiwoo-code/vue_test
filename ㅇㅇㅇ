@@ -5,120 +5,29 @@ params as (
       , '2026-01-13 00:00:00'::timestamp as start_ts
       , '2026-01-14 00:00:00'::timestamp as end_ts
 ),
-eqp as (
-    select
-        p.eqp_id
-      , p.eqp_model_name
-    from photo_eqp_info p
-    join params x
-    on p.eqp_id = x.eqp_id
-    where p.use_yn = 'Y'
-),
-sy_raw as (
-    select
+sy_keys as (
+    select distinct
         s.lot_id
-      , s.slot_seq
-      , s.module_name
-      , s.info_name
-      , s.process_start_tmstp
-      , s.process_end_tmstp
-      , s.process_tmstp
+      , trim(s.slot_seq::text) as slot_seq
     from eqp_prod_sy_map_hist s
     join params x
     on s.eqp_id = x.eqp_id
-    where s.process_tmstp >= x.start_ts - interval '4 hours'
-    and s.process_tmstp <= x.end_ts + interval '4 hours'
-),
-sy_with_order as (
-    select
-        s.lot_id
-      , s.slot_seq
-      , s.module_name
-      , s.info_name
-      , s.process_start_tmstp
-      , s.process_end_tmstp
-      , m."order"
-    from sy_raw s
-    cross join eqp e
-    left join prism_common.sy_info m
-    on m.eqp_model_name = e.eqp_model_name
-    and m.module_name = s.module_name
-    and m.info_name = s.info_name
-),
-sy_filtered as (
-    select
-        s.lot_id
-      , s.slot_seq::text as slot_seq
-      , s.module_name
-      , s.info_name
-      , s.process_start_tmstp
-      , s.process_end_tmstp
-      , s."order"
-    from sy_with_order s
-    join params x
-    on 1 = 1
     where s.process_start_tmstp >= x.start_ts
     and s.process_start_tmstp <= x.end_ts
 ),
-prod_raw as (
-    select
-        p.wafer_seq
-      , p.lot_id
-      , p.slot_seq::text as slot_seq
-      , p.step_id
-      , p.reticle_id
-      , p.chuck_id
-      , p.exp_start_tmstp
-      , p.exp_finish_tmstp
-      , p.status
-      , p.wafer_exp_sec
-      , p.layer_id
-      , p.device_id
+prod_keys as (
+    select distinct
+        p.lot_id
+      , trim(p.slot_seq::text) as slot_seq
     from eqp_prod_std_wafer_hist p
     join params x
     on p.eqp_id = x.eqp_id
-    where p.file_date between x.start_ts::date - interval '1 day' and x.end_ts::date + interval '1 day'
-),
-prod_with_swap as (
-    select
-        p.*
-      , extract(epoch from (p.exp_start_tmstp - lag(p.exp_finish_tmstp) over (order by p.exp_start_tmstp))) as swap_time
-    from prod_raw p
-),
-prod_filtered as (
-    select
-        p.*
-    from prod_with_swap p
-    join params x
-    on 1 = 1
     where p.exp_start_tmstp >= x.start_ts
     and p.exp_start_tmstp <= x.end_ts
 )
 select
-    s.lot_id
-  , s.slot_seq
-  , s.module_name
-  , s.info_name
-  , s.process_start_tmstp
-  , s.process_end_tmstp
-  , s."order"
-  , p.chuck_id
-  , p.step_id
-  , p.reticle_id
-  , p.swap_time
-  , p.exp_start_tmstp
-  , p.exp_finish_tmstp
-  , p.status
-  , p.wafer_exp_sec
-  , p.wafer_seq
-  , p.layer_id
-  , p.device_id
-from sy_filtered s
-left join prod_filtered p
+    count(*) as key_intersection_count
+from sy_keys s
+join prod_keys p
 on p.lot_id = s.lot_id
-and p.slot_seq = s.slot_seq
-order by
-    s.process_start_tmstp
-  , s.lot_id
-  , s.slot_seq
-limit 500;
+and p.slot_seq = s.slot_seq;
