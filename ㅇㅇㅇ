@@ -1,166 +1,128 @@
-WITH
--- ============================================================================
--- params
--- - Python 대응: controller.load_sy_data(equipment, start_date, end_date)
--- ============================================================================
-params AS (
-SELECT
-    CAST(#{eqpId} AS text) AS eqp_id,
-    CAST(#{startTime} AS timestamp) AS start_time,
-    CAST(#{endTime} AS timestamp) AS end_time
+with
+params as (
+    select
+        'PAXV813'::text as eqp_id
+      , '2026-01-13 00:00:00'::timestamp as start_ts
+      , '2026-01-14 00:00:00'::timestamp as end_ts
 ),
-
--- ============================================================================
--- sy_filtered
--- - 목적: SY 원천(eq p_prod_sy_map_hist)에서 바로 화면 범위(start~end)만 조회 + 중복 제거
--- - Python 대응:
---   sy_loader.load_data():
---     (raw 조회 후) df = df[(start<=process_start<=end)]
---     df = df.drop_duplicates()
--- - 주의:
---   Python은 process_tmstp ±4h로 넓게 가져온 뒤 process_start로 다시 자르지만,
---   지금 단계에선 검증/단순화를 위해 "처음부터 process_start로만 필터"한다.
--- ============================================================================
-sy_filtered AS (
-SELECT DISTINCT
-    m.lot_id,
-    m.slot_seq::text AS slot_seq_key,
-    m.module_name,
-    CASE
-        WHEN m.info_name IN ('Die exposuer', 'Die exposure') THEN 'Die exposure'
-        ELSE m.info_name
-    END AS info_name,
-    m.process_start_tmstp,
-    m.process_end_tmstp
-FROM eqp_prod_sy_map_hist m
-JOIN params p
-ON m.eqp_id = p.eqp_id
-WHERE m.process_start_tmstp >= p.start_time
-AND m.process_start_tmstp <= p.end_time
+eqp as (
+    select
+        p.eqp_id
+      , p.eqp_model_name
+      , p.schema_name
+      , p.line_group_id
+      , p.depart_name
+    from photo_eqp_info p
+    join params x
+    on p.eqp_id = x.eqp_id
+    where p.use_yn = 'Y'
 ),
-
--- ============================================================================
--- prod_raw
--- - 목적: 생산(노광) 원천 이력 로딩
--- - Python 대응: prod_loader.load_data()
--- ============================================================================
-prod_raw AS (
-SELECT
-    w.wafer_seq,
-    w.lot_id,
-    w.slot_seq::text AS slot_seq_key,
-    w.exp_start_tmstp,
-    w.exp_finish_tmstp,
-    w.step_id,
-    w.reticle_id,
-    w.chuck_id,
-    w.status,
-    w.wafer_exp_sec,
-    w.layer_id,
-    w.device_id,
-    w.file_date
-FROM eqp_prod_std_wafer_hist w
-JOIN params p
-ON w.eqp_id = p.eqp_id
-WHERE w.file_date BETWEEN (p.start_time::date - interval '1 day') AND (p.end_time::date - interval '1 day')
+sy_raw as (
+    select
+        s.lot_id
+      , s.slot_seq
+      , s.module_name
+      , s.info_name
+      , s.process_start_tmstp
+      , s.process_end_tmstp
+      , s.process_tmstp
+    from eqp_prod_sy_map_hist s
+    join params x
+    on s.eqp_id = x.eqp_id
+    where s.process_tmstp >= x.start_ts - interval '4 hours'
+    and s.process_tmstp <= x.end_ts + interval '4 hours'
 ),
-
--- ============================================================================
--- prod_filtered
--- - 목적: 실제 표시 범위(start~end)로 필터 + swap_time 계산(초)
--- - Python 대응:
---   prod_loader.load_data():
---     df['prev_end'] = exp_finish.shift(1)
---     df['swap_time'] = (exp_start - prev_end).seconds fillna(0)
---     df_filtered = df[(start<=exp_start<=end)]
--- ============================================================================
-prod_filtered AS (
-SELECT
-    r.*,
-    COALESCE(
-        EXTRACT(EPOCH FROM (r.exp_start_tmstp - LAG(r.exp_finish_tmstp) OVER (ORDER BY r.exp_start_tmstp))),
-        0
-    ) AS swap_time_sec
-FROM prod_raw r
-JOIN params p
-ON 1 = 1
-WHERE r.exp_start_tmstp >= p.start_time
-AND r.exp_start_tmstp <= p.end_time
+sy_with_order as (
+    select
+        s.lot_id
+      , s.slot_seq
+      , s.module_name
+      , s.info_name
+      , s.process_start_tmstp
+      , s.process_end_tmstp
+      , m."order"
+    from sy_raw s
+    cross join eqp e
+    left join prism_common.sy_info m
+    on m.eqp_model_name = e.eqp_model_name
+    and m.module_name = s.module_name
+    and m.info_name = s.info_name
 ),
-
--- ============================================================================
--- base_events
--- - 목적: SY 이벤트 + PROD의 Die exposure 이벤트(단순 변환)만 합침
--- - Python 대응:
---   controller.load_sy_data(): dfs=[df_sy, df_only_prod] ... (지금은 단순 합치기만)
--- ============================================================================
-base_events AS (
-SELECT
-    s.lot_id,
-    s.slot_seq_key,
-    s.module_name,
-    s.info_name,
-    s.process_start_tmstp,
-    s.process_end_tmstp,
-    'SY' AS source_type
-FROM sy_filtered s
-
-UNION ALL
-
-SELECT
-    p.lot_id,
-    p.slot_seq_key,
-    'E-Chuck' AS module_name,
-    'Die exposure' AS info_name,
-    p.exp_start_tmstp AS process_start_tmstp,
-    p.exp_finish_tmstp AS process_end_tmstp,
-    'PROD' AS source_type
-FROM prod_filtered p
+sy_filtered as (
+    select
+        *
+    from sy_with_order s
+    join params x
+    on 1 = 1
+    where s.process_start_tmstp >= x.start_ts
+    and s.process_start_tmstp <= x.end_ts
+),
+prod_raw as (
+    select
+        p.wafer_seq
+      , p.lot_id
+      , p.slot_seq
+      , p.layer_id
+      , p.device_id
+      , p.step_id
+      , p.reticle_id
+      , p.shuck_id as chuck_id
+      , p.exp_start_tmstp
+      , p.exp_finish_tmstp
+      , p.wafer_exp_sec
+      , p.status
+      , p.as_on_tmstp
+      , p.as_off_tmstp
+      , p.ts_on_tmstp
+      , p.ts_off_tmstp
+      , p.arr_on_tmstp
+      , p.arr_off_tmstp
+      , p.trr_on_tmstp
+      , p.trr_off_tmstp
+    from eqp_prod_std_wafer_hist p
+    join params x
+    on p.eqp_id = x.eqp_id
+    where p.file_date between x.start_ts::date - interval '1 day' and x.end_ts::date + interval '1 day'
+),
+prod_filtered as (
+    select
+        *
+    from prod_raw p
+    join params x
+    on 1 = 1
+    where p.exp_start_tmstp >= x.start_ts
+    and p.exp_start_tmstp <= x.end_ts
 )
+select
+    'sy'::text as src
+  , s.lot_id
+  , s.slot_seq
+  , s.module_name
+  , s.info_name
+  , s.process_start_tmstp
+  , s.process_end_tmstp
+  , s."order"
+  , null::bigint as wafer_seq
+  , null::timestamp as exp_start_tmstp
+  , null::timestamp as exp_finish_tmstp
+from sy_filtered s
 
--- ============================================================================
--- final
--- - 목적: base_events + prod 컬럼을 (lot_id, slot_seq_key) 기준으로 붙임
--- - Python 대응:
---   df_merged.merge(df_prod[DISPLAY_COLS], on=['lot_id','slot_seq'], how='left')
--- ============================================================================
-SELECT
-    COALESCE(e.lot_id::text, '') AS lot_id,
-    COALESCE(e.slot_seq_key::text, '') AS slot_seq,
-    COALESCE(e.module_name::text, '') AS module_name,
-    COALESCE(e.info_name::text, '') AS info_name,
-    COALESCE(e.process_start_tmstp::text, '') AS process_start_tmstp,
-    COALESCE(e.process_end_tmstp::text, '') AS process_end_tmstp,
+union all
 
-    COALESCE(p.chuck_id::text, '') AS chuck_id,
-    COALESCE(p.step_id::text, '') AS step_id,
-    COALESCE(p.reticle_id::text, '') AS reticle_id,
-    COALESCE(p.swap_time_sec::text, '') AS swap_time,
-    COALESCE(p.exp_start_tmstp::text, '') AS exp_start_tmstp,
-    COALESCE(p.exp_finish_tmstp::text, '') AS exp_finish_tmstp,
-    COALESCE(p.status::text, '') AS status,
-    COALESCE(p.wafer_exp_sec::text, '') AS wafer_exp_sec,
-    COALESCE(p.wafer_seq::text, '') AS wafer_seq,
-    COALESCE(p.layer_id::text, '') AS layer_id,
-    COALESCE(p.device_id::text, '') AS device_id,
-
-    COALESCE(e.source_type::text, '') AS source_type
-FROM base_events e
-LEFT JOIN prod_filtered p
-ON e.lot_id = p.lot_id
-AND e.slot_seq_key = p.slot_seq_key
-ORDER BY
-    e.info_name,
-    e.process_start_tmstp;
-
-
-
-
-SELECT
-    COUNT(*) AS total_prod_events,
-    SUM(CASE WHEN COALESCE(p.chuck_id::text, '') = '' THEN 1 ELSE 0 END) AS missing_chuck_id
-FROM base_events e
-LEFT JOIN prod_filtered p
-ON e.lot_id = p.lot_id
-AND e.slot_seq_key = p.slot_seq_key
-WHERE e.source_type = 'PROD';
+select
+    'prod'::text as src
+  , p.lot_id
+  , p.slot_seq::text as module_name
+  , null::text as module_name
+  , null::text as info_name
+  , null::timestamp as process_start_tmstp
+  , null::timestamp as process_end_tmstp
+  , null::int as "order"
+  , p.wafer_seq
+  , p.exp_start_tmstp
+  , p.exp_finish_tmstp
+from prod_filtered p
+order by
+    src
+  , lot_id
+  , slot_seq;
