@@ -1,3 +1,263 @@
+with
+params as (
+    select
+        'PAXV813'::text as eqp_id
+      , '2026-01-13 11:15:21'::timestamp as start_ts
+      , '2026-01-13 12:15:21'::timestamp as end_ts
+),
+
+-- =====================
+-- SY base
+-- =====================
+sy_base as (
+    select
+        s.lot_id
+      , trim(s.slot_seq::text) as slot_seq
+      , s.module_name
+      , s.info_name
+      , s.process_start_tmstp
+      , s.process_end_tmstp
+      , m."order"
+    from eqp_prod_sy_map_hist s
+    join params x
+    on s.eqp_id = x.eqp_id
+    left join prism_common.sy_info m
+    on m.module_name = s.module_name
+    and m.info_name = s.info_name
+    where s.process_tmstp >= x.start_ts - interval '4 hours'
+    and s.process_tmstp <= x.end_ts + interval '4 hours'
+    and s.process_start_tmstp between x.start_ts and x.end_ts
+),
+
+-- =====================
+-- PROD base
+-- =====================
+prod_base as (
+    select
+        p.wafer_seq
+      , p.lot_id
+      , regexp_replace(trim(p.slot_seq::text), '\.0+$', '') as slot_seq
+      , p.step_id
+      , p.reticle_id
+      , p.chuck_id
+      , p.exp_start_tmstp
+      , p.exp_finish_tmstp
+      , p.status
+      , p.wafer_exp_sec
+      , p.layer_id
+      , p.device_id
+      , p.as_on_tmstp
+      , p.as_off_tmstp
+      , p.ts_on_tmstp
+      , p.ts_off_tmstp
+      , p.arr_on_tmstp
+      , p.arr_off_tmstp
+      , p.trr_on_tmstp
+      , p.trr_off_tmstp
+      , extract(epoch from (
+            p.exp_start_tmstp
+            - lag(p.exp_finish_tmstp) over (order by p.exp_start_tmstp)
+        )) as swap_time
+    from eqp_prod_std_wafer_hist p
+    join params x
+    on p.eqp_id = x.eqp_id
+    where p.exp_start_tmstp between x.start_ts and x.end_ts
+),
+
+-- =====================
+-- Only PROD Die exposure
+-- =====================
+only_prod_events as (
+    select
+        p.lot_id
+      , p.slot_seq
+      , 'E-chuck'::text as module_name
+      , 'Die exposure'::text as info_name
+      , p.exp_start_tmstp as process_start_tmstp
+      , p.exp_finish_tmstp as process_end_tmstp
+      , null::int as "order"
+    from prod_base p
+    where not exists (
+        select 1
+        from sy_base s
+        where s.lot_id = p.lot_id
+        and s.slot_seq = p.slot_seq
+        and s.info_name in ('Die exposure', 'Die exposuer')
+    )
+),
+
+-- =====================
+-- Track events
+-- =====================
+track_events as (
+    select lot_id, slot_seq, 'Track Signal' as module_name, 'AS'  as info_name, as_on_tmstp  as process_start_tmstp, as_off_tmstp  as process_end_tmstp, null::int as "order"
+    from prod_base where as_on_tmstp  is not null and as_off_tmstp  is not null
+    union all
+    select lot_id, slot_seq, 'Track Signal', 'TS',  ts_on_tmstp,  ts_off_tmstp,  null
+    from prod_base where ts_on_tmstp  is not null and ts_off_tmstp  is not null
+    union all
+    select lot_id, slot_seq, 'Track Signal', 'ARR', arr_on_tmstp, arr_off_tmstp, null
+    from prod_base where arr_on_tmstp is not null and arr_off_tmstp is not null
+    union all
+    select lot_id, slot_seq, 'Track Signal', 'TRR', trr_on_tmstp, trr_off_tmstp, null
+    from prod_base where trr_on_tmstp is not null and trr_off_tmstp is not null
+),
+
+-- =====================
+-- All events
+-- =====================
+events as (
+    select * from sy_base
+    union all
+    select * from only_prod_events
+    union all
+    select * from track_events
+),
+
+-- =====================
+-- interval / duration
+-- =====================
+events_time as (
+    select
+        e.*
+      , extract(epoch from (
+            e.process_start_tmstp
+            - lag(e.process_end_tmstp) over (
+                partition by e.info_name
+                order by e.process_start_tmstp
+            )
+        )) as interval
+      , extract(epoch from (e.process_end_tmstp - e.process_start_tmstp)) as duration
+    from events e
+),
+
+-- =====================
+-- prod wafer
+-- =====================
+prod_wafer as (
+    select distinct wafer_seq
+    from prod_base
+    where wafer_seq is not null
+),
+
+-- =====================
+-- LOH loss (list)
+-- =====================
+loh_list_by_wafer as (
+    select
+        l.wafer_seq
+      , '[' || string_agg(
+            quote_literal(
+                l.result_name || '[' ||
+                regexp_replace(
+                    regexp_replace(
+                        regexp_replace(coalesce(round(l.loss_time::numeric,3),0)::text,'(\.\d*?)0+$','\1'),
+                        '\.$',''
+                    ),
+                    '^$','0'
+                ) || ']'
+            ),
+            ', '
+            order by l.result_name
+        ) || ']' as loss
+    from prism_ops.anal_algrth_loh_result_hist l
+    join params x on l.eqp_id = x.eqp_id
+    join prod_wafer pw on pw.wafer_seq = l.wafer_seq
+    where l.summary_date between x.start_ts::date - interval '1 day'
+                           and x.end_ts::date + interval '1 day'
+    group by l.wafer_seq
+),
+
+-- =====================
+-- WST loss (single)
+-- =====================
+wst_text_by_wafer as (
+    select
+        w.wafer_seq
+      , min(
+            w.result_name || '[' ||
+            regexp_replace(
+                regexp_replace(
+                    regexp_replace(coalesce(round(w.loss_time::numeric,3),0)::text,'(\.\d*?)0+$','\1'),
+                    '\.$',''
+                ),
+                '^$','0'
+            ) || ']'
+        ) as loss
+    from anal_algrth_wst_result_hist w
+    join params x on w.eqp_id = x.eqp_id
+    join prod_wafer pw on pw.wafer_seq = w.wafer_seq
+    where w.summary_date between x.start_ts::date - interval '1 day'
+                           and x.end_ts::date + interval '1 day'
+    group by w.wafer_seq
+),
+
+-- =====================
+-- CSV policy: LOH 우선
+-- =====================
+loss_final_by_wafer as (
+    select
+        pw.wafer_seq
+      , case
+            when loh.loss is not null then loh.loss
+            else coalesce(wst.loss,'')
+        end as loss
+    from prod_wafer pw
+    left join loh_list_by_wafer loh on loh.wafer_seq = pw.wafer_seq
+    left join wst_text_by_wafer wst on wst.wafer_seq = pw.wafer_seq
+),
+
+-- =====================
+-- FINAL RESULT
+-- =====================
+final_result as (
+    select
+        coalesce(e.lot_id,'') as lot_id
+      , coalesce(e.slot_seq,'') as slot_seq
+      , e.module_name
+      , e.info_name
+      , e.process_start_tmstp
+      , e.process_end_tmstp
+      , e."order"
+      , coalesce(e.interval,-1) as interval
+      , coalesce(e.duration,-1) as duration
+      , coalesce(p.chuck_id,-1) as chuck_id
+      , coalesce(p.step_id,'') as step_id
+      , coalesce(p.reticle_id,'') as reticle_id
+      , coalesce(p.swap_time,-1) as swap_time
+      , p.exp_start_tmstp
+      , p.exp_finish_tmstp
+      , coalesce(p.status,'') as status
+      , coalesce(p.wafer_exp_sec,-1) as wafer_exp_sec
+      , p.wafer_seq
+      , p.layer_id
+      , p.device_id
+      , coalesce(l.loss,'') as loss
+    from events_time e
+    left join prod_base p
+      on p.lot_id = e.lot_id
+     and p.slot_seq = e.slot_seq
+    left join loss_final_by_wafer l
+      on l.wafer_seq = p.wafer_seq
+)
+select *
+from final_result
+order by
+    "order" desc nulls first
+  , info_name desc nulls first
+  , process_start_tmstp;
+
+
+
+
+
+
+
+
+
+
+
+
 select
     count(*) filter (where loss like '[%') as loh_loss_row_count
   , count(distinct wafer_seq) filter (where loss like '[%') as loh_wafer_count
