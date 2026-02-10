@@ -60,13 +60,21 @@ sy_filtered as (
     where s.process_start_tmstp >= x.start_ts
     and s.process_start_tmstp <= x.end_ts
 ),
-prod_filtered as (
+prod_base as (
     select
         p.wafer_seq
       , p.lot_id
       , p.slot_seq::text as slot_seq
       , p.exp_start_tmstp
       , p.exp_finish_tmstp
+      , p.as_on_tmstp
+      , p.as_off_tmstp
+      , p.ts_on_tmstp
+      , p.ts_off_tmstp
+      , p.arr_on_tmstp
+      , p.arr_off_tmstp
+      , p.trr_on_tmstp
+      , p.trr_off_tmstp
     from eqp_prod_std_wafer_hist p
     join params x
     on p.eqp_id = x.eqp_id
@@ -82,7 +90,7 @@ only_prod_die_exposure as (
       , p.exp_start_tmstp as process_start_tmstp
       , p.exp_finish_tmstp as process_end_tmstp
       , null::int as "order"
-    from prod_filtered p
+    from prod_base p
     where not exists (
         select
             1
@@ -91,6 +99,58 @@ only_prod_die_exposure as (
         and s.slot_seq = p.slot_seq
         and s.info_name in ('Die exposure', 'Die exposuer')
     )
+),
+track_signal_events as (
+    select
+        lot_id
+      , slot_seq
+      , 'Track Signal'::text as module_name
+      , 'AS'::text as info_name
+      , as_on_tmstp as process_start_tmstp
+      , as_off_tmstp as process_end_tmstp
+      , null::int as "order"
+    from prod_base
+    where as_on_tmstp is not null
+    and as_off_tmstp is not null
+
+    union all
+    select
+        lot_id
+      , slot_seq
+      , 'Track Signal'::text as module_name
+      , 'TS'::text as info_name
+      , ts_on_tmstp as process_start_tmstp
+      , ts_off_tmstp as process_end_tmstp
+      , null::int as "order"
+    from prod_base
+    where ts_on_tmstp is not null
+    and ts_off_tmstp is not null
+
+    union all
+    select
+        lot_id
+      , slot_seq
+      , 'Track Signal'::text as module_name
+      , 'ARR'::text as info_name
+      , arr_on_tmstp as process_start_tmstp
+      , arr_off_tmstp as process_end_tmstp
+      , null::int as "order"
+    from prod_base
+    where arr_on_tmstp is not null
+    and arr_off_tmstp is not null
+
+    union all
+    select
+        lot_id
+      , slot_seq
+      , 'Track Signal'::text as module_name
+      , 'TRR'::text as info_name
+      , trr_on_tmstp as process_start_tmstp
+      , trr_off_tmstp as process_end_tmstp
+      , null::int as "order"
+    from prod_base
+    where trr_on_tmstp is not null
+    and trr_off_tmstp is not null
 )
 select
     'sy'::text as src
@@ -115,9 +175,22 @@ select
   , process_end_tmstp
   , "order"
 from only_prod_die_exposure
-order by
-    src
-  , process_start_tmstp
+
+union all
+
+select
+    'track'::text as src
   , lot_id
   , slot_seq
-limit 500;
+  , module_name
+  , info_name
+  , process_start_tmstp
+  , process_end_tmstp
+  , "order"
+from track_signal_events
+order by
+    process_start_tmstp
+  , src
+  , lot_id
+  , slot_seq
+  , info_name;
