@@ -237,6 +237,32 @@ prod_display as (
       , layer_id
       , device_id
     from prod_with_swap
+),
+loss_items as (
+    select
+        w.wafer_seq
+      , w.result_name || '[' || coalesce(round(w.loss_time::numeric, 3)::text, '0') || ']' as loss_item
+    from anal_algrth_wst_result_hist w
+    join params x
+    on w.eqp_id = x.eqp_id
+    where w.summary_date between x.start_ts::date - interval '1 day' and x.end_ts::date + interval '1 day'
+
+    union all
+
+    select
+        l.wafer_seq
+      , l.result_name || '[' || coalesce(round(l.loss_time::numeric, 3)::text, '0') || ']' as loss_item
+    from prism_ops.anal_algrth_loh_result_hist l
+    join params x
+    on l.eqp_id = x.eqp_id
+    where l.summary_date between x.start_ts::date - interval '1 day' and x.end_ts::date + interval '1 day'
+),
+loss_by_wafer as (
+    select
+        wafer_seq
+      , string_agg(loss_item, ', ' order by loss_item) as loss
+    from loss_items
+    group by wafer_seq
 )
 select
     e.lot_id
@@ -259,10 +285,13 @@ select
   , p.wafer_seq
   , p.layer_id
   , p.device_id
+  , lbw.loss
 from events_timecalc e
 left join prod_display p
 on p.lot_id = e.lot_id
 and p.slot_seq = e.slot_seq
+left join loss_by_wafer lbw
+on lbw.wafer_seq = p.wafer_seq
 order by
     e.process_start_tmstp
   , e.src
